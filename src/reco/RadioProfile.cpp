@@ -1,6 +1,7 @@
 #include "reco/RadioProfile.h"
 
 #include "app/AppPaths.h"
+#include "reco/RadioProfileExchange.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -10,6 +11,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
+#include <QSaveFile>
 
 #include <algorithm>
 
@@ -57,6 +59,7 @@ QJsonObject profileToJson(const RadioProfile &profile)
         {QStringLiteral("modifiedAtUtc"), profile.modifiedAtUtc},
         {QStringLiteral("weights"), weights.object()},
         {QStringLiteral("sessionDecay"), decayToJson(profile.sessionDecay)},
+        {QStringLiteral("origin"), RadioProfileExchange::originName(profile.origin)},
     };
 }
 
@@ -81,6 +84,13 @@ bool profileFromJson(const QJsonValue &value, RadioProfile *profile, QString *er
     if (parsed.name.isEmpty()) {
         *error = QStringLiteral("profile name is empty");
         return false;
+    }
+    const QString origin = object.value(QStringLiteral("origin")).toString();
+    if (origin == QLatin1String("manual")) {
+        parsed.origin = RadioProfile::Origin::Manual;
+    } else if (origin == QLatin1String("learned")
+               || (origin.isEmpty() && parsed.name.startsWith(QLatin1String("learned-")))) {
+        parsed.origin = RadioProfile::Origin::Learned;
     }
     parsed.createdAtUtc = object.value(QStringLiteral("createdAtUtc")).toString();
     parsed.modifiedAtUtc = object.value(QStringLiteral("modifiedAtUtc")).toString();
@@ -117,6 +127,7 @@ bool profileFromJson(const QJsonValue &value, RadioProfile *profile, QString *er
 bool operator==(const RadioProfile &left, const RadioProfile &right)
 {
     return left.name == right.name
+        && left.origin == right.origin
         && left.createdAtUtc == right.createdAtUtc
         && left.modifiedAtUtc == right.modifiedAtUtc
         && TrackScorer::weightsToJson(left.weights) == TrackScorer::weightsToJson(right.weights)
@@ -136,7 +147,7 @@ RadioProfileStore::RadioProfileStore()
     restoreFactoryDefaults();
 }
 
-bool RadioProfileStore::load(const QByteArray &legacyWeightsJson)
+bool RadioProfileStore::load(const QByteArray &legacyWeightsJson, bool persistLegacy)
 {
     const QString path = storagePath();
     QFile file(path);
@@ -148,9 +159,12 @@ bool RadioProfileStore::load(const QByteArray &legacyWeightsJson)
             if (error.isEmpty()) {
                 RadioProfile profile = activeProfile();
                 profile.weights = legacyWeights;
+                profile.origin = RadioProfile::Origin::Unknown;
                 previewActiveProfile(profile);
                 commitActivePreview();
-                save();
+                if (persistLegacy) {
+                    save();
+                }
             }
         }
         return true;
@@ -240,12 +254,13 @@ bool RadioProfileStore::save() const
         {QStringLiteral("profiles"), profiles},
         {QStringLiteral("histories"), histories},
     };
-    QFile file(storagePath());
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    QSaveFile file(storagePath());
+    if (!file.open(QIODevice::WriteOnly)) {
         qWarning().noquote() << "Could not save radio profiles:" << storagePath();
         return false;
     }
-    return file.write(QJsonDocument(root).toJson(QJsonDocument::Indented)) >= 0;
+    const QByteArray bytes = QJsonDocument(root).toJson(QJsonDocument::Indented);
+    return file.write(bytes) == bytes.size() && file.commit();
 }
 
 const QVector<RadioProfile> &RadioProfileStore::profiles() const
@@ -465,6 +480,7 @@ bool RadioProfileStore::resetActiveProfile()
     }
     profile->weights = TrackScorer::defaultWeights();
     profile->sessionDecay = TrackScorer::defaultSessionDecay();
+    profile->origin = RadioProfile::Origin::Manual;
     profile->modifiedAtUtc = nowUtc();
     pushActiveSnapshot();
     return true;
@@ -531,7 +547,36 @@ RadioProfile RadioProfileStore::defaultProfile()
 {
     const QString timestamp = nowUtc();
     return {QStringLiteral("Default"), timestamp, timestamp,
-            TrackScorer::defaultWeights(), TrackScorer::defaultSessionDecay()};
+            TrackScorer::defaultWeights(), TrackScorer::defaultSessionDecay(), RadioProfile::Origin::Manual};
+}
+
+bool RadioProfileStore::importProfile(const RadioProfile &profile, bool replace, bool dryRun, QString *error)
+{
+    QByteArray bytes;
+    if (profile.origin == RadioProfile::Origin::Unknown) {
+        *error = QStringLiteral("Imported profile must have a manual or learned origin.");
+        return false;
+    }
+    if (!RadioProfileExchange::encode(profile, true, &bytes, error)) {
+        return false;
+    }
+    const bool exists = std::any_of(m_profiles.cbegin(), m_profiles.cend(), [&profile](const RadioProfile &entry) {
+        return entry.name == profile.name;
+    });
+    if (dryRun) {
+        return true;
+    }
+    if (exists && !replace) {
+        *error = QStringLiteral("Profile already exists: %1. Explicit replace is required.").arg(profile.name);
+        return false;
+    }
+    RadioProfileStore candidate = *this;
+    if (!candidate.saveProfile(profile.name, profile) || !candidate.save()) {
+        *error = QStringLiteral("Could not save imported radio profile.");
+        return false;
+    }
+    *this = std::move(candidate);
+    return true;
 }
 
 QString RadioProfileStore::storagePath()

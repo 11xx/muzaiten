@@ -121,6 +121,7 @@ set(MUZAITEN_SOURCES
     src/reco/RadioFilters.cpp
     src/reco/RadioMix.cpp
     src/reco/RadioProfile.cpp
+    src/reco/RadioProfileExchange.cpp
     src/reco/RadioSession.cpp
     src/reco/ReasonText.cpp
     src/reco/GenreCuration.cpp
@@ -376,6 +377,7 @@ set(MUZAITEN_HEADERS
     src/ui/PlayerBar.h
     src/ui/RadioCustomizationDialog.h
     src/reco/RadioProfile.h
+    src/reco/RadioProfileExchange.h
     src/ui/PlaylistAddDialog.h
     src/ui/HeaderLabelStyle.h
     src/ui/PanelBorderStyle.h
@@ -464,6 +466,7 @@ set(MUZAITEN_RECO_SOURCES
     src/reco/RadioFilters.cpp
     src/reco/RadioMix.cpp
     src/reco/RadioProfile.cpp
+    src/reco/RadioProfileExchange.cpp
     src/reco/RadioSession.cpp
     src/reco/ReasonText.cpp
     src/reco/TrackScorer.cpp

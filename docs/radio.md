@@ -129,6 +129,62 @@ queue before it played is a rejection too, at half the weight of a skip, since
 you turned the track down without hearing it. The command reports how many
 picks were labeled from plays and how many from unheard removals.
 
+### Local profile exchange
+
+Export… and Import… in `Radio > Customization…` exchange local JSON files.
+Export discloses the contents before opening a file picker. Import shows the
+name, origin, all scoring weights and session-decay values before saving. A
+matching name requires checking **Replace existing profile**. Import keeps the
+active selection; replacing the active profile applies its tuning to newly
+generated picks. Replacement starts a fresh undo history for that profile.
+CLI import affects the next application launch.
+
+```sh
+muzaitenctl radio-weights export evening.json --profile Evening
+muzaitenctl radio-weights import evening.json --dry-run
+muzaitenctl radio-weights import evening.json
+muzaitenctl radio-weights import evening.json --replace
+```
+
+Without `--profile`, export uses the active profile. Both import and export
+refuse an existing destination unless replacement is explicit; export's
+`--replace` replaces the file, import's replaces the named local profile.
+`--dry-run` validates and previews an import, including whether replacement
+is required, without saving anything. Importing a different name adds a
+profile without selecting it. Importing the name Default also requires
+explicit replacement when Default exists.
+
+The `muzaiten-radio-profile` version 1 format contains only `format`,
+`version`, `name`, `origin` (`manual` or `learned`), `weights` and
+`sessionDecay`. It preserves every weight and all four decay controls.
+Canonical exports use UTF-8 JSON with sorted keys, four-space indentation and
+a final newline. Export, import, then export preserves the bytes. Unknown
+formats, versions or keys, duplicate or missing keys, malformed JSON,
+non-finite or out-of-range numbers, and files over 64 KiB are rejected before
+any profile changes. Profile names must be 1–200 UTF-16 code units without
+surrounding whitespace, control characters or unpaired surrogates. Writes
+replace destinations atomically. See [data-safety.md](data-safety.md) for the
+complete payload and privacy boundary.
+
+Profiles created by `radio-learn` carry a durable learned origin. Renaming,
+duplicating or tuning one preserves that origin. Reset to Default replaces
+the tuning with manual factory values; Undo can restore its previous origin.
+Legacy `learned-*` names are treated as learned; other profiles without origin
+metadata, including migrated legacy weights, have unknown origin. Loading
+does not guess that a profile is manual; the origin is persisted on the next
+save. Learned and unknown-origin exports require `--allow-learned` or an
+explicit dialog confirmation because tuning derived from listening can reveal
+taste. An unknown-origin export is labeled learned so recipients retain this
+warning.
+
+```sh
+muzaitenctl radio-weights export learned.json --profile learned-20260101 --allow-learned
+```
+
+The file contains no listening records or recording identifiers. Its custom
+name is included verbatim, so choose one you are comfortable sharing. Exchange
+uses local files only and makes no network requests.
+
 ## Genre curation
 
 Scanned genre tags are matched through a folded, alias-canonicalized

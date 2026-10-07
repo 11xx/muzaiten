@@ -72,6 +72,46 @@ destination's records can never be inherited by a later one.
 
 ## Application state
 
+### Radio tuning-profile files
+
+`Radio > Customization…` Export…/Import… and
+`muzaitenctl radio-weights export|import` exchange local files only. A
+`muzaiten-radio-profile` version 1 JSON file contains exactly:
+
+- `format`: `muzaiten-radio-profile`; `version`: 1.
+- `name`: the user-chosen profile name, included verbatim.
+- `origin`: `manual` or `learned`.
+- `weights`: `genreWeight`, `genreIdfSaturation`, `genreCrowdingSoftLimit`,
+  `eraWeight`, `eraSpanYears`, `tempoWeight`, `energyWeight`, `audioWeight`,
+  `ratingWeight`, `userRatingBoost`, `historyWeight`, `historySaturation`,
+  `noveltyWeight`, `noveltyZeroAt`, `recencyPenalty`, `recencyHalfLifeDays`,
+  `skipPenalty`, `sameArtistPenalty`.
+- `sessionDecay`: integer `decayStartTrack` (1–1000), `decayCurve` (0–1;
+  below 0.5 selects linear, otherwise exponential), `noveltyDecayFloor`
+  (0–1) and `ratingDecayFloor` (0–1).
+
+Every weight is required and uses the scorer's validated numeric range. The
+file excludes paths, track/artist/album identifiers, library contents,
+listening history, timestamps, undo snapshots and telemetry rows. Review the
+custom name before sharing, since it can contain information you typed.
+Learned tuning itself can reveal listening taste even without the underlying
+records. Each export of a learned or unknown-origin profile requires explicit
+consent: `--allow-learned` on the CLI, or confirmation in the dialog. An
+unknown-origin profile is exported as learned. Origin follows copies and
+renames; it is not inferred to be manual from a name.
+
+Import previews the complete validated payload in the dialog; CLI
+`--dry-run` reports it without writing stores. Replacement of a matching
+profile requires a separate checkbox or `--replace`. Unknown keys and
+versions, duplicate or missing keys, malformed or truncated JSON, invalid
+UTF-8, non-finite or out-of-range values, and inputs over 64 KiB are rejected
+without changing the store. Replacement starts a fresh undo history for the
+named profile. Profile and export writes are atomic; a failed
+import write also keeps the in-memory profile list intact. Exchange provides
+no accounts, uploads or network transport.
+
+### Storage locations
+
 Application-owned state belongs under XDG locations:
 
 - config: `$XDG_CONFIG_HOME/muzaiten`
