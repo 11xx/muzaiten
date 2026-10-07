@@ -323,20 +323,24 @@ Only exact representative hashes with extractor `muzaiten-dsp` and the
 running binary's `Dsp::kDspVersion` are compatible. A nonrepresentative
 member's matching hash, similar fingerprint or matching MusicBrainz ID
 cannot authorize adoption. Ambiguous destination hashes are mismatched.
+Hashes cover the canonical ffmpeg decode, so installations whose ffmpeg builds
+decode or resample a file differently compute different hashes and match
+nothing for it.
 
 The native writer holds `features.sqlite.lock` for preview, export and
-import. Valid imports write group rows in one transaction. Existing rows,
-including stale rows, require `--replace`. Import does not modify identity,
+import. Valid imports write group rows in one transaction. Replacing a current
+row requires `--replace`; missing rows and stale rows (any other version) are
+written without it. Import does not modify identity,
 per-file caches, semantic generations, neighbors or scan metadata. Readers
 and refresh judge imported versions by their ordinary freshness rules.
 
 The CLI report includes `format`, `version`, `operation`, `dry_run`,
 `replace`, `contents`, `records`, `adopted`, `skipped`, `mismatched`,
 `incompatible` and `existing`. For import, every incoming record is adopted,
-skipped because a local row already exists, or mismatched because its
+skipped because a current local row already exists, or mismatched because its
 extractor/version or representative hash does not qualify. `incompatible`
 is the extractor/version subset of `mismatched`; `existing` is the
-existing-row subset of `skipped`. `adopted` means would adopt during dry-run.
+current-row subset of `skipped`. `adopted` means would adopt during dry-run.
 Import also reports `destination_groups`, `destination_unmatched_groups`,
 `destination_files` and `destination_unmatched_files`. Unmatched groups have
 no compatible incoming representative record; unmatched files have no exact

@@ -204,9 +204,10 @@ fail pack validation are skipped and counted as `invalid`.
 
 `--dry-run` previews the fully validated operation without writing feature
 rows or a pack file. `--replace` permits overwriting an existing export
-file, or replacing existing recipient group rows on import, including stale
-rows. Without it, export refuses an existing destination and import counts
-existing rows as skipped. Import requires exact representative decoded-audio
+file, or replacing current recipient group rows on import. Without it, export
+refuses an existing destination and import counts current rows as skipped.
+Import replaces stale rows, written by another DSP version, either way,
+because they never enter scoring. Import requires exact representative decoded-audio
 hashes and the running binary's scalar extractor/version. Other incoming
 records are counted as mismatched, and local unmatched files/groups are
 reported separately. Fingerprints and MusicBrainz IDs cannot authorize

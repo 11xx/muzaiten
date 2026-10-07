@@ -256,7 +256,7 @@ void execute(QSqlQuery &query)
 struct Group {
     qint64 id;
     QString hash;
-    bool hasFeatures;
+    bool currentFeatures;
     bool hasAnalysis;
     bool validAnalysis;
     QJsonObject record;
@@ -272,13 +272,14 @@ QList<Group> loadGroups(QSqlDatabase db)
     }
     QSqlQuery query(db);
     query.prepare(QStringLiteral(
-        "SELECT r.content_group_id, f.decode_hash, feat.content_group_id IS NOT NULL, ff.path IS NOT NULL, ff.extractor, ff.version, %1 "
+        "SELECT r.content_group_id, f.decode_hash, feat.version = ?, ff.path IS NOT NULL, ff.extractor, ff.version, %1 "
         "FROM (SELECT content_group_id, MIN(path) AS path FROM files "
         "      WHERE status = 'ok' AND content_group_id IS NOT NULL GROUP BY content_group_id) r "
         "JOIN files f ON f.path = r.path "
         "LEFT JOIN features feat ON feat.content_group_id = r.content_group_id "
         "LEFT JOIN file_features ff ON ff.path = r.path "
         "ORDER BY f.decode_hash, r.content_group_id").arg(QStringLiteral("ff.") + scalarKeys.join(QStringLiteral(", ff."))));
+    query.addBindValue(QString::fromLatin1(Dsp::kDspVersion));
     execute(query);
     QList<Group> groups;
     while (query.next()) {
@@ -502,7 +503,8 @@ QJsonObject run(QStringList arguments)
             }
             const Group &group = matches.first();
             matchingGroups.insert(group.id);
-            if (group.hasFeatures && !replace) {
+            // Stale rows never enter scoring; only a current row is analysis worth keeping.
+            if (group.currentFeatures && !replace) {
                 ++existing;
                 ++skipped;
                 continue;
