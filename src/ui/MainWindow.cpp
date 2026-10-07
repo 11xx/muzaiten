@@ -1467,6 +1467,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    cancelSemanticStatusRequest();
     // AppCore can destroy the widget tree while playback remains live in the
     // tray. Only restore a taken-over card here during a real application quit;
     // otherwise releasing it would interrupt headless native DSD playback.
@@ -1542,6 +1543,7 @@ void MainWindow::openLibraryFolder()
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    cancelSemanticStatusRequest();
     savePlaybackState(true);
     saveQueueState();
     saveExplorerState();
@@ -4648,68 +4650,245 @@ void MainWindow::showAnalysisStatus()
 
 void MainWindow::configureSemanticProvider()
 {
-    const QString binary = resolveMuzaitenIndexBinary();
-    QJsonObject status;
-    if (!binary.isEmpty()) {
-        QProcess process;
-        process.start(binary, {QStringLiteral("status"), QStringLiteral("--features"),
-                               m_core->featuresPath(), QStringLiteral("--json")});
-        if (process.waitForFinished(45'000) && process.exitCode() == 0) {
-            status = QJsonDocument::fromJson(process.readAllStandardOutput()).object()
-                         .value(QStringLiteral("semantic")).toObject();
-        }
-    }
-    const QString saved = m_state->setting(QStringLiteral("analysis.semantic.providerPath"));
-    QMessageBox box(this);
-    box.setWindowTitle(QStringLiteral("Semantic provider setup"));
-    box.setIcon(QMessageBox::Information);
-    box.setText(status.value(QStringLiteral("state")).toString(QStringLiteral("Provider status unavailable")));
-    box.setInformativeText(QStringLiteral("Configured path: %1\nResolved path: %2\nDiscovery source: %3")
-                               .arg(saved.isEmpty() ? QStringLiteral("Automatic") : saved,
-                                    status.value(QStringLiteral("provider_path")).toString(QStringLiteral("none")),
-                                    status.value(QStringLiteral("provider_source")).toString(QStringLiteral("none"))));
-    box.setDetailedText(QStringLiteral(
-        "Install command:\nuv tool install 'muzaiten-features-clap[model]'\n\n"
-        "The application never runs uv. This command is copyable and must be run by you."));
-    QPushButton *automatic = box.addButton(QStringLiteral("Use automatic discovery"), QMessageBox::ActionRole);
-    QPushButton *choose = box.addButton(QStringLiteral("Choose executable…"), QMessageBox::ActionRole);
-    box.addButton(QMessageBox::Close);
-    box.exec();
-    if (box.clickedButton() == automatic) {
-        m_state->removeSetting(QStringLiteral("analysis.semantic.providerPath"));
-    } else if (box.clickedButton() == choose) {
-        const QString path = QFileDialog::getOpenFileName(
-            this, QStringLiteral("Choose muzaiten-features-clap"),
-            saved.isEmpty() ? QDir::homePath() : saved);
-        if (!path.isEmpty()) {
-            m_state->setSetting(QStringLiteral("analysis.semantic.providerPath"), path);
-        }
-    }
+    startSemanticStatusRequest(false);
 }
 
 void MainWindow::downloadSemanticModel()
 {
-    if (m_semanticModelProcess != nullptr) {
+    startSemanticStatusRequest(true);
+}
+
+bool MainWindow::semanticStatusRequestCurrent(quint64 generation) const
+{
+    return generation == m_semanticStatusGeneration
+        && m_semanticStatusPathTimer != nullptr && m_semanticStatusPathTimer->isActive()
+        && m_semanticStatusBinary == resolveMuzaitenIndexBinary()
+        && m_semanticStatusFeaturesPath == m_core->featuresPath()
+        && m_semanticStatusProviderPath == m_state->setting(QStringLiteral("analysis.semantic.providerPath"));
+}
+
+void MainWindow::cancelSemanticStatusRequest()
+{
+    ++m_semanticStatusGeneration;
+    if (m_semanticStatusPathTimer != nullptr) {
+        m_semanticStatusPathTimer->stop();
+    }
+    stopSemanticStatusProcess();
+    if (auto *dialog = m_semanticStatusDialog.data()) {
+        m_semanticStatusDialog = nullptr;
+        dialog->reject();
+        dialog->deleteLater();
+    }
+}
+
+void MainWindow::stopSemanticStatusProcess()
+{
+    if (m_semanticStatusTimeout != nullptr) {
+        m_semanticStatusTimeout->stop();
+        m_semanticStatusTimeout = nullptr;
+    }
+    if (auto *process = m_semanticStatusProcess.data()) {
+        m_semanticStatusProcess = nullptr;
+        disconnect(process, nullptr, this, nullptr);
+        if (process->state() == QProcess::NotRunning) {
+            process->deleteLater();
+        } else {
+            // Reap canceled helpers asynchronously through application-owned lifetime.
+            process->setParent(QCoreApplication::instance());
+            connect(process, &QProcess::started, process, &QProcess::kill);
+            process->kill();
+        }
+    }
+}
+
+void MainWindow::startSemanticStatusRequest(bool forDownload)
+{
+    cancelSemanticStatusRequest();
+    if (forDownload && m_semanticModelProcess != nullptr) {
         statusBar()->showMessage(QStringLiteral("Semantic model download is already running"), 5000);
         return;
     }
-    const QString binary = resolveMuzaitenIndexBinary();
-    if (binary.isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("muzaiten-features was not found"), 8000);
+    const quint64 generation = m_semanticStatusGeneration;
+    m_semanticStatusBinary = resolveMuzaitenIndexBinary();
+    m_semanticStatusFeaturesPath = m_core->featuresPath();
+    m_semanticStatusProviderPath = m_state->setting(QStringLiteral("analysis.semantic.providerPath"));
+    if (m_semanticStatusPathTimer == nullptr) {
+        m_semanticStatusPathTimer = new QTimer(this);
+        m_semanticStatusPathTimer->setInterval(100);
+        connect(m_semanticStatusPathTimer, &QTimer::timeout, this, [this]() {
+            if (!semanticStatusRequestCurrent(m_semanticStatusGeneration)) {
+                cancelSemanticStatusRequest();
+                statusBar()->showMessage(QStringLiteral("Semantic provider status canceled because its path changed"), 8000);
+            }
+        });
+    }
+    m_semanticStatusPathTimer->start();
+    if (m_semanticStatusBinary.isEmpty()) {
+        finishSemanticStatusRequest(generation, forDownload, {},
+                                    QStringLiteral("muzaiten-features was not found"));
         return;
     }
-    QProcess statusProcess;
-    statusProcess.start(binary, {QStringLiteral("status"), QStringLiteral("--features"),
-                                 m_core->featuresPath(), QStringLiteral("--json")});
-    if (!statusProcess.waitForFinished(45'000) || statusProcess.exitCode() != 0) {
-        statusBar()->showMessage(QStringLiteral("Semantic provider is not ready; open Semantic provider setup"), 8000);
+
+    auto *waiting = new QDialog(this);
+    waiting->setObjectName(QStringLiteral("semantic.status.waiting"));
+    waiting->setAttribute(Qt::WA_DeleteOnClose);
+    waiting->setWindowTitle(forDownload ? QStringLiteral("Download semantic model")
+                                        : QStringLiteral("Semantic provider setup"));
+    auto *layout = new QVBoxLayout(waiting);
+    layout->addWidget(new QLabel(QStringLiteral("Checking semantic provider status…"), waiting));
+    auto *progress = new QProgressBar(waiting);
+    progress->setRange(0, 0);
+    layout->addWidget(progress);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, waiting);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::rejected, waiting, &QDialog::reject);
+    connect(waiting, &QDialog::rejected, this, [this, waiting, generation]() {
+        if (generation == m_semanticStatusGeneration) {
+            if (m_semanticStatusDialog == waiting) m_semanticStatusDialog = nullptr;
+            cancelSemanticStatusRequest();
+            statusBar()->showMessage(QStringLiteral("Semantic provider status check canceled"), 5000);
+        }
+    });
+    m_semanticStatusDialog = waiting;
+    waiting->show();
+
+    auto *process = new QProcess(this);
+    process->setObjectName(QStringLiteral("semantic.status.process"));
+    m_semanticStatusProcess = process;
+    auto *timeout = new QTimer(process);
+    timeout->setSingleShot(true);
+    timeout->setInterval(45'000);
+    m_semanticStatusTimeout = timeout;
+    connect(timeout, &QTimer::timeout, this, [this, generation, forDownload]() {
+        finishSemanticStatusRequest(generation, forDownload, {},
+                                    QStringLiteral("Semantic provider status check timed out after 45 seconds"));
+    });
+    connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+            [this, process, generation, forDownload](int exitCode, QProcess::ExitStatus exitStatus) {
+        if (m_semanticStatusProcess != process) {
+            return;
+        }
+        const bool success = exitStatus == QProcess::NormalExit && exitCode == 0;
+        const QJsonObject semantic = success
+            ? QJsonDocument::fromJson(process->readAllStandardOutput()).object()
+                  .value(QStringLiteral("semantic")).toObject()
+            : QJsonObject{};
+        finishSemanticStatusRequest(generation, forDownload, semantic,
+            success ? QString{} : QStringLiteral("Semantic provider status check failed"));
+    });
+    connect(process, &QProcess::errorOccurred, this,
+            [this, process, generation, forDownload](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart && m_semanticStatusProcess == process) {
+            finishSemanticStatusRequest(generation, forDownload, {},
+                QStringLiteral("Could not start semantic provider status: %1").arg(process->errorString()));
+        }
+    });
+    connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+            process, &QObject::deleteLater);
+    connect(process, &QProcess::errorOccurred, process, [process](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) {
+            process->deleteLater();
+        }
+    });
+    process->setProgram(m_semanticStatusBinary);
+    process->setArguments({QStringLiteral("status"), QStringLiteral("--features"),
+                           m_semanticStatusFeaturesPath, QStringLiteral("--json")});
+    timeout->start();
+    process->start();
+}
+
+void MainWindow::finishSemanticStatusRequest(quint64 generation, bool forDownload,
+                                            const QJsonObject &semantic, const QString &error)
+{
+    if (!semanticStatusRequestCurrent(generation)) {
+        if (generation == m_semanticStatusGeneration) {
+            cancelSemanticStatusRequest();
+        }
         return;
     }
-    const QJsonObject semantic = QJsonDocument::fromJson(statusProcess.readAllStandardOutput()).object()
-                                     .value(QStringLiteral("semantic")).toObject();
+    stopSemanticStatusProcess();
+    if (auto *waiting = m_semanticStatusDialog.data()) {
+        m_semanticStatusDialog = nullptr;
+        waiting->hide();
+        waiting->deleteLater();
+    }
+    if (forDownload) {
+        if (!error.isEmpty()) {
+            cancelSemanticStatusRequest();
+            statusBar()->showMessage(error + QStringLiteral("; open Semantic provider setup"), 8000);
+            return;
+        }
+        showSemanticModelConsent(generation, semantic);
+    } else {
+        showSemanticProviderSetup(generation, semantic, error);
+    }
+}
+
+void MainWindow::showSemanticProviderSetup(quint64 generation, const QJsonObject &status,
+                                          const QString &error)
+{
+    const QString saved = m_semanticStatusProviderPath;
+    auto *box = new QMessageBox(this);
+    box->setObjectName(QStringLiteral("semantic.provider.setup"));
+    box->setAttribute(Qt::WA_DeleteOnClose);
+    box->setWindowTitle(QStringLiteral("Semantic provider setup"));
+    box->setIcon(QMessageBox::Information);
+    box->setText(status.value(QStringLiteral("state")).toString(QStringLiteral("Provider status unavailable")));
+    QString information = QStringLiteral("Configured path: %1\nResolved path: %2\nDiscovery source: %3")
+                              .arg(saved.isEmpty() ? QStringLiteral("Automatic") : saved,
+                                   status.value(QStringLiteral("provider_path")).toString(QStringLiteral("none")),
+                                   status.value(QStringLiteral("provider_source")).toString(QStringLiteral("none")));
+    if (!error.isEmpty()) {
+        information += QLatin1Char('\n') + error;
+    }
+    box->setInformativeText(information);
+    box->setDetailedText(QStringLiteral(
+        "Install command:\nuv tool install 'muzaiten-features-clap[model]'\n\n"
+        "The application never runs uv. This command is copyable and must be run by you."));
+    QPushButton *automatic = box->addButton(QStringLiteral("Use automatic discovery"), QMessageBox::ActionRole);
+    QPushButton *choose = box->addButton(QStringLiteral("Choose executable…"), QMessageBox::ActionRole);
+    box->addButton(QMessageBox::Close);
+    connect(box, &QDialog::finished, this, [this, box, automatic, choose, saved, generation]() {
+        if (m_semanticStatusDialog == box) m_semanticStatusDialog = nullptr;
+        if (!semanticStatusRequestCurrent(generation)) {
+            if (generation == m_semanticStatusGeneration) cancelSemanticStatusRequest();
+            return;
+        }
+        if (box->clickedButton() == automatic) {
+            m_state->removeSetting(QStringLiteral("analysis.semantic.providerPath"));
+            cancelSemanticStatusRequest();
+        } else if (box->clickedButton() == choose) {
+            auto *picker = new QFileDialog(this, QStringLiteral("Choose muzaiten-features-clap"),
+                                           saved.isEmpty() ? QDir::homePath() : saved);
+            picker->setAttribute(Qt::WA_DeleteOnClose);
+            picker->setFileMode(QFileDialog::ExistingFile);
+            connect(picker, &QFileDialog::fileSelected, this, [this, picker, generation](const QString &path) {
+                if (m_semanticStatusDialog == picker) m_semanticStatusDialog = nullptr;
+                if (semanticStatusRequestCurrent(generation) && !path.isEmpty()) {
+                    m_state->setSetting(QStringLiteral("analysis.semantic.providerPath"), path);
+                }
+                if (generation == m_semanticStatusGeneration) cancelSemanticStatusRequest();
+            });
+            connect(picker, &QDialog::rejected, this, [this, picker, generation]() {
+                if (m_semanticStatusDialog == picker) m_semanticStatusDialog = nullptr;
+                if (generation == m_semanticStatusGeneration) cancelSemanticStatusRequest();
+            });
+            m_semanticStatusDialog = picker;
+            picker->open();
+        } else {
+            cancelSemanticStatusRequest();
+        }
+    });
+    m_semanticStatusDialog = box;
+    box->open();
+}
+
+void MainWindow::showSemanticModelConsent(quint64 generation, const QJsonObject &semantic)
+{
     const QJsonObject model = semantic.value(QStringLiteral("provider")).toObject()
                                   .value(QStringLiteral("model")).toObject();
     if (model.isEmpty()) {
+        cancelSemanticStatusRequest();
         statusBar()->showMessage(QStringLiteral("Semantic provider is not ready; open Semantic provider setup"), 8000);
         return;
     }
@@ -4740,27 +4919,44 @@ void MainWindow::downloadSemanticModel()
                                      sizeLines,
                                      model.value(QStringLiteral("cache_path")).toString(),
                                      model.value(QStringLiteral("sha256")).toString());
-    QString components = QStringLiteral("full");
+    auto *box = new QMessageBox(QMessageBox::Question, QStringLiteral("Download semantic model"),
+                                consent, QMessageBox::NoButton, this);
+    box->setObjectName(QStringLiteral("semantic.model.consent"));
+    box->setAttribute(Qt::WA_DeleteOnClose);
+    QAbstractButton *fullButton = nullptr;
+    QPushButton *audioButton = nullptr;
     if (offerAudioOnly) {
-        QMessageBox box(QMessageBox::Question, QStringLiteral("Download semantic model"), consent,
-                        QMessageBox::NoButton, this);
-        QPushButton *fullButton =
-            box.addButton(QStringLiteral("Full model"), QMessageBox::AcceptRole);
-        QPushButton *audioButton =
-            box.addButton(QStringLiteral("Audio only"), QMessageBox::AcceptRole);
-        box.addButton(QMessageBox::Cancel);
-        box.setDefaultButton(fullButton);
-        box.exec();
-        if (box.clickedButton() != fullButton && box.clickedButton() != audioButton) {
+        auto *full = box->addButton(QStringLiteral("Full model"), QMessageBox::AcceptRole);
+        fullButton = full;
+        audioButton = box->addButton(QStringLiteral("Audio only"), QMessageBox::AcceptRole);
+        box->addButton(QMessageBox::Cancel);
+        box->setDefaultButton(full);
+    } else {
+        box->setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+        fullButton = box->button(QMessageBox::Yes);
+    }
+    connect(box, &QDialog::finished, this, [this, box, fullButton, audioButton, generation]() {
+        if (m_semanticStatusDialog == box) m_semanticStatusDialog = nullptr;
+        if (!semanticStatusRequestCurrent(generation)) {
+            if (generation == m_semanticStatusGeneration) cancelSemanticStatusRequest();
             return;
         }
-        if (box.clickedButton() == audioButton) {
-            components = QStringLiteral("audio");
+        const bool accepted = box->clickedButton() == fullButton
+            || (audioButton != nullptr && box->clickedButton() == audioButton);
+        const QString components = audioButton != nullptr && box->clickedButton() == audioButton
+            ? QStringLiteral("audio") : QStringLiteral("full");
+        const QString binary = m_semanticStatusBinary;
+        cancelSemanticStatusRequest();
+        if (accepted && m_semanticModelProcess == nullptr) {
+            startSemanticModelDownload(binary, components);
         }
-    } else if (QMessageBox::question(this, QStringLiteral("Download semantic model"), consent)
-               != QMessageBox::Yes) {
-        return;
-    }
+    });
+    m_semanticStatusDialog = box;
+    box->open();
+}
+
+void MainWindow::startSemanticModelDownload(const QString &binary, const QString &components)
+{
     auto *process = new QProcess(this);
     m_semanticModelProcess = process;
     process->setProgram(binary);
