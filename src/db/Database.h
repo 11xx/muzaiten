@@ -111,6 +111,9 @@ public:
     Database &operator=(const Database &) = delete;
 
     bool open(const QString &path);
+    // Opens an existing library for queries only: nothing is created,
+    // migrated or written. Fails unless the schema is current.
+    bool openReadOnly(const QString &path);
     bool migrate();
     QString lastError() const;
     void releaseCacheMemory();
@@ -237,6 +240,11 @@ public:
     // semantic neighbor augmentation after the feature store has picked group
     // neighbors and the app has resolved each group to a preferred copy path.
     QVector<RadioCandidateRow> radioCandidatesForPaths(const QStringList &paths) const;
+    // Every track radio may pick, in path order: non-missing, metadata-scanned
+    // and playable, inside the library-enabled roots when any root exists.
+    // False with `error` set when the read fails, so a whole-library
+    // aggregate never summarizes a partial set.
+    bool libraryRadioRows(QVector<RadioCandidateRow> *rows, QString *error) const;
     QVector<Track> tracksForDirectory(const QString &directory) const;
     QStringList localLibraryDirectories(const QString &parentDirectory = {}) const;
     qint64 upsertMediaSource(const QString &kind, const QString &name, const QString &rootHint, const QString &configPath);

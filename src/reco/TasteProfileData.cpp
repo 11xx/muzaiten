@@ -2,15 +2,12 @@
 
 #include "core/FoldKey.h"
 #include "core/GenreTags.h"
+#include "db/Database.h"
 #include "features/FeatureStore.h"
 #include "reco/TrackScorer.h"
 
 #include <QFileInfo>
-#include <QSqlDatabase>
-#include <QSqlError>
-#include <QSqlQuery>
 #include <QUuid>
-#include <QVariant>
 
 namespace TasteProfiles {
 
@@ -25,56 +22,43 @@ bool fromLibrary(const QString &libraryPath, const QString &featuresPath, bool o
         *error = QStringLiteral("No local library is available for taste export.");
         return false;
     }
-    const QString connection = QStringLiteral("taste-export-%1").arg(QUuid::createUuid().toString());
     QVector<TrackScorer::Candidate> tracks;
-    bool success = false;
     {
-        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
-        db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000"));
-        db.setDatabaseName(libraryPath);
-        if (db.open()) {
-            QHash<QString, QString> aliases;
-            QSet<QString> ignored;
-            QSqlQuery query(db);
-            bool schemaOk = query.exec(QStringLiteral("SELECT alias_folded, canonical_folded FROM genre_aliases"));
-            while (schemaOk && query.next()) {
-                aliases.insert(query.value(0).toString(), query.value(1).toString());
-            }
-            schemaOk = schemaOk && query.exec(QStringLiteral("SELECT genre_folded FROM radio_ignored_genres"));
-            while (schemaOk && query.next()) {
-                ignored.insert(query.value(0).toString());
-            }
-            success = schemaOk && query.exec(QStringLiteral(
-                "SELECT t.path, t.musicbrainz_recording_id, t.artist_name, t.title, "
-                "t.original_date, t.date, GROUP_CONCAT(g.genre_folded, char(31)) "
-                "FROM tracks t LEFT JOIN track_genres g ON g.track_id = t.id "
-                "WHERE t.missing = 0 AND t.metadata_scanned = 1 "
-                "GROUP BY t.id ORDER BY t.path"));
-            while (success && query.next()) {
-                TrackScorer::Candidate track;
-                track.path = query.value(0).toString();
-                track.songKey = FoldKey::songKey(query.value(1).toString(), query.value(2).toString(),
-                                                query.value(3).toString());
-                track.year = query.value(4).toString().left(4).toInt();
-                if (track.year <= 0) {
-                    track.year = query.value(5).toString().left(4).toInt();
-                }
-                for (const QString &raw : query.value(6).toString().split(QChar(31), Qt::SkipEmptyParts)) {
-                    const QString genre = GenreTags::canonical(GenreTags::folded(raw), aliases);
-                    if (!ignored.contains(genre) && !GenreTags::isNonGenre(genre)) {
-                        track.genresFolded.append(genre);
-                    }
-                }
-                tracks.append(track);
-            }
-            success = success && query.lastError().type() == QSqlError::NoError;
+        Database library(QStringLiteral("taste-export-%1").arg(QUuid::createUuid().toString()));
+        const auto unreadable = [error](const QString &reason) {
+            *error = QStringLiteral("Could not read taste aggregates from the local library: %1.").arg(reason);
+            return false;
+        };
+        if (!library.openReadOnly(libraryPath)) {
+            return unreadable(library.lastError());
         }
-        db.close();
-    }
-    QSqlDatabase::removeDatabase(connection);
-    if (!success) {
-        *error = QStringLiteral("Could not read taste aggregates from the local library.");
-        return false;
+        QVector<RadioCandidateRow> rows;
+        QString reason;
+        if (!library.libraryRadioRows(&rows, &reason)) {
+            return unreadable(reason);
+        }
+        const QHash<QString, QString> aliases = library.genreAliases();
+        const QSet<QString> ignored = library.ignoredRadioGenres();
+        // "Don't learn from this" keeps a track out of every taste signal;
+        // "Never play on radio" does not, since the file describes the library.
+        const QSet<QString> noLearn = library.flaggedPaths(Database::TrackFlag::NoLearn);
+        tracks.reserve(rows.size());
+        for (const RadioCandidateRow &row : rows) {
+            if (noLearn.contains(row.path)) {
+                continue;
+            }
+            TrackScorer::Candidate track;
+            track.path = row.path;
+            track.songKey = FoldKey::songKey(row.mbRecordingId, row.artistName, row.title);
+            track.year = row.year;
+            for (const QString &raw : row.genresFolded) {
+                const QString genre = GenreTags::canonical(GenreTags::folded(raw), aliases);
+                if (!ignored.contains(genre) && !GenreTags::isNonGenre(genre)) {
+                    track.genresFolded.append(genre);
+                }
+            }
+            tracks.append(track);
+        }
     }
     FeatureStore features(featuresPath);
     QStringList paths;

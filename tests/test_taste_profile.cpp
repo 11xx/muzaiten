@@ -25,7 +25,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
+#include <utility>
 
 namespace {
 
@@ -78,6 +80,27 @@ QVector<TrackScorer::Candidate> poolFor(Database &db, const QString &featuresPat
     return RadioFilters::excludeFlaggedCandidates(pool, db.flaggedPaths(Database::TrackFlag::NeverRadio));
 }
 
+Track libraryTrack(const QString &path, const QString &genre, const QString &date, int index)
+{
+    Track track;
+    track.path = path;
+    track.parentDir = QFileInfo(track.path).absolutePath();
+    track.filename = QFileInfo(track.path).fileName();
+    track.title = QStringLiteral("Fixture title %1").arg(index);
+    track.artistName = QStringLiteral("Fixture artist %1").arg(index);
+    track.albumArtistName = track.artistName;
+    track.albumTitle = QStringLiteral("Fixture album %1").arg(index);
+    track.date = date;
+    track.durationMs = 180000;
+    track.codec = QStringLiteral("flac");
+    MetadataBlob::FullMetadata metadata;
+    metadata.tags.insert(QStringLiteral("GENRE"), {genre});
+    const auto encoded = MetadataBlob::encode(metadata);
+    track.fullMetadataBlob = encoded.data;
+    track.fullMetadataRawSize = encoded.rawSize;
+    return track;
+}
+
 bool atQuantum(double value, double quantum)
 {
     return std::abs(value / quantum - std::round(value / quantum)) < 1e-9;
@@ -120,6 +143,7 @@ private slots:
     void initTestCase();
     void supportAndScoreBounds();
     void quantizedAggregates();
+    void libraryScope();
     void strictParsing();
     void twoInstallations();
     void constraintsAndSessionSnapshots();
@@ -155,22 +179,9 @@ bool TasteProfileTest::fixture(const QString &root, bool source)
             const bool jazz = source ? i < 61 : i % 5 == 0;
             const QString genre = source && i == 76 ? QStringLiteral("rare genre")
                 : jazz ? (source && i % 2 ? QStringLiteral("Bebop") : QStringLiteral("Jazz")) : QStringLiteral("Rock");
-            Track track;
-            track.path = root + QStringLiteral("/synthetic/%1.flac").arg(i, 4, 10, QLatin1Char('0'));
-            track.parentDir = QFileInfo(track.path).absolutePath();
-            track.filename = QFileInfo(track.path).fileName();
-            track.title = QStringLiteral("Fixture title %1").arg(i);
-            track.artistName = QStringLiteral("Fixture artist %1").arg(i);
-            track.albumArtistName = track.artistName;
-            track.albumTitle = QStringLiteral("Fixture album %1").arg(i);
-            track.date = source && i == 76 ? QStringLiteral("1971") : jazz ? QStringLiteral("1987") : QStringLiteral("2005");
-            track.durationMs = 180000;
-            track.codec = QStringLiteral("flac");
-            MetadataBlob::FullMetadata metadata;
-            metadata.tags.insert(QStringLiteral("GENRE"), {genre});
-            const auto encoded = MetadataBlob::encode(metadata);
-            track.fullMetadataBlob = encoded.data;
-            track.fullMetadataRawSize = encoded.rawSize;
+            const Track track = libraryTrack(
+                root + QStringLiteral("/synthetic/%1.flac").arg(i, 4, 10, QLatin1Char('0')), genre,
+                source && i == 76 ? QStringLiteral("1971") : jazz ? QStringLiteral("1987") : QStringLiteral("2005"), i);
             ok = library.upsertTrack(track);
             query.prepare(QStringLiteral("INSERT INTO files VALUES(?, ?)"));
             query.addBindValue(track.path);
@@ -343,6 +354,86 @@ void TasteProfileTest::quantizedAggregates()
                                  R"("genres":{"jazz":0.8026315789473685,"rock":0.19736842105263158},)"
                                  R"("features":{"energy":{"q25":0.39999999999999997,"q50":0.4,"q75":0.41}}})",
                                  &profile, &error));
+}
+
+void TasteProfileTest::libraryScope()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString root = temporary.path();
+    const QString libraryPath = root + QStringLiteral("/library.sqlite");
+    {
+        Database library(QStringLiteral("taste-scope-fixture"));
+        QVERIFY(library.open(libraryPath));
+        for (const auto &[directory, libraryEnabled] : {std::pair{QStringLiteral("music"), true},
+                                                        std::pair{QStringLiteral("memos"), false}}) {
+            QVERIFY(QDir(root).mkpath(directory));
+            ScanRoot scanRoot;
+            scanRoot.path = root + QLatin1Char('/') + directory;
+            scanRoot.libraryEnabled = libraryEnabled;
+            QVERIFY2(library.saveScanRoot(scanRoot), qPrintable(library.lastError()));
+        }
+        int index = 0;
+        const auto add = [&](const QString &directory, const QString &genre, int count,
+                             const std::function<void(Track &)> &adjust = {}) {
+            QStringList paths;
+            for (int i = 0; i < count; ++i, ++index) {
+                Track track = libraryTrack(root + QStringLiteral("/%1/%2.flac").arg(directory).arg(index),
+                                           genre, QStringLiteral("1999"), index);
+                if (adjust) {
+                    adjust(track);
+                }
+                if (!library.upsertTrack(track)) {
+                    return QStringList{};
+                }
+                paths.append(track.path);
+            }
+            return paths;
+        };
+        QCOMPARE(add(QStringLiteral("music"), QStringLiteral("Jazz"), 10).size(), 10);
+        QCOMPARE(add(QStringLiteral("memos"), QStringLiteral("Field recording"), 6).size(), 6);
+        QCOMPARE(add(QStringLiteral("removed"), QStringLiteral("Polka"), 6).size(), 6);
+        QCOMPARE(add(QStringLiteral("music"), QStringLiteral("Noise"), 6,
+                     [](Track &track) { track.scanError = QStringLiteral("no decodable audio"); }).size(), 6);
+        const QStringList guilty = add(QStringLiteral("music"), QStringLiteral("Schlager"), 6);
+        const QStringList exiled = add(QStringLiteral("music"), QStringLiteral("Rock"), 5);
+        QCOMPARE(guilty.size(), 6);
+        QCOMPARE(exiled.size(), 5);
+        for (const QString &path : guilty) {
+            QVERIFY(library.setTrackFlag(path, Database::TrackFlag::NoLearn, true));
+        }
+        for (const QString &path : exiled) {
+            QVERIFY(library.setTrackFlag(path, Database::TrackFlag::NeverRadio, true));
+        }
+    }
+    const QByteArray before = QCryptographicHash::hash(readFile(libraryPath), QCryptographicHash::Sha256);
+    TasteProfile profile;
+    QString error;
+    QVERIFY2(TasteProfiles::fromLibrary(libraryPath, root + QStringLiteral("/features.sqlite"), true, false,
+                                        &profile, &error), qPrintable(error));
+    // Library-disabled roots, rows outside every enabled root, unplayable rows
+    // and "Don't learn from this" tracks stay out; "Never play on radio" stays in.
+    QCOMPARE(profile.genres, (QMap<QString, double>{{QStringLiteral("jazz"), 0.67}, {QStringLiteral("rock"), 0.33}}));
+    QCOMPARE(QCryptographicHash::hash(readFile(libraryPath), QCryptographicHash::Sha256), before);
+
+    const QString outdated = root + QStringLiteral("/outdated.sqlite");
+    {
+        const QString connection = QStringLiteral("taste-scope-outdated");
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
+            db.setDatabaseName(outdated);
+            QVERIFY(db.open());
+            QSqlQuery query(db);
+            QVERIFY(query.exec(QStringLiteral("CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY)")));
+            QVERIFY(query.exec(QStringLiteral("INSERT INTO schema_migrations VALUES(1)")));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connection);
+    }
+    const QByteArray outdatedBefore = readFile(outdated);
+    QVERIFY(!TasteProfiles::fromLibrary(outdated, {}, true, false, &profile, &error));
+    QVERIFY2(error.contains(QStringLiteral("schema")), qPrintable(error));
+    QCOMPARE(readFile(outdated), outdatedBefore);
 }
 
 void TasteProfileTest::strictParsing()

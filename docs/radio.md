@@ -211,16 +211,20 @@ muzaitenctl stop-radio
 muzaitenctl radio-taste remove "Evening library"
 ```
 
-Every CLI export, including its preview, requires `--opt-in`; consent is
-never saved. The preview and export print only the exact file bytes to stdout,
-with disclosure/status on stderr. Exports read the local library and current
-DSP scalars without changing either store. They summarize scanned, nonmissing
-local tracks, canonicalizing genre aliases and omitting ignored/placeholder
-genres. Duplicate song identities and duplicate content groups count once. Genres and decades with fewer than five distinct
-tracks are omitted; each feature distribution needs five distinct samples.
-Shares normalize over retained buckets; multi-genre tracks support each of
-their distinct genres. Tempo and energy report interpolated q25/q50/q75
-quartiles, never individual rows or sample counts.
+Every CLI export, including its preview, requires `--opt-in`; consent is never
+saved. The preview and export print only the exact file bytes to stdout, with
+disclosure/status on stderr. Exports read the local library and current DSP
+scalars without changing either store. They summarize scanned, present and
+playable tracks inside source directories with **Library** enabled (every
+library track when no source directory is configured). Tracks marked **Don't
+learn from this** are left out; tracks marked **Never play on radio** stay in,
+since the file describes the library's composition. Genre aliases are
+canonicalized and ignored/placeholder genres omitted. Duplicate song
+identities and duplicate content groups count once. Genres and decades with
+fewer than five distinct tracks are omitted; each feature distribution needs
+five distinct samples. Shares normalize over retained buckets; multi-genre
+tracks support each of their distinct genres. Tempo and energy report
+interpolated q25/q50/q75 quartiles, never individual rows or sample counts.
 
 Every exported number is rounded. Shares are whole hundredths, assigned by
 largest remainder so each set sums to exactly 1.00; a bucket that rounds to

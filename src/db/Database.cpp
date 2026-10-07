@@ -367,6 +367,29 @@ bool Database::open(const QString &path)
     return migrate();
 }
 
+bool Database::openReadOnly(const QString &path)
+{
+    if (!QFileInfo(path).isFile()) {
+        m_lastError = QStringLiteral("Library database not found");
+        return false;
+    }
+    m_db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), m_connectionName);
+    m_db.setDatabaseName(path);
+    m_db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000"));
+    if (!m_db.open()) {
+        m_lastError = m_db.lastError().text();
+        return false;
+    }
+    QSqlQuery query(m_db);
+    query.exec(QStringLiteral("PRAGMA query_only=ON"));
+    if (!query.exec(QStringLiteral("SELECT MAX(version) FROM schema_migrations")) || !query.next()
+        || query.value(0).toInt() != Schema::currentVersion) {
+        m_lastError = QStringLiteral("Library schema is not current; start muzaiten once to update it");
+        return false;
+    }
+    return true;
+}
+
 void Database::releaseCacheMemory()
 {
     if (!m_db.isOpen()) {
@@ -2612,6 +2635,42 @@ QVector<RadioCandidateRow> Database::radioCandidatesForPaths(const QStringList &
         }
     }
     return rows;
+}
+
+bool Database::libraryRadioRows(QVector<RadioCandidateRow> *rows, QString *error) const
+{
+    rows->clear();
+    QString sql = QStringLiteral(
+        "SELECT t.path, t.artist_name, t.title, t.album_artist_name, t.album_title, "
+        "t.musicbrainz_recording_id, a.musicbrainz_release_group_id, "
+        "GROUP_CONCAT(g.genre_folded, char(31)), t.original_date, t.date, "
+        "t.rating_0_100, utr.rating_0_100, p.status "
+        "FROM tracks t "
+        "LEFT JOIN track_genres g ON g.track_id = t.id "
+        "LEFT JOIN albums a ON a.id = t.album_id "
+        "LEFT JOIN user_track_ratings utr ON utr.track_path = t.path "
+        "LEFT JOIN pending_track_rating_writes p ON p.track_path = t.path "
+        "WHERE t.missing = 0 AND t.metadata_scanned = 1 AND %1")
+                      .arg(playablePredicate(QStringLiteral("t")));
+    if (hasScanRoots(m_db)) {
+        sql += QStringLiteral(" AND %1").arg(enabledLibraryRootPredicate(QStringLiteral("t"), enabledLibraryRoots()));
+    }
+    sql += QStringLiteral(" GROUP BY t.id ORDER BY t.path");
+
+    QSqlQuery query(m_db);
+    if (!query.exec(sql)) {
+        *error = query.lastError().text();
+        return false;
+    }
+    while (query.next()) {
+        rows->push_back(readRadioCandidateRow(query));
+    }
+    if (query.lastError().isValid()) {
+        *error = query.lastError().text();
+        rows->clear();
+        return false;
+    }
+    return true;
 }
 
 QStringList Database::localLibraryDirectories(const QString &parentDirectory) const
