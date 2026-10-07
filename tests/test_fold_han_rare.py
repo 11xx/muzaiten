@@ -278,17 +278,151 @@ class FoldHanRareTests(unittest.TestCase):
             stream.write("𠀀\t橹\tsingle\tunihan:kSemanticVariant,unihan:kSimplifiedVariant\t-\t0\t-\n")
         findings = rare.check_provenance(table, provenance, refs, rare.Predictions({}, []), {"櫓", "禾"})
         self.assertEqual([(f[3], f[4]) for f in findings], [("variant-guard", "橹")])
+        argv = ["check", str(table), "--provenance", str(provenance), "--reviewed", str(self.reviewed)]
+        with (mock.patch.object(rare, "read_references", return_value=refs),
+              mock.patch.object(rare, "read_predictions", return_value=rare.Predictions({}, [])),
+              mock.patch.object(rare, "authored_before", return_value={"櫓", "禾"}),
+              contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO())):
+            self.assertEqual(rare.main(argv), 1)
+            self.reviewed.write_text("\t".join(data.finding_key(findings[0])) + "\tSynthetic family-target choice\n")
+            self.assertEqual(rare.main(argv), 0)
+            self.reviewed.write_text(self.reviewed.read_text().replace("橹", "櫓", 1))
+            self.assertEqual(rare.main(argv), 1)
 
     def test_family_without_a_rule_target_uses_its_unique_simplified_member(self):
         refs = self.refs_for({"kSimplifiedVariant": {"𠿕": "U+2A70E", "劔": "U+2A6A5"}, "kZVariant": {"劎": "U+5294"}})
         mappings, issues, _ = rare.family_mappings(refs, set())
-        self.assertFalse(issues)
-        self.assertEqual({ch: target for ch, (target, _) in mappings.items()},
-                         {"𠿕": "𪜎", "劎": "𪚥", "劔": "𪚥"})
+        self.assertEqual({ch: target for ch, (target, _) in mappings.items()}, {"𠿕": "𪜎"})
+        self.assertEqual(issues, {ch: ["family-target:unresolved=劎 劔"] for ch in "劎劔𪚥"})
         refs.fields["kSimplifiedVariant"]["劎"] = "U+2A6A6"
         mappings, issues, _ = rare.family_mappings(refs, set())
         self.assertEqual(set(issues), {"劎", "劔", "𪚥", "𪚦"})
         self.assertNotIn("劎", mappings)
+
+    def test_two_general_standard_members_cannot_fall_back_to_a_named_nonstandard_member(self):
+        refs = self.refs_for({"kTGH": {"𠀀": "1", "𠀁": "1"},
+                              "kSimplifiedVariant": {"𠀀": "U+20002"}, "kZVariant": {"𠀁": "U+20000"}})
+        for choices in (None, {"𠀀": "𠀂"}):
+            with self.subTest(choices=choices):
+                mappings, issues, _ = rare.family_mappings(refs, set(), choices)
+                self.assertFalse(mappings)
+                self.assertEqual(issues, {ch: ["family-target:unresolved=𠀀 𠀁"] for ch in "𠀀𠀁𠀂"})
+
+    def test_opencc_only_all_astral_family_uses_its_named_simplified_member(self):
+        refs = self.refs_for({}, opencc={"𠀀": ["𠀁"]})
+        mappings, issues, _ = rare.family_mappings(refs, set())
+        self.assertEqual(mappings, {"𠀀": ("𠀁", "opencc:TSCharacters")})
+        self.assertFalse(issues)
+        _, records, _, findings = rare.assemble(["𠀀", "𠀁"], refs, rare.Predictions({}, []), set())
+        self.assertEqual([r.columns() for r in records],
+                         [["𠀀", "𠀁", "single", "opencc:TSCharacters", "-", "0", "-"]])
+        self.assertFalse(findings)
+
+    def test_unresolved_family_choice_requires_one_exact_finding_per_member(self):
+        refs = self.refs_for({"kSimplifiedVariant": {"劔": "U+2A6A5"}, "kZVariant": {"劎": "U+5294"}})
+        members = list("劎劔𪚥")
+        predictions = rare.Predictions({}, [])
+        out = self.root / "family-choice"
+        rare.write_assembly(out, "extb", members, refs, predictions, set())
+        table, sidecar = out / "extb.tsv", out / "extb-provenance.tsv"
+        table_header = "\n".join(line for line in table.read_text().splitlines()
+                                 if line.startswith("#") and line != "# complete") + "\n"
+        provenance_header = "\n".join(line for line in sidecar.read_text().splitlines()
+                                      if line.startswith("#")) + "\n"
+        def select(target):
+            choices = {ch: target for ch in members if ch != target}
+            rows, records, _, _ = rare.assemble(members, refs, predictions, set(), choices)
+            table.write_text(table_header + "".join("\t".join(row) + "\n" for row in rows))
+            sidecar.write_text(provenance_header + "".join("\t".join(r.columns()) + "\n" for r in records))
+        select("劎")
+        findings = rare.check_provenance(table, sidecar, refs, predictions, set())
+        self.assertEqual([f[2:] for f in findings],
+                         [(ch, "family-target", "-" if ch == "劎" else "劎", "family-target:unresolved=劎 劔")
+                          for ch in members])
+        _, records = rare.read_records(sidecar)
+        self.assertEqual({r.ch: r.attested_by for r in records},
+                         {"劔": "unihan:kZVariant", "𪚥": "unihan:kSimplifiedVariant,unihan:kZVariant"})
+        argv = ["check", str(table), "--provenance", str(sidecar), "--reviewed", str(self.reviewed)]
+        with (mock.patch.object(rare, "read_references", return_value=refs),
+              mock.patch.object(rare, "read_predictions", return_value=predictions),
+              mock.patch.object(rare, "authored_before", return_value=set()),
+              contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO())):
+            self.assertEqual(rare.main(argv), 1)
+            self.reviewed.write_text("".join("\t".join(data.finding_key(f)) + "\tSynthetic family choice\n" for f in findings))
+            self.assertEqual(rare.main(argv), 0)
+            select("劔")
+            self.assertEqual(rare.main(argv), 1)
+        select("劎")
+        sidecar.write_text(provenance_header)
+        self.assertTrue([f for f in rare.check_provenance(table, sidecar, refs, predictions, set())
+                         if f[3] == "provenance"])
+
+    def test_unresolved_family_choices_cannot_disagree_or_override_earlier_candidates(self):
+        refs = self.refs_for({"kSimplifiedVariant": {"劔": "U+2A6A5"}, "kZVariant": {"劎": "U+5294"}})
+        for choices in ({"劎": "𪚥", "劔": "𪚥"}, {"劔": "劎", "𪚥": "劔"}, {"劔": "木"}):
+            with self.subTest(choices=choices):
+                mappings, issues, _ = rare.family_mappings(refs, set(), choices)
+                self.assertFalse(mappings)
+                self.assertEqual(set(issues), set("劎劔𪚥"))
+        mappings, issues, _ = rare.family_mappings(refs, set(), {"劔": "劎"})
+        self.assertEqual({ch: target for ch, (target, _) in mappings.items()}, {"劔": "劎", "𪚥": "劎"})
+        self.assertEqual(set(issues), set("劎劔𪚥"))
+
+    def test_orphan_family_reviewed_choice_lists_all_members_without_a_preference(self):
+        refs = self.refs_for({"kZVariant": {"𠀀": "U+20001"}})
+        mappings, issues, _ = rare.family_mappings(refs, set(), {"𠀀": "𠀁"})
+        self.assertEqual(mappings, {"𠀀": ("𠀁", "unihan:kZVariant")})
+        self.assertEqual(issues, {ch: ["family-target:unresolved=𠀀 𠀁"] for ch in "𠀀𠀁"})
+
+    def test_reviewed_choice_for_an_unresolved_direct_family_can_select_a_partial_tie(self):
+        refs = self.refs_for({"kMandarin": {"𠀀": "mā", "劔": "mā", "禾": "mā"},
+                              "kSimplifiedVariant": {"劔": "U+2A6A5"}, "kZVariant": {"劎": "U+5294"},
+                              "kSemanticVariant": {"𠀀": "U+5294 U+79BE"}})
+        mappings, issues, _ = rare.family_mappings(refs, {"劔", "禾"}, {"𠀀": "劎", "劔": "劎"})
+        self.assertEqual(mappings["𠀀"][0], "劎")
+        self.assertIn("variant-guard:tied-lineages=劔→劎:1 禾:1", issues["𠀀"])
+        self.assertIn("family-target:unresolved=劎 劔", issues["𠀀"])
+
+    def test_tgh_decisive_reading_precedes_general_evidence_without_dropping_alternatives(self):
+        examples = [("㴔", "xī", "jí"), ("䐃", "zhūn", "jùn"), ("倴", "bēn", "bèn")]
+        for ch, agreed, decisive in examples:
+            with self.subTest(ideograph=ch):
+                refs = self.refs_for({"kMandarin": {ch: agreed}, "kHanyuPinyin": {ch: "1:" + agreed},
+                                      "kTGHZ2013": {ch: "1:" + decisive}}, {ch: {agreed}})
+                records, _ = rare.ordered_readings(ch, refs, rare.Predictions({}, []))
+                self.assertEqual([r.value for r in records], [agreed, decisive])
+                records, issues = rare.ordered_readings(ch, refs, rare.Predictions({}, []), tier="tgh")
+                self.assertEqual([r.value for r in records], [decisive, agreed])
+                self.assertEqual([(r.basis, r.attested_by) for r in records], [("single", "unihan"), ("agreed", "cns,unihan")])
+                self.assertFalse(issues)
+
+    def test_tgh_priority_is_tier_specific_and_uses_the_first_valid_reference_reading(self):
+        refs = self.refs_for({"kMandarin": {"𠀀": "mā"}, "kTGHZ2013": {"𠀀": "1:hé,bá"}}, {"𠀀": {"mā"}})
+        predictions = rare.Predictions({}, [])
+        records, issues = rare.ordered_readings("𠀀", refs, predictions, ["mā", "hé", "bá"], tier="tgh")
+        self.assertEqual(([r.value for r in records], issues), (["hé", "mā", "bá"], []))
+        records, _ = rare.ordered_readings("𠀀", refs, predictions, tier="extb")
+        self.assertEqual([r.value for r in records], ["mā", "bá", "hé"])
+        refs.fields["kTGHZ2013"]["𠀀"] = "1:x5,hé"
+        records, issues = rare.ordered_readings("𠀀", refs, predictions, tier="tgh")
+        self.assertEqual([r.value for r in records], ["hé", "mā"])
+        self.assertEqual(issues, [("x5", "unparseable kTGHZ2013 reading")])
+        refs.fields["kTGHZ2013"].clear()
+        records, _ = rare.ordered_readings("𠀀", refs, predictions, tier="tgh")
+        self.assertEqual([r.value for r in records], ["mā"])
+
+    def test_tgh_assembly_and_audit_enforce_decisive_default_without_suppressions(self):
+        refs = self.refs_for({"kTGH": {"𠀀": "1"}, "kMandarin": {"𠀀": "mā"},
+                              "kTGHZ2013": {"𠀀": "1:hé"}}, {"𠀀": {"mā"}})
+        predictions = rare.Predictions({}, [])
+        out = self.root / "tgh-priority"
+        self.assertFalse(rare.write_assembly(out, "tgh", ["𠀀"], refs, predictions, set()))
+        table, sidecar = out / "tgh.tsv", out / "tgh-provenance.tsv"
+        self.assertIn("𠀀\thé mā\t", table.read_text())
+        self.assertFalse(rare.check_provenance(table, sidecar, refs, predictions, set()))
+        table.write_text(table.read_text().replace("hé mā", "mā hé"))
+        findings = rare.check_provenance(table, sidecar, refs, predictions, set())
+        self.assertTrue(any(f[4:] == ("mā hé / ", "hé mā / ") for f in findings))
 
     def test_partial_target_scores_independent_lineages_not_unihan_fields(self):
         refs = self.refs_for({"kMandarin": {"𠀀": "mā", "木": "mā", "禾": "mā"},
@@ -356,6 +490,18 @@ class FoldHanRareTests(unittest.TestCase):
         self.assertEqual([(r.value, r.attested_by) for r in records], [("mā", "cns,unihan")])
         self.assertEqual(findings, [("𠀀", "provenance", "mao\u02c7", "unparseable cns reading"),
                                     ("𠀀", "provenance", "x5", "unparseable kMandarin reading")])
+        predictions = rare.Predictions({}, [])
+        out = self.root / "malformed-reference"
+        rare.write_assembly(out, "extb", ["𠀀"], refs, predictions, set())
+        table, sidecar = out / "extb.tsv", out / "extb-provenance.tsv"
+        audited = rare.check_provenance(table, sidecar, refs, predictions, set())
+        self.assertEqual([f[2:] for f in audited], findings)
+        with (mock.patch.object(rare, "read_references", return_value=refs),
+              mock.patch.object(rare, "read_predictions", return_value=predictions),
+              mock.patch.object(rare, "authored_before", return_value=set()),
+              contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO())):
+            self.assertEqual(rare.main(["check", str(table), "--provenance", str(sidecar),
+                                        "--reviewed", str(self.reviewed)]), 1)
 
     def test_decomposition_pointer_and_hash_exclude_input_text(self):
         path = self.root / "tgh-fixture-1.tsv"
@@ -518,6 +664,207 @@ class FoldHanRareTests(unittest.TestCase):
             self.reviewed.write_text(self.reviewed.read_text().replace("mā hé", "hé mā"))
             self.assertEqual(rare.main(argv), 1)
 
+    def test_evidence_tie_accepts_an_alternative_only_with_its_exact_reviewed_row(self):
+        refs = self.refs_for({"kTGH": {"𠀀": "1"}, "kHanyuPinyin": {"𠀀": "1:hé,mā"}})
+        predictions = rare.Predictions({}, [])
+        out = self.root / "evidence-choice"
+        rare.write_assembly(out, "tgh", ["𠀀"], refs, predictions, set())
+        table, sidecar = out / "tgh.tsv", out / "tgh-provenance.tsv"
+        table.write_text(table.read_text().replace("hé mā", "mā hé"))
+        headers, records = rare.read_records(sidecar)
+        text = sidecar.read_text()
+        for record in records:
+            columns = record.columns()
+            columns[5] = "1" if record.value == "mā" else "2"
+            text = text.replace("\t".join(record.columns()), "\t".join(columns))
+        sidecar.write_text(text)
+        findings = rare.check_provenance(table, sidecar, refs, predictions, set())
+        self.assertEqual([(f[3], f[4], f[5]) for f in findings],
+                         [("provenance", "mā hé", "evidence-order tie requires a reviewed decision")])
+        argv = ["check", str(table), "--provenance", str(sidecar), "--reviewed", str(self.reviewed)]
+        with (mock.patch.object(rare, "read_references", return_value=refs),
+              mock.patch.object(rare, "read_predictions", return_value=predictions),
+              mock.patch.object(rare, "authored_before", return_value=set()),
+              contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO())):
+            self.assertEqual(rare.main(argv), 1)
+            self.reviewed.write_text("\t".join(data.finding_key(findings[0])) + "\tSynthetic choice\n")
+            self.assertEqual(rare.main(argv), 0)
+            self.reviewed.write_text(self.reviewed.read_text().replace("mā hé", "hé mā"))
+            self.assertEqual(rare.main(argv), 1)
+
+    def test_reviewed_permutations_preserve_region_evidence_and_attested_membership(self):
+        refs = self.refs_for({"kHanyuPinyin": {"𠀀": "1:hé,mā"}}, {"𠀀": {"bá"}})
+        predictions = rare.Predictions({}, [])
+        records, issues = rare.ordered_readings("𠀀", refs, predictions, ["mā", "hé", "bá"])
+        self.assertEqual([r.value for r in records], ["mā", "hé", "bá"])
+        self.assertEqual(issues, [("mā hé bá", "evidence-order tie requires a reviewed decision")])
+        for choice in (["bá", "mā", "hé"], ["mā", "hé"], ["mā", "mā", "bá"], ["mā", "hé", "bō"]):
+            with self.subTest(choice=choice):
+                records, _ = rare.ordered_readings("𠀀", refs, predictions, choice)
+                self.assertEqual([r.value for r in records], ["hé", "mā", "bá"])
+        refs.cns["𠀀"] = {"bá", "hé"}
+        records, issues = rare.ordered_readings("𠀀", refs, predictions, ["mā", "hé", "bá"])
+        self.assertEqual(([r.value for r in records], issues), (["hé", "mā", "bá"], []))
+
+    def test_prediction_coordinates_and_text_reject_private_locations(self):
+        for value in ("home/user/private", "../private", "./private", "C:\\private", "release/one"):
+            with self.subTest(coordinate=value), self.assertRaises(ValueError):
+                rare.coordinate(value)
+        for url in ("http://localhost/a", "http://localhost./a", "http://host.local/a",
+                    "http://127.0.0.1/a", "http://10.0.0.1/a", "http://172.16.0.1/a",
+                    "http://192.168.1.1/a", "http://[::1]/a", "http://[fc00::1]/a",
+                    "http://[::ffff:127.0.0.1]/a", "http://2130706433/a", "http://127.1/a", "http://0x7f.0.0.1/a", "http://host.home.arpa/a"):
+            with self.subTest(source=url), self.assertRaises(ValueError):
+                rare.coordinate(url, source=True)
+        for url in ("https://example.org/source/archive.zip", "https://www.unicode.org/Public/", "fixture:synthetic"):
+            rare.coordinate(url, source=True)
+        for column in (3, 4, 6):
+            for value in ("from home/user/private", "./inputs", "notes /home/example/file", "C:\\private\\file"):
+                with self.subTest(column=column, value=value):
+                    path = prediction_file(self.root / "private.tsv", [("𠀀", "mā", "")])
+                    lines = path.read_text().splitlines()
+                    columns = lines[-1].split("\t")
+                    columns[column] = value
+                    lines[-1] = "\t".join(columns)
+                    path.write_text("\n".join(lines) + "\n")
+                    with self.assertRaisesRegex(ValueError, "paths or session identifiers"):
+                        rare.read_predictions([path])
+
+    def test_notice_requires_attribution_and_file_scope_for_readings_and_mappings(self):
+        refs = self.refs_for({"kTGH": {"𠀀": "1"}, "kMandarin": {"𠀀": "mā"}},
+                             {"𠀀": {"mā"}}, {"𠀀": ["木"]})
+        predictions = rare.Predictions({}, [])
+        out = self.root / "notices"
+        rare.write_assembly(out, "tgh", ["𠀀"], refs, predictions, set())
+        table, sidecar = out / "tgh.tsv", out / "tgh-provenance.tsv"
+        notice = self.root / "NOTICE"
+        original = (data.DEFAULT_AUTHORED_DIR / "NOTICE").read_text()
+        notice.write_text(original)
+        self.assertFalse(rare.check_provenance(table, sidecar, refs, predictions, set(), notice))
+        for source in ("unihan", "cns", "opencc"):
+            lines = original.splitlines()
+            for i, line in enumerate(lines):
+                if line.startswith("# attribution: "):
+                    entry = json.loads(line.removeprefix("# attribution: "))
+                    if entry["reference"] == source:
+                        entry["files"].remove("tgh.tsv")
+                        lines[i] = "# attribution: " + rare.canonical(entry)
+            notice.write_text("\n".join(lines) + "\n")
+            findings = rare.check_provenance(table, sidecar, refs, predictions, set(), notice)
+            self.assertEqual([(f[4], f[5]) for f in findings],
+                             [(source, "NOTICE attribution missing or incomplete")])
+        for removed in ("UNICODE LICENSE V3", "COPYRIGHT AND PERMISSION NOTICE", "Taiwan Open Government Data License v1"):
+            notice.write_text(original.replace(removed, "absent"))
+            self.assertTrue(rare.check_provenance(table, sidecar, refs, predictions, set(), notice))
+        notice.unlink()
+        self.assertEqual(rare.check_provenance(table, sidecar, refs, predictions, set(), notice)[0][4], "invalid NOTICE")
+
+    def test_notice_missing_from_shipping_scope_fails_the_checker(self):
+        out, table, sidecar = self.assemble_fixture()
+        notice = self.root / "NOTICE"
+        original = (data.DEFAULT_AUTHORED_DIR / "NOTICE").read_text()
+        argv = ["check", str(table), "--provenance", str(sidecar), "--reviewed", str(self.reviewed),
+                "--authored", str(self.root / "authored")]
+        with (mock.patch.object(rare, "read_references", return_value=self.refs),
+              mock.patch.object(rare, "read_predictions", return_value=self.predictions),
+              mock.patch.object(data, "DEFAULT_AUTHORED_DIR", self.root),
+              contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO())):
+            self.assertEqual(rare.main(argv), 1)
+            notice.write_text(original)
+            self.assertEqual(rare.main(argv), 0)
+            notice.write_text("\n".join(line for line in original.splitlines()
+                                        if not line.startswith('# attribution: {"reference":"cns"')) + "\n")
+            self.assertEqual(rare.main(argv), 1)
+
+    def test_notice_rejects_missing_provider_and_duplicate_reference(self):
+        records = [rare.Record("𠀀", "mā", "single", "unihan", "unihan", 1, "-")]
+        original = (data.DEFAULT_AUTHORED_DIR / "NOTICE").read_text()
+        notice = self.root / "NOTICE"
+        line = next(line for line in original.splitlines() if line.startswith("# attribution: "))
+        entry = json.loads(line.removeprefix("# attribution: "))
+        entry["provider"] = ""
+        for text in (original.replace(line, "# attribution: " + rare.canonical(entry)), original + line + "\n"):
+            notice.write_text(text)
+            self.assertEqual(rare.check_notice(pathlib.Path("tgh.tsv"), records, notice)[0][4], "invalid NOTICE")
+
+    def test_cached_smoke_skips_absent_inputs_but_rejects_a_wrong_checksum(self):
+        paths = {name: self.root / name for name in ("unihan", "cns-properties", "cns-mappings", "opencc")}
+        with (mock.patch.object(data, "reference_cache", return_value=paths),
+              mock.patch.object(data.urllib.request, "urlretrieve", side_effect=AssertionError("network"))):
+            self.assertIsNone(pinned_references())
+            for path in paths.values():
+                path.write_bytes(b"invalid cached fixture")
+            with self.assertRaisesRegex(ValueError, "cached reference sha256 mismatch"):
+                pinned_references()
+
+    def integrated_check(self, table, refs, authored, provenance=None, predictions=None):
+        with (mock.patch.object(data, "unihan_archive", return_value=object()),
+              mock.patch.object(data, "unihan_fields", return_value=refs.fields),
+              mock.patch.object(data, "cns_archives", return_value=(object(), object())),
+              mock.patch.object(data, "cns_readings", return_value=refs.cns),
+              mock.patch.object(data, "opencc_archive", return_value=object()),
+              mock.patch.object(data, "opencc_characters", return_value=refs.opencc),
+              mock.patch.object(rare, "shipped_pins", return_value=refs.pins),
+              contextlib.redirect_stdout(output := io.StringIO()), contextlib.redirect_stderr(io.StringIO())):
+            result = data.check([table], self.reviewed, authored_dir=authored,
+                                provenance_dir=provenance, predictions_dir=predictions or self.root / "no-predictions")
+        return result, [line.split("\t") for line in output.getvalue().splitlines()]
+
+    def test_marked_tables_use_provenance_rules_and_unmarked_tables_keep_legacy_rules(self):
+        refs = self.refs_for({"kMandarin": {"𠀀": "mā", "𠀂": "mā", "木": "mā", "禾": "mā"},
+                              "kHanyuPinyin": {"𠀀": "1:bā,hē"},
+                              "kSimplifiedVariant": {"𠀀": "U+20001", "𠀃": "U+2F803"},
+                              "kZVariant": {"𠀁": "U+6728"}, "kTGH": {"𠄢": "1"},
+                              "kSemanticVariant": {"𠀂": "U+6728 U+79BE"}},
+                             {"𠀀": {"bā"}, "𠀂": {"mā"}, "禾": {"mā"}})
+        out = self.root / "legacy"
+        out.mkdir()
+        (out / "gb2312.tsv").write_text("木\tmā\t\n禾\tmā\t\n")
+        rare.write_assembly(out, "extb", ["𠀀", "𠀂", "𠀃"], refs, rare.Predictions({}, []), {"木", "禾"})
+        table = out / "extb.tsv"
+        table.write_text(table.read_text().replace("# complete\n", ""))
+        sidecars = self.root / "legacy-sidecars"
+        sidecars.mkdir()
+        (sidecars / table.name).write_bytes((out / "extb-provenance.tsv").read_bytes())
+        result, findings = self.integrated_check(table, refs, out, sidecars)
+        self.assertEqual((result, findings), (0, []))
+        table.write_text(table.read_text().replace("# schema: fold-han-provenance/1\n", ""))
+        result, findings = self.integrated_check(table, refs, out, sidecars)
+        self.assertEqual(result, 1)
+        self.assertTrue({"default", "archaic", "simplified", "family-target", "variant-guard"}
+                        <= {f[3] for f in findings}, findings)
+
+    def test_provenance_directory_does_not_audit_unmarked_essential_files(self):
+        refs = self.refs_for({"kMandarin": {"木": "mù"}})
+        table = self.root / "gb2312.tsv"
+        table.write_text("木\tmù\t\n")
+        with mock.patch.object(rare, "check_provenance", side_effect=AssertionError("unmarked essential audit")):
+            result, findings = self.integrated_check(table, refs, self.root, self.root / "missing-sidecars")
+        self.assertEqual((result, findings), (0, []))
+        table.write_text("木\thé\t禾\n")
+        result, findings = self.integrated_check(table, refs, self.root, self.root / "missing-sidecars")
+        self.assertEqual(result, 1)
+        self.assertTrue({"default", "simplified", "unattested", "tone"} <= {f[3] for f in findings})
+        self.assertNotIn("provenance", {f[3] for f in findings})
+
+    def test_prediction_batch_selection_uses_exact_tier(self):
+        for name in ("big5-fixture-1.tsv", "big5-2-fixture-1.tsv", "big5-2-fixture-gaps.tsv", "tgh-other.tsv"):
+            (self.root / name).write_text("deliberately invalid excluded input")
+        self.assertEqual([p.name for p in data.prediction_logs(self.root, "big5")], ["big5-fixture-1.tsv"])
+        self.assertEqual([p.name for p in data.prediction_logs(self.root, "big5-2")], ["big5-2-fixture-1.tsv"])
+        refs = self.refs_for({"kMandarin": {"木": "mù"}})
+        out = self.root / "marked-essential"
+        rare.write_assembly(out, "big5", ["木"], refs, rare.Predictions({}, []), set())
+        table = out / "big5.tsv"
+        table.write_text(table.read_text().replace("# complete\n", ""))
+        (self.root / "big5-fixture-1.tsv").unlink()
+        sidecars = self.root / "essential-sidecars"
+        sidecars.mkdir()
+        (sidecars / "big5.tsv").write_bytes((out / "big5-provenance.tsv").read_bytes())
+        with mock.patch.object(rare, "check_notice", return_value=[]):
+            result, findings = self.integrated_check(table, refs, out, sidecars, self.root)
+        self.assertEqual((result, findings), (0, []))
+
     def test_integrated_checker_requires_provenance_and_uses_evidence_default(self):
         out, table, provenance = self.assemble_fixture()
         sidecars = self.root / "provenance"
@@ -541,11 +888,14 @@ class FoldHanRareTests(unittest.TestCase):
 
 
 def pinned_references():
-    """Return the cached pinned references without downloading, or None when one is absent or differs."""
+    """Return verified cached references without downloading, or None when one is absent."""
     paths = data.reference_cache()
     pins = rare.shipped_pins()
-    if not all(path.is_file() and rare.digest(path) == pins[name]["sha256"] for name, path in paths.items()):
+    if not all(path.is_file() for path in paths.values()):
         return None
+    for name, path in paths.items():
+        if rare.digest(path) != pins[name]["sha256"]:
+            raise ValueError(f"{name}: cached reference sha256 mismatch")
     return rare.References(data.unihan_fields(paths["unihan"], *rare.FIELDS),
                            data.cns_readings((paths["cns-properties"], paths["cns-mappings"])),
                            data.opencc_characters(paths["opencc"]), pins)
@@ -567,7 +917,7 @@ class PinnedReferenceSmokeTests(unittest.TestCase):
                 members = self.tiers[name]
                 self.assertTrue(all(data.in_ideograph_blocks(ch) for ch in members))
                 authored = rare.authored_before(data.DEFAULT_AUTHORED_DIR, name)
-                rows, _, _, findings = rare.assemble(members, self.refs, rare.Predictions({}, []), authored)
+                rows, _, _, findings = rare.assemble(members, self.refs, rare.Predictions({}, []), authored, tier=name)
                 self.assertEqual([row[0] for row in rows], members)
                 self.assertLessEqual({f[1] for f in findings}, {"provenance", "variant-guard", "family-target"})
                 self.assertFalse([f for f in findings if f[3].startswith("unparseable")])

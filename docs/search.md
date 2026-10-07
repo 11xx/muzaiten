@@ -78,10 +78,16 @@ keeps its written form).
 Each variant family folds to a BMP common simplified form when a reference
 gives one, otherwise to a General Standard form, including astral forms.
 When neither exists, its BMP member remains the fold key and astral variants
-fold back to it. A family these rules leave without a single key, such as one
-with only astral members and no General Standard form, folds to its one member
-a reference names as a simplified form; otherwise it awaits a reviewed
-decision.
+fold back to it. Only a family without any BMP or General Standard member
+uses its unique member directly named as simplified by Unihan or OpenCC.
+An earlier rule naming several members stays a reviewed choice among those
+members; the fourth rule cannot override them. The provenance checker accepts a
+consistent listed target with its mapping records and an exact reviewed
+`family-target` row for each table member.
+
+In `tgh`, the first valid `kTGHZ2013` reading is the default before the general
+region and evidence order. Other attested readings retain that general order;
+without a valid `kTGHZ2013` reading it also chooses the default.
 
 The authored files proceed through `tgh`, `big5-2`, `core`, `uro`, `exta`,
 `extb`, `extc` and `cns` after the four essential sets. A file declares full
@@ -103,10 +109,20 @@ Taiwan's CNS 11643 open data for reading attestation,
 including the exact tone of every reading across simplified and traditional
 counterparts. It reports `family-target` disagreements for astral variant
 families and `variant-guard` findings for unsupported semantic variant folds.
-With no file arguments it requires the four essential tier files and checks
-rare files that exist; explicit file arguments select the character files, while the
-word file is still checked from `--words` or `words.tsv` in the authored
-directory. Reviewed rows in `tools/fold-han-reviewed.tsv` match an ideograph
+Rare files and tables marked with `# schema: fold-han-provenance/1` require a
+matching provenance sidecar and their prediction batches. `--provenance DIR`
+and `--predictions DIR` select these artifact directories; essential tables
+without the marker keep their authored-data checks. The `provenance` kind audits
+reference pins, readings, evidence order, mapping relations and NOTICE attribution.
+For marked tables this audit owns default selection, reading order, simplified
+mappings, family targets and variant guards; the older `archaic`, `simplified`,
+`family-target` and single-candidate `variant-guard` rules apply to unmarked tables.
+Other checks, including OpenCC disagreements, retain their rules. See
+[rare Han records and assembly](../tools/fold-han-rare.md) for formats and exact
+reviewed choices. With no file arguments it requires the four essential tier
+files and checks rare files that exist; explicit file arguments select the
+character files. The word file is checked from `--words` or `words.tsv` in the
+authored directory. Reviewed rows in `tools/fold-han-reviewed.tsv` match an ideograph
 or word, finding kind, authored value and reference value, followed by the
 reason for the decision. Rows in `tables/han/words.tsv` use
 `word<TAB>reading[<TAB>second reading]`: the word may use any Han spelling;

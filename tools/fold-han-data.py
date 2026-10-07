@@ -751,6 +751,14 @@ def check_words(
     return unsuppressed, counts
 
 
+def prediction_logs(directory: pathlib.Path, tier: str) -> list[pathlib.Path]:
+    """Select batches by the longest matching tier name (big5-2 precedes big5)."""
+    names = sorted((path.removesuffix(".tsv") for path in TIER_FILES), key=len, reverse=True)
+    return sorted(path for path in directory.glob("*.tsv")
+                  if not path.name.endswith("-gaps.tsv")
+                  and next((name for name in names if path.stem.startswith(name + "-")), None) == tier)
+
+
 def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pathlib.Path | None = None,
           authored_dir: pathlib.Path = DEFAULT_AUTHORED_DIR,
           opencc_path: pathlib.Path | None = None,
@@ -788,7 +796,7 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pa
         listed: set[str] = set()
         per_file_start = len(findings)
         has_provenance = any(line == "# schema: fold-han-provenance/1" for line in lines)
-        if has_provenance or path.name in RARE_FILES or provenance_dir is not None:
+        if has_provenance or path.name in RARE_FILES:
             if "fold_han_rare" not in sys.modules:
                 spec = importlib.util.spec_from_file_location("fold_han_rare", ROOT / "tools" / "fold-han-rare.py")
                 rare = importlib.util.module_from_spec(spec)
@@ -797,7 +805,7 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pa
             rare = sys.modules["fold_han_rare"]
             provenance = (provenance_dir or ROOT / "tools" / "fold-han-provenance") / path.name
             prediction_root = predictions_dir or ROOT / "tools" / "fold-han-predictions"
-            prediction_paths = sorted(p for p in prediction_root.glob(f"{path.stem}-*.tsv") if not p.name.endswith("-gaps.tsv"))
+            prediction_paths = prediction_logs(prediction_root, path.stem)
             try:
                 predictions = rare.read_predictions(prediction_paths)
                 references = rare.References(fields, cns, opencc, rare.shipped_pins())
@@ -841,13 +849,13 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pa
                 candidates.update(variant_codes(fields.get("kZVariant", {}).get(raw_ch, "")))
                 candidates.update(opencc_values or ())
                 candidates.discard(raw_ch)
-                if any(ord(target) >= 0x10000 for target in candidates):
+                if not has_provenance and any(ord(target) >= 0x10000 for target in candidates):
                     bmp = (simplified_text if simplified_text and ord(simplified_text) < 0x10000 else None)
                     bmp = bmp or next((v for v in opencc_values or () if v != raw_ch and ord(v) < 0x10000), None)
                     target = bmp or next((v for v in sorted(candidates) if v in fields.get("kTGH", {})), None)
                     if simplified_text != (target or ""):
                         add(path, row_number, raw_ch, "family-target", simplified_text or "-", target or "-")
-                if path.name in RARE_FILES and simplified_text:
+                if not has_provenance and path.name in RARE_FILES and simplified_text:
                     direct = candidates | set(variant_codes(fields.get("kTraditionalVariant", {}).get(raw_ch, "")))
                     if raw_ch in variant_codes(fields.get("kTraditionalVariant", {}).get(simplified_text, "")):
                         direct.add(simplified_text)
@@ -931,7 +939,8 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pa
             for base, reading in our_by_base.items():
                 if base not in attested:
                     add(path, row_number, raw_ch, "unattested", reading, "-")
-                elif base in readings_in(READING_FIELDS) and base not in current and reading != readings[0]:
+                elif (not has_provenance and base in readings_in(READING_FIELDS)
+                      and base not in current and reading != readings[0]):
                     add(path, row_number, raw_ch, "archaic", reading, "kHanyuPinyin only")
 
             authored_bases = set(our_by_base)
@@ -952,7 +961,7 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pa
                 add(path, row_number, raw_ch, "missing", reading_text or "-", reference)
 
             expected_simple = simplified_form(raw_ch, fields) or ""
-            if simplified_text != expected_simple:
+            if not has_provenance and simplified_text != expected_simple:
                 add(path, row_number, raw_ch, "simplified", simplified_text or "-", expected_simple or "-")
 
         stem = path.stem

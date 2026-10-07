@@ -44,8 +44,11 @@ malformed pinyin, mismatched normalization, missing metadata and extra columns
 are errors. Text-bearing schema 1 and unversioned five-column logs are not accepted
 as shipping prediction logs.
 
-Batch records may come from any predictor. Header coordinates exclude local
-paths and session identifiers. Fixtures may use `fixture:` source identifiers.
+Batch records may come from any predictor. Header identifiers exclude path separators,
+relative paths and session identifiers. Source URLs exclude credentials, localhost,
+private IP literals and local host suffixes. Sound-component, stated-basis and hint
+text exclude path-like tokens and session identifiers. Fixtures may use `fixture:`
+source identifiers.
 Keep verbatim decomposition inputs, prompts and raw responses in private evidence
 until their source terms permit distribution. Converting responses into this
 format must preserve their checksums and conversion evidence outside the shipping
@@ -89,9 +92,14 @@ Predictions without an attested syllable are withheld and recorded in gaps.
 All exact reference readings under the character ship; attestation is not
 inherited from a variant's reading.
 
-Region class is the first sort key: mainland-attested readings precede Taiwan-only
-readings. Within each region, evidence order is both lineages, then one lineage
-plus prediction, then unpredicted single-lineage readings. Ties use exact `kMandarin` order, then
+For `tgh`, the first valid `kTGHZ2013` reading is decisive for the default,
+before region and evidence precedence. Every other attested reading remains;
+its order follows the general rules. Without a valid `kTGHZ2013` reading those
+rules choose the default, and any unparseable source spelling remains a finding.
+For other tiers, region class is the first sort key: mainland-attested readings
+precede Taiwan-only readings. Within each region, evidence order is both lineages,
+then one lineage plus prediction, then unpredicted single-lineage readings.
+Ties use exact `kMandarin` order, then
 batch/model reading order. Remaining ties use lexical spelling for a reproducible
 proposal and require a reviewed decision when they affect the first reading.
 Mainland evidence is the first `kMandarin` value, `kHanyuPinyin`, `kXHC1983` or
@@ -99,8 +107,11 @@ Mainland evidence is the first `kMandarin` value, `kHanyuPinyin`, `kXHC1983` or
 evidence. A predicted CNS-only reading cannot outrank an unpredicted mainland
 reading. Two or more CNS-only readings without a confirmed prediction require
 a reviewed default; one attested CNS-only reading needs no choice. A decider
-can choose any attested default in that case by aligning table order and provenance
-ranks, then recording the exact resulting default finding in the reviewed rows.
+can choose an attested default for either an evidence-order tie or a CNS-only choice
+by aligning table order and provenance ranks, then recording the exact resulting
+finding in the reviewed rows. A permutation must preserve the region, evidence,
+`kMandarin` and prediction precedence of readings outside the tie. Duplicate,
+missing and unattested readings cannot settle a choice.
 Different prediction passes produce a blocking disagreement finding; they
 never count as independent attestation.
 
@@ -113,11 +124,25 @@ blocks.
 
 The family target comes from the first rule that applies: the family's BMP
 simplified members, otherwise its `kTGH` members, otherwise its BMP members.
-When that rule names one member, it is the target. When it names several, or no
-rule applies (an all-astral family without a `kTGH` member), the target is the
-family's only member named as a simplified form by `kSimplifiedVariant` or OpenCC.
-A family with none or several such members gives every member a blocking
-`family-target` finding.
+When that rule names one member, it is the target. Only when all three preference
+sets are empty does the family use its unique member directly named as simplified
+by `kSimplifiedVariant` or OpenCC. A nonempty ambiguous preference set cannot be
+overridden by that fallback. A family with several preferred members, or no
+unique fourth-rule target, gives every member a blocking `family-target` finding
+listing the candidates of the first nonempty preference set, or all family
+members when no preference applies.
+
+A decider chooses a target from that list. Each non-target table row names it in
+the simplified column with matching mapping provenance; the target's own column
+stays empty. All supplied choices within a family must agree. The checker
+recomputes relation paths from that target and retains one exact
+`family-target` finding per listed table member, without table/record mismatch
+findings for a consistent choice. A reviewed row matches the member, kind,
+selected mapping (or `-` for the target itself), and the full
+`family-target:unresolved=<candidate list>` reference. For example, selecting 劎
+from `劎 劔` keeps that exact reference on every member. Missing provenance,
+conflicting choices and targets outside a nonempty preference set cannot be
+settled by that family-choice row.
 
 Preceding tiers establish authored/typed membership; the current tier and later
 tiers cannot change that baseline during an audit. Partial semantic links
@@ -175,8 +200,9 @@ All four file checksums are verified before parsing their shipped formats.
 tables bearing the provenance schema header. `--provenance DIR` and
 `--predictions DIR` select their artifact directories. The provenance audit
 recomputes basis, attestation, tones, batch evidence, reading order, mapping
-relations, counts and source pins. Complete-tier coverage is checked even when
-the supplied sidecar agrees with a missing table row. Essential tables without
+relations, counts, source pins and NOTICE attribution. Prediction batches match the
+exact tier; `big5-2` batches do not belong to `big5`. Complete-tier coverage is checked
+even when the supplied sidecar agrees with a missing table row. Essential tables without
 the marker retain their authored-data checks.
 
 Exit status is 0 for no blocking findings, 1 for findings, 2 for invalid command
@@ -185,13 +211,18 @@ decisions use the existing five-column reviewed-row format and suppress only
 exact `(ideograph, kind, ours, reference)` findings. A reviewed decision must
 retain the factual attestation and prediction evidence; it is not a substitute
 for missing logs. The provenance-aware audit supplies the default rule for
-marked tables; the other authored-data findings still require resolution.
+marked tables, including reading order, simplified mappings, family targets and
+partial-variant guards. The older `archaic`, `simplified`, `family-target` and
+single-candidate `variant-guard` rules apply only to unmarked tables. Other
+checks, including tone, format, missing readings, coverage and OpenCC
+disagreements, still require resolution.
 
 Run the combined offline suite with
 `python3 tests/test_fold_han_data.py .`. It includes the records/assembly tests
 and requires no model access or reference downloads.
 `python3 tests/test_fold_han_rare.py` also assembles every tier from the cached
 pinned references, read-only, and skips that check when they are not cached.
+A cached file with a different checksum fails the smoke check; it is never downloaded.
 
 ## Dispatch API proposal
 
@@ -213,10 +244,15 @@ output ownership and signing must be established before adding execution.
 [NOTICE](../src/search/fold/tables/han/NOTICE) records the reference providers
 and terms. Basis labels describe how a value was obtained; they do not decide
 copyright, database rights, license compatibility or the release license.
-Transcribed-file inventories and the distribution license require a release
-decision based on the actual assembled corpus and retained evidence. CNS source
-coordinates are reference metadata; distribution attribution text accompanies
-the first shipped CNS-derived rows after the applicable license decision.
+The checker requires a `# attribution: <JSON object>` record for each reference
+used in a marked table. Each record has `reference` (`unihan`, `cns` or `opencc`),
+`provider`, public `source`, `license` and `files` (the exact table basenames
+covered by the attribution). Unihan requires `Unicode-3.0` and its license
+notice; CNS requires `Taiwan Open Government Data License v1` and its dataset
+attribution. Missing providers, notices, references or file scope produce blocking
+`provenance` findings. Sidecars identify the actual references used within that
+scope. This check verifies notice coverage; the distribution license requires a
+release decision based on the assembled corpus and retained evidence.
 Decomposition inputs require their own source-license determination; prediction
 metadata and a blind generation method do not confer permission to distribute
 them. Synthetic fixtures exercise the format without embedding dictionary
