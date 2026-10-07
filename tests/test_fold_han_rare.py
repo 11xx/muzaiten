@@ -215,7 +215,7 @@ class FoldHanRareTests(unittest.TestCase):
     def test_mapping_family_rule_and_blind_basis(self):
         refs = self.refs_for({"kSimplifiedVariant": {"鵰": "U+2B6F2"}, "kTraditionalVariant": {"𫛲": "U+9D70"},
                               "kZVariant": {"𫛲": "U+96D5"}}, opencc={"鵰": ["雕"]})
-        mappings, issues = rare.family_mappings(refs, {"雕"})
+        mappings, issues, _ = rare.family_mappings(refs, {"雕"})
         self.assertFalse(issues)
         self.assertEqual(mappings["𫛲"][0], "雕")
         rows, records, _, findings = rare.assemble(["𫛲"], refs, self.predict("-", ch="𫛲", simple="雕"), {"雕"})
@@ -226,34 +226,80 @@ class FoldHanRareTests(unittest.TestCase):
     def test_general_standard_target_and_reverse_bmp_mapping(self):
         refs = self.refs_for({"kSimplifiedVariant": {"訏": "U+2C8D9"}, "kTGH": {"𬣙": "1"},
                               "kZVariant": {"𰡻": "U+7459"}})
-        mappings, issues = rare.family_mappings(refs, set())
+        mappings, issues, _ = rare.family_mappings(refs, set())
         self.assertEqual((mappings["訏"][0], mappings["𰡻"][0]), ("𬣙", "瑙"))
         self.assertFalse(issues)
 
     def test_partial_relation_guards_and_ambiguous_targets(self):
         refs = self.refs_for({"kMandarin": {"𠀀": "mā", "木": "mā", "禾": "mā"},
                               "kSemanticVariant": {"𠀀": "U+6728"}})
-        mappings, issues = rare.family_mappings(refs, {"木"})
+        mappings, issues, rejected = rare.family_mappings(refs, {"木"})
         self.assertEqual(mappings["𠀀"][0], "木")
-        self.assertFalse(issues)
+        self.assertFalse(issues or rejected)
         refs.fields["kSemanticVariant"]["𠀀"] += " U+79BE"
-        mappings, issues = rare.family_mappings(refs, {"木", "禾"})
+        mappings, issues, _ = rare.family_mappings(refs, {"木", "禾"})
         self.assertNotIn("𠀀", mappings)
         self.assertIn("tied-lineages", issues["𠀀"][0])
         refs.fields["kSemanticVariant"]["𠀀"] = "U+6728"
-        _, issues = rare.family_mappings(refs, {"𠀀", "木"})
-        self.assertIn("variant-guard", issues["𠀀"][0])
+        mappings, issues, rejected = rare.family_mappings(refs, {"𠀀", "木"})
+        self.assertFalse(mappings or issues)
+        self.assertEqual(rejected, {"𠀀": [("木", "kSemanticVariant")]})
+
+    def test_guard_failed_links_are_gaps_not_findings(self):
+        refs = self.refs_for({"kTGH": {"𠀀": "1"}, "kMandarin": {"𠀀": "mā", "木": "mā"},
+                              "kSemanticVariant": {"𠀀": "U+6728"}})
+        rows, _, gaps, findings = rare.assemble(["𠀀"], refs, rare.Predictions({}, []), {"木"})
+        self.assertEqual((rows, findings), ([("𠀀", "mā", "")], []))
+        self.assertEqual(gaps, [("𠀀", "木", "木", "-", "guard-failed:kSemanticVariant")])
+
+    def test_tied_candidates_of_one_family_need_no_choice(self):
+        refs = self.refs_for({"kMandarin": {"𠀀": "suì", "岁": "suì", "歲": "suì"},
+                              "kSimplifiedVariant": {"歲": "U+5C81"}, "kSemanticVariant": {"𠀀": "U+5C81 U+6B72"}})
+        mappings, issues, _ = rare.family_mappings(refs, {"岁", "歲"})
+        self.assertFalse(issues)
+        self.assertEqual(mappings["𠀀"][0], "岁")
+
+    def test_tied_choice_names_the_family_target_of_one_candidate(self):
+        refs = self.refs_for({"kMandarin": {"𠀀": "lǔ", "櫓": "lǔ", "禾": "lǔ"},
+                              "kSimplifiedVariant": {"櫓": "U+6A79"}, "kSemanticVariant": {"𠀀": "U+6AD3 U+79BE"}})
+        mappings, issues, _ = rare.family_mappings(refs, {"櫓", "禾"})
+        self.assertNotIn("𠀀", mappings)
+        self.assertEqual(issues["𠀀"], ["variant-guard:tied-lineages=櫓→橹:1 禾:1"])
+        for choice in ("櫓", "木"):
+            self.assertNotIn("𠀀", rare.family_mappings(refs, {"櫓", "禾"}, {"𠀀": choice})[0])
+        mappings, issues, _ = rare.family_mappings(refs, {"櫓", "禾"}, {"𠀀": "橹"})
+        self.assertEqual(mappings["𠀀"], ("橹", "unihan:kSemanticVariant,unihan:kSimplifiedVariant"))
+        self.assertEqual(issues["𠀀"], ["variant-guard:tied-lineages=櫓→橹:1 禾:1"])
+        out = self.root / "family-choice"
+        rare.write_assembly(out, "extb", ["𠀀"], refs, rare.Predictions({}, []), {"櫓", "禾"})
+        table, provenance = out / "extb.tsv", out / "extb-provenance.tsv"
+        table.write_text(table.read_text().replace("𠀀\tlǔ\t\n", "𠀀\tlǔ\t橹\n"))
+        with provenance.open("a") as stream:
+            stream.write("𠀀\t橹\tsingle\tunihan:kSemanticVariant,unihan:kSimplifiedVariant\t-\t0\t-\n")
+        findings = rare.check_provenance(table, provenance, refs, rare.Predictions({}, []), {"櫓", "禾"})
+        self.assertEqual([(f[3], f[4]) for f in findings], [("variant-guard", "橹")])
+
+    def test_family_without_a_rule_target_uses_its_unique_simplified_member(self):
+        refs = self.refs_for({"kSimplifiedVariant": {"𠿕": "U+2A70E", "劔": "U+2A6A5"}, "kZVariant": {"劎": "U+5294"}})
+        mappings, issues, _ = rare.family_mappings(refs, set())
+        self.assertFalse(issues)
+        self.assertEqual({ch: target for ch, (target, _) in mappings.items()},
+                         {"𠿕": "𪜎", "劎": "𪚥", "劔": "𪚥"})
+        refs.fields["kSimplifiedVariant"]["劎"] = "U+2A6A6"
+        mappings, issues, _ = rare.family_mappings(refs, set())
+        self.assertEqual(set(issues), {"劎", "劔", "𪚥", "𪚦"})
+        self.assertNotIn("劎", mappings)
 
     def test_partial_target_scores_independent_lineages_not_unihan_fields(self):
         refs = self.refs_for({"kMandarin": {"𠀀": "mā", "木": "mā", "禾": "mā"},
                               "kHanyuPinyin": {"木": "1:mā"}, "kXHC1983": {"木": "1:mā"},
                               "kSemanticVariant": {"𠀀": "U+6728 U+79BE"}},
                              {"𠀀": {"mā"}, "禾": {"mā"}})
-        mappings, issues = rare.family_mappings(refs, {"木", "禾"})
+        mappings, issues, _ = rare.family_mappings(refs, {"木", "禾"})
         self.assertEqual(mappings["𠀀"][0], "禾")
         self.assertFalse(issues)
         refs.cns["木"] = {"mā"}
-        mappings, issues = rare.family_mappings(refs, {"木", "禾"})
+        mappings, issues, _ = rare.family_mappings(refs, {"木", "禾"})
         self.assertNotIn("𠀀", mappings)
         self.assertEqual(issues["𠀀"], ["variant-guard:tied-lineages=木:2 禾:2"])
 
@@ -284,7 +330,7 @@ class FoldHanRareTests(unittest.TestCase):
         refs = self.refs_for({"kMandarin": {"𠀀": "huī", "灰": "huī", "\U0002F835": "huī"},
                               "kSemanticVariant": {"𠀀": "U+2F835 U+FA11", "\uFA11": "U+5D0E", "\U0002F835": "U+7070"},
                               "kZVariant": {"\uFA17": "U+76CA"}})
-        mappings, issues = rare.family_mappings(refs, {"灰", "崎"})
+        mappings, issues, _ = rare.family_mappings(refs, {"灰", "崎"})
         self.assertEqual(mappings["𠀀"], ("灰", "unihan:kSemanticVariant"))
         self.assertFalse(issues)
         self.assertFalse({"\uFA11", "\uFA17", "\U0002F835"} & set(mappings))
@@ -334,7 +380,7 @@ class FoldHanRareTests(unittest.TestCase):
 
     def test_direct_ambiguous_family_does_not_choose_lexically(self):
         refs = self.refs_for({"kSimplifiedVariant": {"𠀀": "U+6728 U+79BE"}})
-        mappings, issues = rare.family_mappings(refs, set())
+        mappings, issues, _ = rare.family_mappings(refs, set())
         self.assertFalse(mappings)
         self.assertIn("unresolved", issues["𠀀"][0])
 
@@ -525,6 +571,8 @@ class PinnedReferenceSmokeTests(unittest.TestCase):
                 self.assertEqual([row[0] for row in rows], members)
                 self.assertLessEqual({f[1] for f in findings}, {"provenance", "variant-guard", "family-target"})
                 self.assertFalse([f for f in findings if f[3].startswith("unparseable")])
+                self.assertFalse([f for f in findings if f[1] == "variant-guard"
+                                  and not f[3].startswith("variant-guard:tied-lineages=")])
 
 
 if __name__ == "__main__":
