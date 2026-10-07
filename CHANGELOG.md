@@ -22,6 +22,8 @@
 
 ### Developer tooling
 
+- Han generation and checks accept Python Unicode versions independently of
+  the pinned Unihan 16.0.0 reference, retaining runtime category filtering.
 - Han word tables accept any spelling and merge readings under simplified keys;
   data checks flag redundant rows and readings at joined keys.
 - A fold regression sweep compares search fold readings against a base
