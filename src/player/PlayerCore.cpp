@@ -152,6 +152,29 @@ void PlayerCore::resolveDsdTakeover(bool accepted)
     plan.action = PlaybackStartPlan::Action::NativeDsd;
     plan.device = pending.device;
     startTrack(pending.track, pending.playbackPath, pending.notifyScrobbler, pending.startPaused, plan);
+    if (pending.resumePositionMs > 0) {
+        const quint64 transportRequests = m_backend->transportRequests();
+        QTimer::singleShot(250, this, [this, pending, transportRequests]() {
+            if (m_currentTrack.path == pending.track.path
+                && m_backend->transportRequests() == transportRequests) {
+                m_backend->seek(pending.resumePositionMs);
+            }
+        });
+    }
+}
+
+std::optional<PlayerCore::DsdTakeoverRequest> PlayerCore::pendingDsdTakeoverRequest() const
+{
+    if (!m_pendingDsdTakeover.active) return std::nullopt;
+    return DsdTakeoverRequest{m_pendingDsdTakeover.track, m_pendingDsdTakeover.device,
+                              m_pendingDsdTakeover.resumePositionMs};
+}
+
+bool PlayerCore::setPendingDsdResumePosition(qint64 positionMs)
+{
+    if (!m_pendingDsdTakeover.active) return false;
+    m_pendingDsdTakeover.resumePositionMs = std::max<qint64>(0, positionMs);
+    return true;
 }
 
 void PlayerCore::skipCurrentTrack()

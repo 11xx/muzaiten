@@ -25,6 +25,9 @@ The saved queue is restored once at process startup, before IPC and desktop
 media controls accept commands. Closing the window to the tray keeps the live
 queue, its source, the current index, and shuffle and radio state. Queue saves
 continue while the window is closed, and reopening displays that live session.
+A saved DSD start that needs device takeover waits for the first window's
+approval without advancing the queue. Its saved pause state and position are
+used if the takeover is accepted.
 
 The queue survives a restart through two keys in `state.sqlite`. `queue.state`
 holds the tracks and the queue's identity (its id, source kind, source

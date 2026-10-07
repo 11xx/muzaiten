@@ -2,24 +2,6 @@
 
 ## [Unreleased]
 
-### Changed
-
-- DSD playback planning survives closing and reopening the window. A track
-  requiring device-takeover approval is skipped while the window is closed.
-  An output choice stays active for the process if saving it fails, with the
-  error shown in the window.
-- Typing a General Standard simplified form such as 𬣙 or 𫐄 finds text
-  written with its traditional form (訏, 軏), and the reverse.
-
-### Fixed
-
-- Startup IPC commands retain their acknowledged queue changes, including
-  enqueue-and-play requests received while the window opens. Queue state is
-  restored before IPC and desktop media controls accept commands. Closing to
-  the tray keeps queue saves active, and reopening preserves the live queue,
-  its source, cursor, shuffle and radio state. Raises during window creation
-  share the same window.
-
 ### Developer tooling
 
 - Han generation and checks accept Python Unicode versions independently of
@@ -107,6 +89,13 @@
 
 ### Changed
 
+- DSD playback planning survives closing and reopening the window. A track
+  requiring device-takeover approval waits for the first window's prompt at
+  startup and is skipped after the window has been closed to the tray. An
+  output choice stays active for the process if saving it fails, with the
+  error shown in the window.
+- Typing a General Standard simplified form such as 𬣙 or 𫐄 finds text
+  written with its traditional form (訏, 軏), and the reverse.
 - Fuzzy free-text search matches a file path within one folder name or the
   file name, so letters scattered across folders no longer add up to a
   match and fuzzy queries report far fewer stray results. A term containing
@@ -142,6 +131,15 @@
 
 ### Fixed
 
+- A saved DSD track requiring device takeover retains its queue position,
+  paused state and saved playback position until the first window offers the
+  takeover prompt. It does not skip to and play the next track at startup.
+- Startup IPC commands retain their acknowledged queue changes, including
+  enqueue-and-play requests received while the window opens. Queue state is
+  restored before IPC and desktop media controls accept commands. Closing to
+  the tray keeps queue saves active, and reopening preserves the live queue,
+  its source, cursor, shuffle and radio state. Raises during window creation
+  share the same window.
 - Feature refresh reports `"canceled": true` with exit 130 when a stop arrives
   at the boundary between completed native analysis and semantic analysis.
   Completed feature rows remain durable.

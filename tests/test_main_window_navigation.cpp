@@ -822,9 +822,82 @@ private slots:
         QCoreApplication::processEvents();
     }
 
+    void startupDsdTakeoverWaitsForFirstWindow()
+    {
+        FakeAudioGraph graph;
+        FakeCard card;
+        card.pwId = 42;
+        card.cardIndex = 999;
+        card.stableId = QStringLiteral("test-startup-dsd");
+        card.description = QStringLiteral("Test DSD card");
+        graph.cards.append(card);
+
+        Track dsd;
+        // The queue's codec exercises DSD planning before decoding; a WAV
+        // container keeps unrelated metadata probes on a valid media file.
+        dsd.path = m_stateRoot.filePath(QStringLiteral("startup.wav"));
+        dsd.filename = QStringLiteral("startup.wav");
+        dsd.codec = QStringLiteral("dsf");
+        QVERIFY(writeSilentWav(dsd.path));
+
+        Track next;
+        next.path = m_stateRoot.filePath(QStringLiteral("next.wav"));
+        next.filename = QStringLiteral("next.wav");
+        next.codec = QStringLiteral("wav");
+        QVERIFY(writeSilentWav(next.path));
+
+        {
+            AppCore saved;
+            if (!saved.backend()->dsdSupport().nativePassthrough) {
+                QSKIP("Native DSD plugins are not installed");
+            }
+            PlaybackProfile profile = saved.activePlaybackProfile();
+            profile.mode = QStringLiteral("shared");
+            profile.allowResample = false;
+            profile.deviceId = card.stableId;
+            profile.device = QStringLiteral("hw:999");
+            QVERIFY(saved.saveActivePlaybackProfile(profile));
+            saved.player()->resetQueue({dsd, next}, 0);
+            saved.queueSession()->saveQueueState();
+            const QJsonObject playback{{QStringLiteral("queueIndex"), 0},
+                                       {QStringLiteral("trackPath"), dsd.path},
+                                       {QStringLiteral("positionMs"), QStringLiteral("42000")},
+                                       {QStringLiteral("state"), QStringLiteral("paused")}};
+            QVERIFY(saved.settings()->setSetting(QStringLiteral("playback.state"),
+                QString::fromUtf8(QJsonDocument(playback).toJson(QJsonDocument::Compact))));
+        }
+
+        AppCore restored;
+        QCOMPARE(restored.player()->queueIndex(), 0);
+        QCOMPARE(restored.player()->currentTrack().path, dsd.path);
+        const auto pending = restored.player()->pendingDsdTakeoverRequest();
+        QVERIFY(pending.has_value());
+        QCOMPARE(pending->track.path, dsd.path);
+        QCOMPARE(pending->device, QStringLiteral("hw:999"));
+        QCOMPARE(pending->resumePositionMs, qint64{42000});
+        QCOMPARE(restored.backend()->state(), PlaybackBackend::State::Stopped);
+        QVERIFY(restored.window() == nullptr);
+        restored.m_storageWarnings.append(QStringLiteral("Synthetic storage warning"));
+        restored.showWindow();
+        QVERIFY(restored.window()->m_dsdTakeoverPromptActive);
+        QCOMPARE(restored.window()->m_pendingDsdTakeoverDevice, QStringLiteral("hw:999"));
+        QVERIFY(restored.window()->statusBar()->currentMessage().contains(QStringLiteral("DSD needs")));
+        QCOMPARE(restored.player()->queueIndex(), 0);
+    }
+
     void dsdPlannerSurvivesWindowRelease()
     {
+        FakeAudioGraph graph;
+        FakeCard card;
+        card.pwId = 43;
+        card.cardIndex = 999;
+        card.stableId = QStringLiteral("test-headless-dsd");
+        card.description = QStringLiteral("Test headless DSD card");
+        graph.cards.append(card);
         AppCore core;
+        if (!core.backend()->dsdSupport().nativePassthrough) {
+            QSKIP("Native DSD plugins are not installed");
+        }
         core.m_window = new MainWindow(&core);
         QPointer<MainWindow> released = core.window();
         core.releaseWindow();
@@ -833,7 +906,10 @@ private slots:
         QVERIFY(released.isNull());
 
         PlaybackProfile active = core.activePlaybackProfile();
+        active.mode = QStringLiteral("shared");
         active.allowResample = false;
+        active.deviceId = card.stableId;
+        active.device = QStringLiteral("hw:999");
         core.setActivePlaybackProfile(active);
         core.m_window = new MainWindow(&core);
         QCOMPARE(core.window()->m_playbackProfile.allowResample, false);
@@ -842,7 +918,7 @@ private slots:
         QCoreApplication::processEvents();
         QVERIFY(core.window() == nullptr);
 
-        const QString path = m_stateRoot.filePath(QStringLiteral("headless.dff"));
+        const QString path = m_stateRoot.filePath(QStringLiteral("headless.dsf"));
         QFile file(path);
         QVERIFY(file.open(QIODevice::WriteOnly));
         QCOMPARE(file.write("synthetic"), qint64{9});
@@ -850,14 +926,14 @@ private slots:
 
         Track track;
         track.path = path;
-        track.filename = QStringLiteral("headless.dff");
-        track.codec = QStringLiteral("dff");
+        track.filename = QStringLiteral("headless.dsf");
+        track.codec = QStringLiteral("dsf");
         QString skipReason;
         connect(core.player(), &PlayerCore::trackStartSkipped, &core,
                 [&skipReason](const Track &, const QString &reason) { skipReason = reason; });
         core.player()->appendTracks({track});
         core.player()->playAt(0);
-        QVERIFY(skipReason.contains(QStringLiteral("DFF/DSDIFF")));
+        QVERIFY(skipReason.contains(QStringLiteral("Open the window")));
     }
 
     void outputChoiceRemainsActiveWhenStorageRejectsIt()
@@ -896,6 +972,16 @@ private slots:
         MainWindow window(&core);
         QCOMPARE(window.m_playbackProfile.sharedEndpoint, QStringLiteral("mixer-output"));
         QCOMPARE(window.m_playbackProfile.allowResample, false);
+
+        QVERIFY(query.exec(QStringLiteral("PRAGMA query_only=ON")));
+        PlaybackProfile changed = window.m_playbackProfile;
+        changed.sharedEndpoint = QStringLiteral("session-only-output");
+        QTest::ignoreMessage(QtWarningMsg,
+            QRegularExpression(QStringLiteral("^muzaiten: could not save output profile: ")));
+        window.applyProfileTransition(window.m_playbackProfile, changed);
+        QVERIFY(window.statusBar()->currentMessage().contains(QStringLiteral("could not save it")));
+        QCOMPARE(core.activePlaybackProfile().sharedEndpoint, QStringLiteral("session-only-output"));
+        QVERIFY(query.exec(QStringLiteral("PRAGMA query_only=OFF")));
     }
 
     void failedMixPreservesActiveRadioRefill()

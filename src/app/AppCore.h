@@ -287,7 +287,6 @@ private:
     DirectDeviceResolver *m_directDevices = nullptr;
     PlaybackProfile m_activePlaybackProfile;
     QString m_playbackProfileSaveError;
-    bool m_playbackProfileUnsaved = false;
     ListenTracker    *m_listenTracker = nullptr;
     PlayEventRecorder *m_playEventRecorder = nullptr;
     ListenBrainzHub  *m_listenBrainzHub = nullptr;
@@ -305,6 +304,7 @@ private:
     MainWindow       *m_window = nullptr;
     QueueSnapshotStore *m_queueSession = nullptr;
     bool              m_creatingWindow = false;
+    bool              m_windowCreatedOnce = false;
     bool              m_quitting = false;
     bool              m_resumeDone = false;
     bool              m_trayAlwaysVisible = false;

@@ -397,9 +397,8 @@ AppCore::AppCore(QObject *parent)
                 return skip(QStringLiteral("The configured native DSD device is no longer available"));
             }
             device = dev->hwPath;
-            if (dev->heldByPipeWire() && !m_window) {
-                // The takeover prompt belongs to the window, so no headless
-                // start can wait for an answer that cannot arrive.
+            if (dev->heldByPipeWire() && !m_window && m_windowCreatedOnce) {
+                qInfo("muzaiten: native DSD takeover needs an open window; skipping the track");
                 return skip(QStringLiteral("Open the window to approve native DSD device takeover"));
             }
             plan.device = device;
@@ -733,11 +732,14 @@ void AppCore::showWindow()
         QScopedValueRollback<bool> constructing(m_creatingWindow, true);
         restoreInteractiveMemory();
         m_window = new MainWindow(this);
+        m_windowCreatedOnce = true;
     }
     m_window->show();
     m_window->raise();
     m_window->activateWindow();
-    if (!m_storageWarnings.isEmpty()) m_window->statusBar()->showMessage(m_storageWarnings.join(QStringLiteral("; ")), 15000);
+    if (!m_storageWarnings.isEmpty() && !m_player->pendingDsdTakeoverRequest()) {
+        m_window->statusBar()->showMessage(m_storageWarnings.join(QStringLiteral("; ")), 15000);
+    }
     if (m_tray && !m_trayAlwaysVisible) {
         m_tray->hide();
     }
@@ -746,6 +748,7 @@ void AppCore::showWindow()
 void AppCore::releaseWindow()
 {
     if (!m_window) return;
+    m_windowCreatedOnce = true;
     m_window->persistViewState();
     // Native DSD may have switched the card's PipeWire profile off. Keep its
     // small UI controller alive while tray-hidden so its pause/end timers can
@@ -1100,6 +1103,7 @@ void AppCore::restoreSavedPlayback()
     }
     m_player->playAt(queueIndex, false, state != QStringLiteral("playing"), false);
     if (positionMs > 0) {
+        if (m_player->setPendingDsdResumePosition(positionMs)) return;
         // Only if nothing newer was asked of playback in the meantime.
         const quint64 transportRequests = m_playback->transportRequests();
         QTimer::singleShot(250, this, [this, positionMs, transportRequests, trackPath]() {
@@ -1113,10 +1117,7 @@ void AppCore::restoreSavedPlayback()
 
 void AppCore::saveAdoptedSharedEndpoint(const QString &name, const QString &label)
 {
-    // A clean profile may have been changed by another store writer. A failed
-    // save leaves the running choice authoritative until this process exits.
-    PlaybackProfile profile = m_playbackProfileUnsaved ? m_activePlaybackProfile
-        : playbackProfileFromJson(m_database->setting(QStringLiteral("playback.profile")));
+    PlaybackProfile profile = m_activePlaybackProfile;
     profile.sharedEndpoint = name;
     profile.sharedEndpointLabel = label;
     if (!saveActivePlaybackProfile(profile)) {
@@ -1131,11 +1132,9 @@ bool AppCore::saveActivePlaybackProfile(const PlaybackProfile &profile)
     m_activePlaybackProfile = profile;
     if (!m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(profile))) {
         m_playbackProfileSaveError = m_database->lastError();
-        m_playbackProfileUnsaved = true;
         return false;
     }
     m_playbackProfileSaveError.clear();
-    m_playbackProfileUnsaved = false;
     return true;
 }
 

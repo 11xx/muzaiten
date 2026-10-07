@@ -11,6 +11,7 @@
 
 #include <chrono>
 #include <functional>
+#include <optional>
 
 class PlaybackBackend;
 
@@ -46,15 +47,19 @@ public:
     // anything already in the queue. Keeps PlayerCore free of any DB dependency.
     using RandomTrackProvider = std::function<QVector<Track>(int count, const QSet<QString> &excludePaths)>;
 
-    // The UI decides whether a track can start normally, needs native DSD output,
-    // or must wait for a user-confirmed device takeover. Keeping the decision as
-    // a narrow callback preserves PlayerCore's window-free ownership of transport
-    // state while leaving PipeWire/device UI in MainWindow.
+    // The app decides whether a track can start normally, needs native DSD
+    // output, or must wait for a user-confirmed device takeover. The decision
+    // stays a narrow callback so transport state remains window-free.
     struct PlaybackStartPlan {
         enum class Action { Normal, NativeDsd, DeferForDsdTakeover, Skip };
         Action action = Action::Normal;
         QString device;
         QString reason;
+    };
+    struct DsdTakeoverRequest {
+        Track track;
+        QString device;
+        qint64 resumePositionMs = 0;
     };
     using PlaybackStartPlanner = std::function<PlaybackStartPlan(const Track &)>;
 
@@ -122,6 +127,8 @@ public:
     // Completes the one outstanding native-DSD takeover request. Stale UI timer
     // callbacks are harmless: they become no-ops after a different track starts.
     void resolveDsdTakeover(bool accepted);
+    std::optional<DsdTakeoverRequest> pendingDsdTakeoverRequest() const;
+    bool setPendingDsdResumePosition(qint64 positionMs);
 
     // -- queue mutation ------------------------------------------------------
     void appendAndPlay(const Track &track);
@@ -291,6 +298,7 @@ private:
         QString device;
         bool notifyScrobbler = true;
         bool startPaused = false;
+        qint64 resumePositionMs = 0;
     };
     PendingDsdTakeover m_pendingDsdTakeover;
     // Set after a declined/timed-out prompt. Native DSD tracks are then skipped
