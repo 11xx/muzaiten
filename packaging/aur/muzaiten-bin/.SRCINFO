@@ -5,6 +5,7 @@ pkgbase = muzaiten-bin
 	url = https://github.com/11xx/muzaiten
 	arch = x86_64
 	license = Unlicense
+	license = Unicode-3.0
 	depends = qt6-base
 	depends = qt6-multimedia
 	depends = taglib

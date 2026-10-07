@@ -241,19 +241,39 @@ output ownership and signing must be established before adding execution.
 
 ## Source notices
 
-[NOTICE](../src/search/fold/tables/han/NOTICE) records the reference providers
-and terms. Basis labels describe how a value was obtained; they do not decide
-copyright, database rights, license compatibility or the release license.
-The checker requires a `# attribution: <JSON object>` record for each reference
-used in a marked table. Each record has `reference` (`unihan`, `cns` or `opencc`),
-`provider`, public `source`, `license` and `files` (the exact table basenames
-covered by the attribution). Unihan requires `Unicode-3.0` and its license
-notice; CNS requires `Taiwan Open Government Data License v1` and its dataset
-attribution. Missing providers, notices, references or file scope produce blocking
-`provenance` findings. Sidecars identify the actual references used within that
-scope. This check verifies notice coverage; the distribution license requires a
-release decision based on the assembled corpus and retained evidence.
-Decomposition inputs require their own source-license determination; prediction
-metadata and a blind generation method do not confer permission to distribute
-them. Synthetic fixtures exercise the format without embedding dictionary
-decompositions or model output.
+[NOTICE](../src/search/fold/tables/han/NOTICE) is generated from
+[the source-terms registry](fold-han-source-terms.json) and source table pin
+headers. Each `# attribution: <JSON object>` record has `reference`, `provider`,
+`license`, `pins` and `files`; its rendered statement and file scope must agree
+with the registry. Empty catalog scopes attribute no distributed table.
+
+Every input pin of a marked table needs known terms and a scoped attribution,
+including sources used for membership or prediction attestation. Synthetic
+input snapshots support assembly experiments; an unregistered exact pin fails
+source-term checking. The production CLI has no registry override. Unihan uses
+Unicode-3.0 with its pinned archive notice and complete license text. CNS uses
+OGDL-Taiwan-1.0 with agency/year/full title/version, the conditional-use
+statement, license URL and provider site credit. OpenCC uses its pinned
+Apache-2.0 dictionary terms and exact license copy. A prominent modified-file
+notice appears in the table and sidecar if and only if they contain
+OpenCC-attested mappings.
+
+Missing terms, attribution scope, legal copies or modified-content notices
+produce `source-terms` findings. Reviewed reading or mapping decisions cannot
+suppress these findings. Full OGDL text and OpenCC AUTHORS are conservative
+project-policy copies; the checker distinguishes them from license-required
+copies. Source and binary installation preserve NOTICE and the copies through
+CMake's `HanNotices` component.
+
+```sh
+python3 tools/fold-han-notice.py render --write
+python3 tools/fold-han-notice.py check
+python3 tests/test_fold_han_notice.py
+```
+
+Adding row-bearing tiers or changing a source pin requires updating the exact
+terms, regenerating NOTICE, and synchronizing package license metadata with the
+actual data components. Basis labels describe how a value was obtained; they
+do not decide copyright, database rights, corpus compatibility or a release
+license. Decomposition inputs require their own source-license determination;
+prediction metadata and a blind method do not confer distribution rights.

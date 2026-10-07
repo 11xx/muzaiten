@@ -752,3 +752,6 @@ target_link_libraries(test_taste_radio_appcore PRIVATE muzaiten_app muzaiten_ui_
 target_compile_features(test_taste_radio_appcore PRIVATE cxx_std_26)
 add_test(NAME test_taste_radio_appcore COMMAND test_taste_radio_appcore)
 set_tests_properties(test_taste_radio_appcore PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 45)
+
+add_test(NAME test_fold_han_notice
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fold_han_notice.py)

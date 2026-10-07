@@ -30,6 +30,18 @@ def load_checker():
 
 
 data = load_checker()
+
+
+def load_notice():
+    if "fold_han_notice" not in sys.modules:
+        spec = importlib.util.spec_from_file_location("fold_han_notice", pathlib.Path(__file__).with_name("fold-han-notice.py"))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+    return sys.modules["fold_han_notice"]
+
+
+notice_terms = load_notice()
 PREDICTION_SCHEMA = "fold-han-predictions/2"
 PROVENANCE_SCHEMA = "fold-han-provenance/1"
 REFERENCE_SCHEMA = "fold-han-references/1"
@@ -540,13 +552,14 @@ def write_assembly(out: pathlib.Path, tier: str, members: list[str], refs: Refer
     rows, records, gaps, findings = assemble(members, refs, predictions, authored, tier=tier)
     counts = dict(sorted(Counter(r.basis for r in records if r.rank).items()))
     out.mkdir(parents=True, exist_ok=True)
-    common = header(PROVENANCE_SCHEMA, refs, predictions, authored)
+    common = header(PROVENANCE_SCHEMA, refs, predictions, authored) + "# Source attributions and license texts: NOTICE.\n"
+    modified = notice_terms.MODIFIED_NOTICE + "\n" if notice_terms.transformed_opencc(records) else ""
     files = {
-        f"{tier}.tsv": common + "# complete\n# Mainland readings precede Taiwan-only readings; unresolved order choices require reviewed rows.\n"
+        f"{tier}.tsv": common + modified + "# complete\n# Mainland readings precede Taiwan-only readings; unresolved order choices require reviewed rows.\n"
         + "# Readings marked single are transcribed from the named source; see NOTICE.\n"
         + f"# counts: {canonical(counts)}\n# columns: ideograph\treadings\tsimplified\n"
         + "".join("\t".join(row) + "\n" for row in rows),
-        f"{tier}-provenance.tsv": common + "# columns: " + "\t".join(PROVENANCE_COLUMNS) + "\n"
+        f"{tier}-provenance.tsv": common + modified + "# columns: " + "\t".join(PROVENANCE_COLUMNS) + "\n"
         + "".join("\t".join(r.columns()) + "\n" for r in records),
         f"{tier}-gaps.tsv": header("fold-han-gaps/1", refs, predictions, authored)
         + "# columns: ideograph\traw\tnormalized\tbatch\treason\n"
@@ -592,40 +605,15 @@ def read_records(path: pathlib.Path) -> tuple[dict, list[Record]]:
     return headers, records
 
 
-def check_notice(table: pathlib.Path, records: list[Record], notice: pathlib.Path) -> list[tuple]:
-    """Require a scoped provider attribution for every reference used by the table."""
-    sources = {source.split(":", 1)[0] for record in records for source in record.attested_by.split(",")}
-    if not sources:
-        return []
+def check_notice(table: pathlib.Path, records: list[Record], notice: pathlib.Path, pins: dict | None = None) -> list[tuple]:
+    """Bind scoped attributions and delivered legal texts to exact input pins."""
     try:
-        text = notice.read_text(encoding="utf-8")
-        attributions = {}
-        for line in text.splitlines():
-            if not line.startswith("# attribution: "):
-                continue
-            entry = json.loads(line.removeprefix("# attribution: "))
-            keys(entry, {"reference", "provider", "source", "license", "files"}, "NOTICE attribution")
-            name = entry["reference"]
-            if name not in {"unihan", "cns", "opencc"} or name in attributions:
-                raise ValueError("invalid or duplicate NOTICE reference")
-            coordinate(entry["source"], source=True)
-            if (not isinstance(entry["provider"], str) or not entry["provider"].strip()
-                    or not isinstance(entry["license"], str) or not entry["license"].strip()
-                    or not isinstance(entry["files"], list)
-                    or any(name not in data.TIER_FILES for name in entry["files"])):
-                raise ValueError("invalid NOTICE attribution")
-            attributions[name] = entry
-        required_licenses = {"unihan": "Unicode-3.0", "cns": "Taiwan Open Government Data License v1"}
-        missing = [source for source in sorted(sources)
-                   if source not in attributions or table.name not in attributions[source]["files"]
-                   or (source in required_licenses and attributions[source]["license"] != required_licenses[source])
-                   or (source == "unihan" and not all(part in text for part in
-                       ("UNICODE LICENSE V3", "COPYRIGHT AND PERMISSION NOTICE", "Copyright ©",
-                        "Permission is hereby granted", "THE DATA FILES AND SOFTWARE ARE PROVIDED")))]
-        return [(table.name, "-", "-", "provenance", source, "NOTICE attribution missing or incomplete")
-                for source in missing]
+        if pins is None:
+            pins = document(table)[0].get("references")
+        notice_terms.check_table(table, records, notice, pins)
+        return []
     except (OSError, ValueError, TypeError, KeyError) as exc:
-        return [(table.name, "-", "-", "provenance", "invalid NOTICE", str(exc))]
+        return [(table.name, "-", "-", "source-terms", "invalid NOTICE", str(exc))]
 
 
 def check_provenance(table: pathlib.Path, provenance: pathlib.Path, refs: References, predictions: Predictions,
@@ -672,7 +660,11 @@ def check_provenance(table: pathlib.Path, provenance: pathlib.Path, refs: Refere
         return [finding("-", "invalid records", str(exc))]
 
     findings = [finding(ch, ours, reference, kind) for ch, kind, ours, reference in issues]
-    findings.extend(check_notice(table, expected + actual, notice or data.DEFAULT_AUTHORED_DIR / "NOTICE"))
+    findings.extend(check_notice(table, expected + actual, notice or data.DEFAULT_AUTHORED_DIR / "NOTICE", refs.pins))
+    try:
+        notice_terms.check_modified_file(provenance, expected + actual)
+    except (OSError, ValueError) as exc:
+        findings.append(finding("-", "invalid modified-file notice", str(exc), "source-terms"))
     if headers.get("complete"):
         if table.stem not in tiers:
             findings.append(finding("-", table.stem, "unknown complete tier", "coverage"))
@@ -749,7 +741,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             findings = check_provenance(args.table, args.provenance, refs, predictions, authored)
             reviewed = data.read_reviewed(args.reviewed)
-            findings = [f for f in findings if data.finding_key(f) not in reviewed]
+            findings = [f for f in findings if f[3] == "source-terms" or data.finding_key(f) not in reviewed]
             for f in findings:
                 print("\t".join(data.clean_tsv(value) for value in f))
         print(f"{args.command}: blocking findings={len(findings)}", file=sys.stderr)

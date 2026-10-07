@@ -94,6 +94,18 @@ The authored files proceed through `tgh`, `big5-2`, `core`, `uro`, `exta`,
 coverage with a `# complete` header line; a file without it may still be
 partial while its set is being authored.
 
+Rare tables carrying source-pin headers require exact entries in
+`tools/fold-han-source-terms.json`, scoped NOTICE attribution and complete
+license copies. The CNS pronunciation and code-mapping route is
+OGDL-Taiwan-1.0: attribution names 數位發展部, year 2026, the full dataset title
+and release 20260805, with the license statement/link and provider site credit.
+The year follows the release version; it is not a claimed source copyright year.
+An OpenCC modified-content notice appears only on a table or sidecar containing
+OpenCC-attested mappings. Missing source terms cannot be waived by a reviewed
+reading or mapping disagreement. The source-terms registry and NOTICE do not
+establish corpus compatibility. Distribution inventories distinguish available
+reference terms from tables actually present.
+
 Other ideographs with Unihan data read from Unicode's Unihan database:
 `tools/fold-han-data.py` generates `src/search/fold/unihan/han_pinyin.tsv`
 and `han_simplified.tsv` from a pinned Unihan release, leaving out the
@@ -103,7 +115,10 @@ independently of Python's `unicodedata.unidata_version`. Generated keys must
 lie in the tool's ideograph blocks and have category `Lo` in the running
 Python's Unicode database; reference entries for unrecognized characters are
 excluded. Generation is byte-repeatable with the same reference, authored
-tables, and runtime categories. The TSV headers identify the Unihan reference.
+tables, and runtime categories. The TSV headers identify the Unihan version, source URL and archive checksum.
+The scoped [Han NOTICE](../src/search/fold/tables/han/NOTICE) retains the exact
+archive copyright notice; binary installs include it and the complete Unicode
+license under `share/licenses/muzaiten/`.
 `tools/fold-han-data.py check` compares the authored tables with Unihan and
 Taiwan's CNS 11643 open data for reading attestation,
 including the exact tone of every reading across simplified and traditional
@@ -159,7 +174,11 @@ reading in both authored readings; a reviewer adds that reading or records why
 the word should keep its existing readings. `opencc` reports a simplified form
 that differs from OpenCC's first traditional-to-simplified mapping, including
 another listed target; a reviewer chooses the intended fold or records the
-disagreement. CC-CEDICT and OpenCC are check-only references and never ship.
+disagreement. CC-CEDICT supplies word checks. OpenCC supplies comparison targets
+and variant-family relations; attributed rare tables can contain selected and
+transformed mappings from its pinned dictionary. A listed second candidate is
+not its preferred first output. The raw reference dictionaries stay in the
+checker cache.
 The checker downloads them to
 `$XDG_CACHE_HOME/muzaiten-tools/` (`~/.cache/muzaiten-tools/` by default, apart
 from the application's own cache) on first use and prints its date line with the word

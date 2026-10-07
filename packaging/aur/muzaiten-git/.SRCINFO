@@ -6,6 +6,7 @@ pkgbase = muzaiten-git
 	url = https://github.com/11xx/muzaiten
 	arch = x86_64
 	license = Unlicense
+	license = Unicode-3.0
 	makedepends = git
 	makedepends = cmake
 	makedepends = ninja

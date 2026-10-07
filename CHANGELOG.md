@@ -2,7 +2,22 @@
 
 ## [Unreleased]
 
+### Distribution
+
+- Source and binary packages include scoped Han attributions and exact Unicode
+  and OpenCC license copies. Unihan attribution uses its pinned archive notice
+  instead of ICU's copyright line. Package labels identify the authored and
+  Unihan-derived components actually included; reference terms do not claim
+  CNS/OpenCC rare data is shipped.
+
+
 ### Developer tooling
+
+- A single exact-pin source-term registry generates Han NOTICE statements and
+  table scopes. Unknown pins, incomplete CNS agency/year/title/version
+  attribution, missing legal texts and inaccurate OpenCC modified-file notices
+  block source-term checks; reviewed data disagreements cannot waive them.
+  Focused fixtures cover source mismatches and CMake staging-install omissions.
 
 - Rare Han proposals assemble from checksum-pinned references with per-value
   provenance. Marked tables audit evidence ordering, reviewed ties, family

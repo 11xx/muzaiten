@@ -121,8 +121,41 @@ This produces, under `dist/`:
 
 - `muzaiten-<version>-<arch>.tar.zst` — a prefixed tree containing `muzaiten`,
   `muzaitenctl`, `muzaiten-features`, and the lightweight `muzaiten-import`
-  helper, plus the desktop entry, icon, metainfo, and license; and
+  helper, plus the desktop entry, icon, metainfo, and licenses/source notices; and
 - `muzaiten-<version>-<arch>.tar.zst.sha256`.
+
+CMake installs `UNLICENSE`, the scoped Han `NOTICE`, and exact license copies
+under `share/licenses/muzaiten/`. Native archives and both AUR packages inherit
+these install rules; the AUR packages use their own package name for the license
+directory. Source distributions retain the tracked NOTICE, registry and copies.
+
+`tools/fold-han-source-terms.json` is the trusted source-term registry. Exact
+source URL/revision/hash pins select attribution facts and legal-text hashes.
+`python3 tools/fold-han-notice.py render --write` generates NOTICE scopes from
+source table headers; `python3 tools/fold-han-notice.py check` checks the source
+inventory and copies. Unknown pins, absent statements/scopes and changed legal
+texts block distribution. To check a staged install, use
+`python3 tools/fold-han-notice.py check --package STAGE/share/licenses/muzaiten`.
+The CMake staging fixture installs the `HanNotices` component without compiling
+C++ and checks its files and hashes.
+
+The shipped data components are authored fold tables and Unihan 16.0.0-derived
+readings/mappings. Package and AppStream metadata declare `Unlicense` and
+`Unicode-3.0` for these components. CNS/OpenCC entries with empty NOTICE scopes
+attribute no shipped rows. Adding attributed rows requires regenerating NOTICE
+and updating package metadata with that row-bearing change; available reference
+terms alone do not add a package license. Unicode and the pinned OpenCC Apache
+texts are exact upstream copies. Full OGDL text and OpenCC AUTHORS are
+conservative offline credits chosen by project policy, rather than required
+license copies. Their inclusion is checked as that policy.
+
+CNS-derived pronunciation and mapping data uses OGDL-Taiwan-1.0 with the full
+agency/year/title/version statement, conditional-use text, license URL and
+provider credit. The attribution year follows release 20260805. The provider
+site's undertaking about errors or omissions requires consideration before a
+public rare-tier release; source disagreements and any operator reporting
+choice are recorded privately. A checker does not contact the provider or
+claim corpus compatibility or legal clearance.
 
 `tools/version.py` supplies the same PEP 440 version to CMake, native archives
 and the VCS package. Clean tagged releases use an unpadded UTC date such as

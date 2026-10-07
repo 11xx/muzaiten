@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""Source-pin attribution, legal-copy and CMake staging fixtures."""
+from __future__ import annotations
+
+import copy
+import importlib.util
+import json
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+import xml.etree.ElementTree as ET
+from types import SimpleNamespace
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location("fold_han_notice", ROOT / "tools/fold-han-notice.py")
+notice = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(notice)
+
+
+class HanNoticeTests(unittest.TestCase):
+    def setUp(self):
+        build = ROOT / "build"
+        build.mkdir(exist_ok=True)
+        self.temporary = tempfile.TemporaryDirectory(prefix="han-notices-", dir=build)
+        self.addCleanup(self.temporary.cleanup)
+        self.root = pathlib.Path(self.temporary.name)
+        self.registry = notice.read_registry()
+        self.pins = {key: pin for source in self.registry["sources"].values() for key, pin in source["pins"].items()}
+        self.scopes = {name: ["tgh.tsv"] for name in self.registry["sources"]}
+        self.table = self.root / "tgh.tsv"
+        self.table.write_text("# fixture table\n", encoding="utf-8")
+        self.notice = self.root / "NOTICE"
+        self.notice.write_text(notice.render_notice(self.registry, self.scopes), encoding="utf-8")
+        shutil.copytree(notice.HAN / "licenses", self.root / "licenses")
+        self.records = [SimpleNamespace(attested_by="cns,unihan")]
+
+    def check(self, records=None):
+        notice.check_table(self.table, records if records is not None else self.records,
+                           self.notice, self.pins, self.registry)
+
+    def test_registered_pins_and_complete_notices(self):
+        self.scopes = {name: ["tgh.tsv", "big5-2.tsv"] for name in self.registry["sources"]}
+        self.notice.write_text(notice.render_notice(self.registry, self.scopes))
+        self.check()
+
+    def test_unknown_pin_and_missing_cns_component_block(self):
+        self.pins["unihan"] = {**self.pins["unihan"], "sha256": "0" * 64}
+        with self.assertRaisesRegex(ValueError, "source terms unresolved"):
+            self.check()
+        self.pins.pop("unihan")
+        self.pins.pop("cns-mappings")
+        with self.assertRaisesRegex(ValueError, "all component pins"):
+            self.check()
+
+    def test_required_cns_attribution_and_wrong_license(self):
+        for field in ("agency", "year", "title", "version", "statement", "license_url", "website_credit"):
+            with self.subTest(field=field):
+                registry = copy.deepcopy(self.registry)
+                del registry["sources"]["cns"]["attribution"][field]
+                path = self.root / "terms.json"
+                path.write_text(json.dumps(registry), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "cns attribution"):
+                    notice.read_registry(path)
+        registry = copy.deepcopy(self.registry)
+        registry["sources"]["cns"]["license"] = "OFL-1.1"
+        path.write_text(json.dumps(registry), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "license must be OGDL-Taiwan-1.0"):
+            notice.read_registry(path)
+
+    def test_render_drift_and_icu_copyright_substitution(self):
+        original = self.notice.read_text()
+        for text in (original.replace("數位發展部", "agency omitted"),
+                     original.replace("© 2024 Unicode®, Inc.", "Copyright © 2016-2025 Unicode, Inc.")):
+            self.notice.write_text(text)
+            with self.assertRaisesRegex(ValueError, "differs from source terms"):
+                self.check()
+
+    def test_missing_table_scope(self):
+        self.scopes["cns"] = []
+        self.notice.write_text(notice.render_notice(self.registry, self.scopes))
+        with self.assertRaisesRegex(ValueError, "outside table scope"):
+            self.check()
+
+    def test_duplicate_json_keys_and_reference(self):
+        text = self.notice.read_text()
+        line = next(line for line in text.splitlines() if line.startswith("# attribution: "))
+        for changed in (text.replace('"reference":"unihan"', '"reference":"unihan","reference":"cns"'), text + line + "\n"):
+            self.notice.write_text(changed)
+            with self.assertRaisesRegex(ValueError, "duplicate"):
+                self.check()
+
+    def test_missing_and_truncated_license_copies(self):
+        path = self.root / "licenses/APACHE-2.0.txt"
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, "license copy:.*missing"):
+            self.check()
+        path.write_text("Apache License, Version 2.0\n")
+        with self.assertRaisesRegex(ValueError, "license copy:.*hash differs"):
+            self.check()
+
+    def test_symlinked_and_escaping_license_assets(self):
+        path = self.root / "licenses/UNICODE-3.0.txt"
+        path.unlink()
+        path.symlink_to(notice.HAN / "licenses/UNICODE-3.0.txt")
+        with self.assertRaisesRegex(ValueError, "symlinked"):
+            self.check()
+        with self.assertRaisesRegex(ValueError, "unsafe"):
+            notice.regular_file(self.root, "../NOTICE")
+
+    def test_policy_copies_are_distinguished_from_legal_requirements(self):
+        (self.root / "licenses/OGDL-Taiwan-1.0.txt").unlink()
+        with self.assertRaisesRegex(ValueError, "project-policy copy:"):
+            self.check()
+        self.assertIn("not a license-required copy", self.notice.read_text())
+
+    def test_opencc_modified_notice_present_iff_transformed_content(self):
+        self.table.write_text(notice.MODIFIED_NOTICE + "\n")
+        with self.assertRaisesRegex(ValueError, "must match transformed"):
+            self.check()
+        self.check([SimpleNamespace(attested_by="opencc:TSCharacters,unihan:kSimplifiedVariant")])
+        self.table.write_text("# fixture table\n")
+        with self.assertRaisesRegex(ValueError, "must match transformed"):
+            self.check([SimpleNamespace(attested_by="opencc:TSCharacters")])
+
+    def test_prediction_only_and_empty_records_still_require_all_pins(self):
+        self.check([])
+        self.scopes["cns"] = []
+        self.notice.write_text(notice.render_notice(self.registry, self.scopes))
+        with self.assertRaisesRegex(ValueError, "outside table scope"):
+            self.check([])
+
+    def test_actual_inventory_and_legacy_unicode_copy(self):
+        scopes = notice.check_source(self.registry)
+        self.assertEqual(scopes["unihan"], ["unihan/han_pinyin.tsv", "unihan/han_simplified.tsv"])
+        self.assertEqual(scopes["cns"], [])
+        self.assertEqual(scopes["opencc"], [])
+
+    def test_package_metadata_matches_row_bearing_components(self):
+        scopes = notice.scope_inventory(self.registry)
+        licenses = {"Unlicense"} | {self.registry["sources"][name]["license"] for name, files in scopes.items() if files}
+        for name in ("muzaiten-bin", "muzaiten-git"):
+            text = (ROOT / "packaging/aur" / name / ".SRCINFO").read_text()
+            declared = {line.split("=", 1)[1].strip() for line in text.splitlines() if line.strip().startswith("license =")}
+            self.assertEqual(declared, licenses, name)
+            build = (ROOT / "packaging/aur" / name / "PKGBUILD").read_text()
+            for license in licenses:
+                self.assertIn("'" + license + "'", build)
+        expression = ET.parse(ROOT / "packaging/org.11xx.muzaiten.metainfo.xml").getroot().findtext("project_license")
+        self.assertEqual(set(expression.split(" AND ")), licenses)
+        for license in licenses:
+            self.assertIn("'" + license + "'", (ROOT / "packaging/build-release.sh").read_text())
+
+    def stage_install(self):
+        source = self.root / "cmake-source"
+        source.mkdir()
+        cmake = source / "CMakeLists.txt"
+        cmake.write_text(f'''cmake_minimum_required(VERSION 3.20)
+project(HanNoticeInstall NONE)
+set(CMAKE_INSTALL_LIBDIR lib)
+include(GNUInstallDirs)
+include("{ROOT.as_posix()}/cmake/HanNotices.cmake")
+muzaiten_install_han_notices("{ROOT.as_posix()}" "{pathlib.Path(sys.executable).as_posix()}")
+''')
+        build = self.root / "cmake-build"
+        stage = self.root / "stage"
+        for command in (["cmake", "-S", str(source), "-B", str(build)],
+                        ["cmake", "--install", str(build), "--prefix", str(stage), "--component", "HanNotices"]):
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return stage / "share/licenses/muzaiten"
+
+    def test_cmake_staging_install_delivers_notices_and_exact_legal_texts(self):
+        stage = self.stage_install()
+        notice.check_source(self.registry, package=stage)
+        expected = {"UNLICENSE", "NOTICE", *self.registry["files"]}
+        self.assertEqual({p.relative_to(stage).as_posix() for p in stage.rglob("*") if p.is_file()}, expected)
+
+    def test_staged_notice_or_license_omission_blocks_package(self):
+        stage = self.stage_install()
+        for asset in ("NOTICE", "licenses/UNICODE-3.0.txt", "licenses/APACHE-2.0.txt"):
+            with self.subTest(asset=asset):
+                path = stage / asset
+                original = path.read_bytes()
+                path.unlink()
+                with self.assertRaises(ValueError):
+                    notice.check_source(self.registry, package=stage)
+                path.write_bytes(original)
+
+
+if __name__ == "__main__":
+    unittest.main()

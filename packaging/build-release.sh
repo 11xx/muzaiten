@@ -70,7 +70,7 @@ pkgrel=1
 pkgdesc="Native music player for local libraries (local dev build for packaging tests)"
 arch=('${arch}')
 url="https://github.com/11xx/muzaiten"
-license=('Unlicense')
+license=('Unlicense' 'Unicode-3.0')
 depends=('qt6-base' 'qt6-multimedia' 'taglib' 'chromaprint' 'gstreamer' 'gst-plugins-base-libs' 'glib2' 'zstd' 'python')
 optdepends=('gst-plugins-good: extra audio decoders and sinks'
             'gst-plugin-pipewire: PipeWire audio output'
@@ -160,7 +160,6 @@ DESTDIR="$stage" cmake --install "$BUILD_DIR" --prefix "$PREFIX" >/dev/null
 for executable in muzaiten muzaitenctl muzaiten-features; do
     strip --strip-unneeded "$stage/$PREFIX/bin/$executable"
 done
-install -Dm644 UNLICENSE "$stage/$PREFIX/share/licenses/muzaiten/UNLICENSE"
 
 mkdir -p dist
 tarball="dist/muzaiten-${version}-${arch}.tar.zst"
