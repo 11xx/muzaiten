@@ -68,6 +68,7 @@ Motörhead	motorhead	motoerhead
 # Japanese seed readings use wapuro and Hepburn, followed by Chinese pinyin.
 # Authored ideographs can also have a second pinyin reading.
 花々	花々	hanahana	huahua
+三線	三线	sanshin	sanxian
 東京の夜	东京no夜	toukyounoyoru	tokyonoyoru	dongjingnoye
 傳達給你	传达给你	chuandageini	zhuandajini	zhuandageini	chuandajini
 音乐	音乐	yinyue
@@ -150,6 +151,9 @@ Motörhead	motorhead	motoerhead
 ວຽງຈັນ	ວຽງຈັນ	viangchan	wiangjan
 ຫຼວງພະບາງ	ຫຼວງພະບາງ	luangphabang
 ສະບາຍດີ	ສະບາຍດີ	sabaidi	sabaidee
+# Thai marks retain their written identity while their Latin readings differ.
+ป๊อด	ป๊อด	pot	pod
+ป็อด	ป็อด	poot	pood
 # Brahmic scripts keep their surface; readings are common (the inherent
 # vowel dropped where Hindi drops it), full, and ee/oo.
 नमस्ते	नमस्ते	namaste
@@ -200,6 +204,8 @@ Motörhead	motorhead	motoerhead
 חיים	חיימ	chaym	haim
 ג׳ורג׳	ג'ורג'	jorj
 ދިވެހި	ދިވެހި	dhivehi
+# foldgen.py leaves Mro letters in their native surface when no rule applies.
+𖩀𖩁𖩂	𖩀𖩁𖩂
 # Tibetan keeps its surface; readings are Wylie with syllables joined.
 སྨོན་ལམ་	སྨོན་ལམ་	smonlam
 བོད་སྐད་	བོད་སྐད་	bodskad
