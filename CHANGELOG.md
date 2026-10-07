@@ -10,7 +10,6 @@
   Unihan-derived components actually included; reference terms do not claim
   CNS/OpenCC rare data is shipped.
 
-
 ### Developer tooling
 
 - A single exact-pin source-term registry generates Han NOTICE statements and
