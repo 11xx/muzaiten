@@ -1,5 +1,6 @@
 #include "app/AppCore.h"
 #include "app/StartupStorage.h"
+#include <QScopedValueRollback>
 #include <QStatusBar>
 #include <QTextStream>
 
@@ -39,6 +40,7 @@
 #include "scrobble/PlayEventRecorder.h"
 #include "scrobble/ScrobbleBackfill.h"
 #include "ui/MainWindow.h"
+#include "ui/QueueSnapshotStore.h"
 
 #include <QApplication>
 #include <QDateTime>
@@ -65,6 +67,31 @@
 #endif
 
 namespace {
+
+RepeatMode repeatModeFromString(const QString &value)
+{
+    if (value == QStringLiteral("all")) {
+        return RepeatMode::All;
+    }
+    if (value == QStringLiteral("one")) {
+        return RepeatMode::One;
+    }
+    return RepeatMode::Off;
+}
+
+ShuffleMode shuffleModeFromString(const QString &value)
+{
+    if (value == QStringLiteral("queue")) {
+        return ShuffleMode::Queue;
+    }
+    if (value == QStringLiteral("library")) {
+        return ShuffleMode::Library;
+    }
+    if (value == QStringLiteral("radio")) {
+        return ShuffleMode::Radio;
+    }
+    return ShuffleMode::Off;
+}
 
 QString repeatModeToString(RepeatMode mode)
 {
@@ -403,7 +430,8 @@ AppCore::AppCore(QObject *parent)
         return m_database ? m_database->randomTracks(count, excludePaths) : QVector<Track>{};
     });
 
-    m_mpris = new MprisService(this);
+    m_queueSession = new QueueSnapshotStore(*m_player, *m_database, *m_playlistDb, *m_state, this);
+    m_mpris = new MprisService(this, false);
     m_mpris->setDatabase(m_database.get());
 
     m_listenTracker = new ListenTracker(this);
@@ -553,11 +581,19 @@ AppCore::AppCore(QObject *parent)
 
     setupMprisWiring();
     setupScrobbleWiring();
+    m_queueSession->loadQueueState();
+    restorePlaybackModes();
+    if (m_player->queueIndex() >= 0) {
+        m_player->presentTrack(m_player->queue().at(m_player->queueIndex()));
+    }
+    if (qApp->property("muzaiten.demoScreensDir").toString().isEmpty()) {
+        restoreSavedPlayback();
+        maybeRestoreRadioSession();
+    }
+    updateMprisCapabilities();
+    m_mpris->registerService();
     setupIpcHandler();
     setupTrayIcon();
-    // Playback resume is deferred to the first showWindow(): the saved queue is
-    // loaded by MainWindow's constructor (loadQueueState), so the player's queue
-    // is empty here. restoreSavedPlayback() is guarded to run once per process.
 
     // Eagerly resume an interrupted ListenBrainz backfill, but not immediately:
     // give startup I/O (library/db opens, scan resume, tray/mpris wiring) a
@@ -574,6 +610,7 @@ AppCore::~AppCore()
         delete m_window;
         m_window = nullptr;
     }
+    m_queueSession->saveQueueState();
     saveRadioSessionState();
     // Finalize any in-flight play event before teardown, defensively: the
     // aboutToQuit signal may not fire on every exit path.
@@ -595,6 +632,7 @@ PlaybackBackend *AppCore::backend() const { return m_playback; }
 Database *AppCore::database() const { return m_database.get(); }
 PlaylistDatabase *AppCore::playlistDatabase() const { return m_playlistDb.get(); }
 SettingsStore *AppCore::settings() const { return m_state.get(); }
+QueueSnapshotStore *AppCore::queueSession() const { return m_queueSession; }
 ArtworkCache *AppCore::artworkCache() const { return m_artworkCache.get(); }
 FeatureStore *AppCore::features() const { return m_features.get(); }
 ListenHistoryStore *AppCore::listenHistory() const { return m_listenHistory.get(); }
@@ -690,15 +728,11 @@ void AppCore::setTrayAlwaysVisible(bool visible)
 
 void AppCore::showWindow()
 {
+    if (m_creatingWindow) return;
     if (!m_window) {
+        QScopedValueRollback<bool> constructing(m_creatingWindow, true);
         restoreInteractiveMemory();
         m_window = new MainWindow(this);
-        // First window of the process: its constructor loaded the saved queue,
-        // so the player now has tracks to resume into. Guarded to run once.
-        if (qApp->property("muzaiten.demoScreensDir").toString().isEmpty()) {
-            restoreSavedPlayback();
-            maybeRestoreRadioSession();
-        }
     }
     m_window->show();
     m_window->raise();
@@ -785,6 +819,8 @@ void AppCore::quit()
 void AppCore::setupMprisWiring()
 {
     connect(m_mpris, &MprisService::raiseRequested, this, &AppCore::showWindow);
+    connect(m_player, &PlayerCore::queueChanged, this, &AppCore::updateMprisCapabilities);
+    connect(m_player, &PlayerCore::queueReset, this, &AppCore::updateMprisCapabilities);
     connect(m_mpris, &MprisService::previousRequested, m_player, &PlayerCore::previous);
     connect(m_mpris, &MprisService::nextRequested, m_player, &PlayerCore::next);
     connect(m_mpris, &MprisService::repeatModeRequested, m_player, &PlayerCore::setRepeatMode);
@@ -1028,6 +1064,18 @@ void AppCore::setupTrayIcon()
     connect(m_player, &PlayerCore::playbackCleared, this, [this]() {
         m_tray->setToolTip(QStringLiteral("muzaiten"));
     });
+}
+
+void AppCore::restorePlaybackModes()
+{
+    m_player->setLibraryShufflePercent(std::clamp(
+        m_state->setting(QStringLiteral("playback.libraryShufflePercent"), QStringLiteral("20")).toInt(), 0, 100));
+    m_player->setRadioShufflePercent(std::clamp(
+        m_state->setting(QStringLiteral("playback.radioShufflePercent"), QStringLiteral("80")).toInt(), 0, 100));
+    m_player->setRepeatMode(repeatModeFromString(m_state->setting(QStringLiteral("playback.repeatMode"))));
+    m_player->setShuffleMode(shuffleModeFromString(m_state->setting(QStringLiteral("playback.shuffleMode"))));
+    m_mpris->setRepeatMode(m_player->repeatMode());
+    m_mpris->setShuffleMode(m_player->shuffleMode());
 }
 
 void AppCore::restoreSavedPlayback()

@@ -192,42 +192,9 @@ QStringList normalizedAlbumTitles(QStringList albumTitles)
     return albumTitles;
 }
 
-RepeatMode repeatModeFromString(const QString &value)
-{
-    if (value == QStringLiteral("all")) {
-        return RepeatMode::All;
-    }
-    if (value == QStringLiteral("one")) {
-        return RepeatMode::One;
-    }
-    return RepeatMode::Off;
-}
-
-ShuffleMode shuffleModeFromString(const QString &value)
-{
-    if (value == QStringLiteral("queue")) {
-        return ShuffleMode::Queue;
-    }
-    if (value == QStringLiteral("library")) {
-        return ShuffleMode::Library;
-    }
-    if (value == QStringLiteral("radio")) {
-        return ShuffleMode::Radio;
-    }
-    return ShuffleMode::Off;
-}
-
 QString newQueueIdentity()
 {
     return QStringLiteral("queue:%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-}
-
-QString normalizedQueueSourceKind(const QString &kind)
-{
-    if (kind == QStringLiteral("album") || kind == QStringLiteral("playlist")) {
-        return kind;
-    }
-    return QStringLiteral("queue");
 }
 
 qint64 queueSnapshotSavedAt(const QJsonObject &snapshot)
@@ -617,7 +584,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_scanController = new ScanController(*this);
     m_ratingSyncController = new RatingSyncController(*this);
     m_viewStatePersistence = new ViewStatePersistence(*this);
-    m_queueSnapshotStore = new QueueSnapshotStore(*this);
+    m_queueSnapshotStore = m_core->queueSession();
     setWindowTitle(QStringLiteral("muzaiten"));
     qRegisterMetaType<RatingTagSyncSummary>("RatingTagSyncSummary");
     resize(1440, 900);
@@ -755,11 +722,16 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     m_takenOverDsdReleaseTimer->setSingleShot(true);
     connect(m_takenOverDsdReleaseTimer, &QTimer::timeout, this, &MainWindow::releaseHeldOutputDevice);
 
-    // PlayerCore, MprisService, and data stores are now owned by AppCore.
-    // m_player, m_playback, m_mpris, m_database, etc. are all borrowed pointers
-    // assigned from AppCore at the top of this constructor.
-    connect(m_player, &PlayerCore::aboutToAddTracks, this, &MainWindow::prepareQueueForTrackAddition);
-    connect(m_player, &PlayerCore::aboutToInjectLibraryTrack, this, &MainWindow::prepareQueueForLibraryInjection);
+    // AppCore owns playback, the queue session and data stores. The window
+    // borrows them and keeps only the views and interactive prompts.
+    connect(m_queueSnapshotStore, &QueueSnapshotStore::sourceChanged, this, &MainWindow::refreshQueueSourceDependentUi);
+    connect(m_queueSnapshotStore, &QueueSnapshotStore::snapshotsChanged, this, &MainWindow::refreshSavedQueuePlaylistEntries);
+    connect(m_queueSnapshotStore, &QueueSnapshotStore::playlistItemsChanged, this, [this]() {
+        if (m_playlistView != nullptr) {
+            m_playlistView->reloadItems();
+            m_playlistView->reloadPlaylists();
+        }
+    });
     connect(m_player, &PlayerCore::queueChanged, this, &MainWindow::syncQueueState);
     connect(m_player, &PlayerCore::queueTracksChanged, this, &MainWindow::patchQueueRows);
     connect(m_player, &PlayerCore::currentIndexChanged, this, &MainWindow::onPlayerIndexChanged);
@@ -795,17 +767,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_player, &PlayerCore::shuffleModeChanged, this, [this](ShuffleMode mode) {
         m_playerBar->setShuffleMode(mode);
     });
-    connect(m_player, &PlayerCore::radioActiveChanged, this, [this](bool active) {
-        syncRadioUiState();
-        // Radio replaces the queue with its own session. Sever any playlist
-        // backing BEFORE the seed lands: radioActiveChanged fires ahead of the
-        // clearAll/appendAndPlay sequence in AppCore::startRadio, and with a
-        // playlist-sourced queue still marked, prepareQueueForTrackAddition
-        // would mirror the radio seed into that playlist.
-        if (active) {
-            markQueueAsSpontaneous();
-        }
-    });
+    connect(m_player, &PlayerCore::radioActiveChanged, this, [this]() { syncRadioUiState(); });
     // Shuffle-percent persistence is handled by AppCore (state + MPRIS).
     connect(m_player, &PlayerCore::trackUnresolvable, this, [this](const Track &track) {
         QMessageBox::warning(this, QStringLiteral("Playback"),
@@ -825,15 +787,8 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playbackStateSaveTimer, &QTimer::timeout, this, [this]() {
         savePlaybackState();
     });
-    m_queueStateSaveTimer = new QTimer(this);
-    m_queueStateSaveTimer->setSingleShot(true);
-    m_queueStateSaveTimer->setInterval(500);
-    connect(m_queueStateSaveTimer, &QTimer::timeout, this, [this]() {
-        saveQueueState();
-    });
 
-    // m_mpris->setDatabase(...) was moved to AppCore constructor.
-    // m_rightSidebar still needs the database for track enrichment:
+    // The sidebar enriches queue tracks from the library database.
     if (m_rightSidebar) {
         m_rightSidebar->setDatabase(m_database);
     }
@@ -1480,8 +1435,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     loadPlaybackResumeSettings();
     loadViewSettings();
     loadSearchRankingConfig();
-    loadPlaybackModes();
-    loadQueueState();
+    adoptQueueSession();
     syncRadioUiState();
     refreshSavedQueuePlaylistEntries();
     loadExplorerState();
@@ -1489,8 +1443,7 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     configureListenBrainz();
     configureLastFm();
     loadExistingLibrary();
-    // Playback resume is handled once at AppCore startup; do not re-run it on
-    // window rebuild — it would restart/seek live audio.
+    // AppCore restores playback once per process.
     // Resume the lazy fill if a previous run left placeholder rows (e.g. closed
     // mid-fill or after a canceled scan). Deferred so the window shows first.
     QTimer::singleShot(0, this, [this]() { pumpMetadataFill(); });
@@ -2617,7 +2570,7 @@ PlaylistView *MainWindow::ensurePlaylistView()
     m_playlistView->setSavedQueueEntries(savedQueuePlaylistEntries());
     m_playlistView->setQueueIsPlaylistSourced(queueIsPlaylistSourced());
     if (!m_player->currentTrack().path.isEmpty()) {
-        const qint64 sourceId = m_queueSourceKind == QStringLiteral("playlist") ? m_queueSourcePlaylistId : 0;
+        const qint64 sourceId = m_queueSnapshotStore->sourceKind() == QStringLiteral("playlist") ? m_queueSnapshotStore->sourcePlaylistId() : 0;
         m_playlistView->setNowPlaying(m_player->currentTrack().path, sourceId);
     }
 
@@ -3040,7 +2993,19 @@ void MainWindow::refreshLibraryFileExplorer()
     m_libraryFileExplorer->setLibraryEntries(directories, tracks);
 }
 
-void MainWindow::loadQueueState() { m_queueSnapshotStore->loadQueueState(); }
+void MainWindow::adoptQueueSession()
+{
+    syncQueueState();
+    m_rightSidebar->setCurrentIndex(m_player->queueIndex(), /*reveal=*/true);
+    m_playerBar->setRepeatMode(m_player->repeatMode());
+    m_playerBar->setShuffleMode(m_player->shuffleMode());
+    if (!m_player->currentTrack().path.isEmpty()) {
+        presentTrack(m_player->currentTrack(), false);
+        updatePlaybackPosition();
+    }
+    m_playerBar->setPlaying(m_playback->state() == PlaybackBackend::State::Playing
+                            || m_playback->state() == PlaybackBackend::State::Buffering);
+}
 
 void MainWindow::saveQueueState() { m_queueSnapshotStore->saveQueueState(); }
 
@@ -3260,75 +3225,9 @@ void MainWindow::snapshotCurrentQueueAsPrevious(const QString &source) { m_queue
 
 void MainWindow::markQueueAsSpontaneous(const QString &id) { m_queueSnapshotStore->markQueueAsSpontaneous(id); }
 
-void MainWindow::appendTracksToCurrentPlaylist(const QVector<Track> &tracks)
-{
-    if (m_playlistDb == nullptr || m_queueSourcePlaylistId <= 0 || tracks.isEmpty()) {
-        return;
-    }
-    QSet<QString> existingPaths;
-    for (const PlaylistItem &item : m_playlistDb->items(m_queueSourcePlaylistId)) {
-        if (!item.trackPath.isEmpty()) {
-            existingPaths.insert(item.trackPath);
-        }
-    }
-    bool changed = false;
-    for (const Track &track : tracks) {
-        if (track.path.isEmpty() || existingPaths.contains(track.path)) {
-            continue;
-        }
-        changed = m_playlistDb->addItem(m_queueSourcePlaylistId, playlistItemFromTrack(track, QString())) > 0 || changed;
-        existingPaths.insert(track.path);
-    }
-    if (changed && m_playlistView != nullptr) {
-        m_playlistView->reloadItems();
-        m_playlistView->reloadPlaylists();
-    }
-}
-
-void MainWindow::prepareQueueForTrackAddition(const QVector<Track> &tracks)
-{
-    if (tracks.isEmpty()) {
-        return;
-    }
-    if (m_queueSourceKind == QStringLiteral("playlist")) {
-        if (!m_suppressPlaylistMirror) {
-            appendTracksToCurrentPlaylist(tracks);
-        }
-        return;
-    }
-    if (m_queueSourceKind == QStringLiteral("album")) {
-        markQueueAsSpontaneous();
-        return;
-    }
-    ensureCurrentQueueIdentity();
-}
-
-void MainWindow::prepareQueueForLibraryInjection(const Track &track)
-{
-    if (track.path.isEmpty()) {
-        return;
-    }
-    // A library-shuffle injection is the player appending a fresh track it chose
-    // itself, never a user edit. For a playlist-backed queue the track joins the
-    // live queue only — it is deliberately NOT mirrored into the playlist, since
-    // it was never part of that playlist. The playlist link stays intact so the
-    // user's own subsequent adds still mirror (and still prompt) as usual.
-    if (m_queueSourceKind == QStringLiteral("playlist")) {
-        return;
-    }
-    // For album / standalone queues the injected foreign track means the queue is
-    // no longer a faithful copy of its source, so apply the same identity policy a
-    // user add would: drop the album identity, or anchor a standalone queue id.
-    if (m_queueSourceKind == QStringLiteral("album")) {
-        markQueueAsSpontaneous();
-        return;
-    }
-    ensureCurrentQueueIdentity();
-}
-
 bool MainWindow::queueIsPlaylistSourced() const
 {
-    return m_queueSourceKind == QStringLiteral("playlist") && m_queueSourcePlaylistId > 0;
+    return m_queueSnapshotStore->sourceKind() == QStringLiteral("playlist") && m_queueSnapshotStore->sourcePlaylistId() > 0;
 }
 
 void MainWindow::unlinkQueueFromPlaylist()
@@ -3339,9 +3238,7 @@ void MainWindow::unlinkQueueFromPlaylist()
     // Keep the tracks and the same queue identity; just sever the playlist link so
     // later edits stop mirroring (and stop prompting). The playlist itself is left
     // untouched — this only affects the live queue.
-    m_queueSourceKind = QStringLiteral("queue");
-    m_queueSourcePlaylistId = 0;
-    m_queueSourceName.clear();
+    m_queueSnapshotStore->setQueueIdentity(m_queueSnapshotStore->queueId());
     // The "don't ask again" memory was keyed to that playlist; drop it so a future
     // playlist-backed queue starts fresh.
     m_mirrorPromptSuppressedForPlaylist = 0;
@@ -3355,13 +3252,13 @@ PlaylistMirrorChoice MainWindow::promptPlaylistMirror(int trackCount)
     // "Don't ask again" stays in effect only while the same playlist backs the
     // queue, and replays whichever button the user ticked it on — so "Queue only"
     // keeps queueing and "Add to playlist" keeps saving, instead of always saving.
-    if (m_mirrorPromptSuppressedForPlaylist == m_queueSourcePlaylistId) {
+    if (m_mirrorPromptSuppressedForPlaylist == m_queueSnapshotStore->sourcePlaylistId()) {
         return m_rememberedMirrorChoice;
     }
 
-    const QString playlist = m_queueSourceName.isEmpty()
+    const QString playlist = m_queueSnapshotStore->sourceName().isEmpty()
         ? QStringLiteral("the current playlist")
-        : QStringLiteral("“%1”").arg(m_queueSourceName);
+        : QStringLiteral("“%1”").arg(m_queueSnapshotStore->sourceName());
     QMessageBox box(this);
     box.setIcon(QMessageBox::Question);
     box.setWindowTitle(QStringLiteral("Add to playlist queue"));
@@ -3387,7 +3284,7 @@ PlaylistMirrorChoice MainWindow::promptPlaylistMirror(int trackCount)
         ? PlaylistMirrorChoice::QueueOnly
         : PlaylistMirrorChoice::AddToPlaylist;
     if (dontAsk->isChecked()) {
-        m_mirrorPromptSuppressedForPlaylist = m_queueSourcePlaylistId;
+        m_mirrorPromptSuppressedForPlaylist = m_queueSnapshotStore->sourcePlaylistId();
         m_rememberedMirrorChoice = choice;
     }
     return choice;
@@ -3410,9 +3307,9 @@ void MainWindow::enqueueTracksFromMenu(const QVector<Track> &tracks, QueueAddMod
             break;
         }
     }
-    m_suppressPlaylistMirror = suppressMirror;
+    m_queueSnapshotStore->setPlaylistMirrorSuppressed(suppressMirror);
     enqueueTracksFromUi(tracks, mode);
-    m_suppressPlaylistMirror = false;
+    m_queueSnapshotStore->setPlaylistMirrorSuppressed(false);
 }
 
 void MainWindow::adoptQueueSnapshot(const QJsonObject &snapshot, const QVector<Track> &tracks, int playIndex)
@@ -3420,13 +3317,11 @@ void MainWindow::adoptQueueSnapshot(const QJsonObject &snapshot, const QVector<T
     if (tracks.isEmpty()) {
         return;
     }
-    m_queueId = snapshot.value(QStringLiteral("id")).toString();
-    m_queueSourceKind = normalizedQueueSourceKind(snapshot.value(QStringLiteral("sourceKind")).toString(QStringLiteral("queue")));
-    m_queueSourcePlaylistId = snapshot.value(QStringLiteral("sourcePlaylistId")).toString().toLongLong();
-    if (m_queueSourcePlaylistId <= 0) {
-        m_queueSourcePlaylistId = static_cast<qint64>(snapshot.value(QStringLiteral("sourcePlaylistId")).toDouble(0));
-    }
-    m_queueSourceName = snapshot.value(QStringLiteral("sourceName")).toString();
+    qint64 playlistId = snapshot.value(QStringLiteral("sourcePlaylistId")).toString().toLongLong();
+    if (playlistId <= 0) playlistId = static_cast<qint64>(snapshot.value(QStringLiteral("sourcePlaylistId")).toDouble(0));
+    m_queueSnapshotStore->setQueueIdentity(snapshot.value(QStringLiteral("id")).toString(),
+                                          snapshot.value(QStringLiteral("sourceKind")).toString(), playlistId,
+                                          snapshot.value(QStringLiteral("sourceName")).toString());
     ensureCurrentQueueIdentity();
     m_player->resetQueue(tracks);
     m_queueStore->setTracks(m_player->queue());
@@ -3450,10 +3345,7 @@ void MainWindow::replaceQueueWithTracks(const QVector<Track> &tracks, int playIn
     snapshotCurrentQueueAsPrevious();
 
     m_player->resetQueue(tracks);
-    m_queueId = newQueueIdentity();
-    m_queueSourceKind = normalizedQueueSourceKind(sourceKind);
-    m_queueSourcePlaylistId = m_queueSourceKind == QStringLiteral("playlist") ? sourcePlaylistId : 0;
-    m_queueSourceName = sourceName;
+    m_queueSnapshotStore->setQueueIdentity(newQueueIdentity(), sourceKind, sourcePlaylistId, sourceName);
     m_queueStore->setTracks(m_player->queue());
     // resetQueue() does not emit queueChanged, so syncQueueState() won't run here;
     // push the source-dependent UI (playlist-mirror items, merge gating) directly.
@@ -4415,25 +4307,6 @@ int MainWindow::deepReleaseMs() const
                                    0,
                                    kMaxMemoryReleaseSeconds);
     return seconds * 1000;
-}
-
-void MainWindow::loadPlaybackModes()
-{
-    const RepeatMode repeat = repeatModeFromString(m_state->setting(QStringLiteral("playback.repeatMode")));
-    const ShuffleMode shuffle = shuffleModeFromString(m_state->setting(QStringLiteral("playback.shuffleMode")));
-    const int libraryPercent = std::clamp(
-        m_state->setting(QStringLiteral("playback.libraryShufflePercent"), QStringLiteral("20")).toInt(), 0, 100);
-    const int radioPercent = std::clamp(
-        m_state->setting(QStringLiteral("playback.radioShufflePercent"), QStringLiteral("80")).toInt(), 0, 100);
-    // Percents first so restored shuffle modes use their saved chances. The
-    // PlayerCore setters only emit on a change, so push the player bar
-    // explicitly to cover restoring the default (off) modes too.
-    m_player->setLibraryShufflePercent(libraryPercent);
-    m_player->setRadioShufflePercent(radioPercent);
-    m_player->setRepeatMode(repeat);
-    m_player->setShuffleMode(shuffle);
-    m_playerBar->setRepeatMode(repeat);
-    m_playerBar->setShuffleMode(shuffle);
 }
 
 void MainWindow::configureSearchRanking()
@@ -5970,10 +5843,7 @@ void MainWindow::clearQueue()
         return;
     }
 
-    m_queueId.clear();
-    m_queueSourceKind = QStringLiteral("queue");
-    m_queueSourcePlaylistId = 0;
-    m_queueSourceName.clear();
+    m_queueSnapshotStore->setQueueIdentity({});
     m_player->clearAll();
 }
 
@@ -6101,9 +5971,6 @@ void MainWindow::refreshQueueSourceDependentUi()
     // The "(don't save to playlist)" menu items and the playlist-mirror warning
     // only make sense while a playlist backs the queue; tell every view and gate
     // the "merge saved queue" action, which is never wanted in playlist mode.
-    // Called from syncQueueState (queue mutations) and from the queue-*replace*
-    // paths (play playlist/album, restore snapshot, startup restore), which use
-    // resetQueue and so never emit queueChanged themselves.
     const bool playlistSourced = queueIsPlaylistSourced();
     if (m_trackTable != nullptr) m_trackTable->setQueueIsPlaylistSourced(playlistSourced);
     if (m_albumGrid != nullptr) m_albumGrid->setQueueIsPlaylistSourced(playlistSourced);
@@ -6123,7 +5990,7 @@ void MainWindow::refreshPlaylistNowPlaying()
     if (m_playlistView == nullptr) {
         return;
     }
-    const qint64 sourceId = queueIsPlaylistSourced() ? m_queueSourcePlaylistId : 0;
+    const qint64 sourceId = queueIsPlaylistSourced() ? m_queueSnapshotStore->sourcePlaylistId() : 0;
     m_playlistView->setNowPlaying(m_player->currentTrack().path, sourceId);
 }
 
@@ -6131,15 +5998,6 @@ void MainWindow::syncQueueState()
 {
     // PlayerCore already clamped its indices and re-prepared the gapless
     // "next" track; push every derived view of the queue in lock-step.
-    if (m_player->queue().isEmpty()) {
-        m_queueId.clear();
-        m_queueSourceKind = QStringLiteral("queue");
-        m_queueSourcePlaylistId = 0;
-        m_queueSourceName.clear();
-    } else {
-        ensureCurrentQueueIdentity();
-    }
-
     m_queueStore->setSnapshot(m_player->queue(), m_player->queueIndex(),
                               m_player->queueIndex() + 1, m_player->playNextInsertIndex());
     refreshPlayNextRange();
@@ -6152,7 +6010,7 @@ void MainWindow::syncQueueState()
 
 void MainWindow::syncPlaylistBackedQueue(qint64 playlistId)
 {
-    if (!queueIsPlaylistSourced() || playlistId != m_queueSourcePlaylistId || m_playlistDb == nullptr) {
+    if (!queueIsPlaylistSourced() || playlistId != m_queueSnapshotStore->sourcePlaylistId() || m_playlistDb == nullptr) {
         return;
     }
     QVector<Track> tracks;

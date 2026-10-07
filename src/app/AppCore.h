@@ -32,6 +32,7 @@ class PlaybackBackend;
 class PlayerCore;
 class PlaylistDatabase;
 class RadioSession;
+class QueueSnapshotStore;
 class QSystemTrayIcon;
 class QThread;
 class SettingsStore;
@@ -63,6 +64,7 @@ public:
     Database            *database() const;
     PlaylistDatabase    *playlistDatabase() const;
     SettingsStore       *settings() const;
+    QueueSnapshotStore  *queueSession() const;
     ArtworkCache        *artworkCache() const;
     FeatureStore        *features() const;
     ListenHistoryStore  *listenHistory() const;
@@ -212,6 +214,7 @@ private:
     void setupIpcHandler();
     void setupTrayIcon();
     void restoreSavedPlayback();
+    void restorePlaybackModes();
     void updateMprisCapabilities();
     void releaseIdleMemory();
     void restoreInteractiveMemory();
@@ -300,6 +303,8 @@ private:
     IpcServer        *m_ipc = nullptr;
     QSystemTrayIcon  *m_tray = nullptr;
     MainWindow       *m_window = nullptr;
+    QueueSnapshotStore *m_queueSession = nullptr;
+    bool              m_creatingWindow = false;
     bool              m_quitting = false;
     bool              m_resumeDone = false;
     bool              m_trayAlwaysVisible = false;

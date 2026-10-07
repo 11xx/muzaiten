@@ -21,6 +21,11 @@ restored after restart.
 
 ## Queue state
 
+The saved queue is restored once at process startup, before IPC and desktop
+media controls accept commands. Closing the window to the tray keeps the live
+queue, its source, the current index, and shuffle and radio state. Queue saves
+continue while the window is closed, and reopening displays that live session.
+
 The queue survives a restart through two keys in `state.sqlite`. `queue.state`
 holds the tracks and the queue's identity (its id, source kind, source
 playlist, and name) and is rewritten only when one of those changes.

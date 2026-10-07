@@ -2,6 +2,7 @@
 #define private public
 #include "app/AppCore.h"
 #undef private
+#include "app/AppPaths.h"
 #include "core/Artist.h"
 #include "core/MetadataBlob.h"
 #include "db/Database.h"
@@ -37,6 +38,8 @@
 #include "ui/RightSidebar.h"
 #undef private
 
+#include <QEventLoop>
+#include <functional>
 #include <QDataStream>
 #include <algorithm>
 #include <QDateTime>
@@ -152,6 +155,50 @@ QJsonObject storedJsonObject(const SettingsStore &store, const QString &key)
     return QJsonDocument::fromJson(store.setting(key).toUtf8()).object();
 }
 
+QJsonObject ipcRequest(AppCore &core, const QString &command, const QJsonObject &args = {})
+{
+    QLocalSocket socket;
+    QEventLoop loop;
+    QTimer deadline;
+    deadline.setSingleShot(true);
+    deadline.setInterval(1000);
+    QObject::connect(&socket, &QLocalSocket::connected, &loop, [&]() {
+        socket.write(QJsonDocument(QJsonObject{{QStringLiteral("command"), command},
+                                                {QStringLiteral("args"), args}})
+                         .toJson(QJsonDocument::Compact) + '\n');
+    });
+    QObject::connect(&socket, &QLocalSocket::readyRead, &loop, [&]() {
+        if (socket.canReadLine()) loop.quit();
+    });
+    QObject::connect(&socket, &QLocalSocket::errorOccurred, &loop, &QEventLoop::quit);
+    QObject::connect(&deadline, &QTimer::timeout, &loop, &QEventLoop::quit);
+    socket.connectToServer(core.ipc()->serverPath());
+    deadline.start();
+    loop.exec();
+    return QJsonDocument::fromJson(socket.readLine()).object();
+}
+
+class WindowConstructionProbe final : public QObject {
+public:
+    std::function<void()> onConstruction;
+    QSet<MainWindow *> windows;
+    bool fired = false;
+protected:
+    bool eventFilter(QObject *object, QEvent *event) override
+    {
+        if (event->type() == QEvent::ChildAdded) {
+            if (auto *window = qobject_cast<MainWindow *>(object)) {
+                windows.insert(window);
+                if (!fired) {
+                    fired = true;
+                    onConstruction();
+                }
+            }
+        }
+        return false;
+    }
+};
+
 } // namespace
 
 class MainWindowNavigationTest final : public QObject {
@@ -181,6 +228,173 @@ private slots:
                                           Q_ARG(QVector<Search::ScoredResult>, results),
                                           Q_ARG(int, 0), Q_ARG(int, 2)));
         QVERIFY(hidden->isHidden());
+    }
+
+    void startupEnqueueDuringWindowConstruction_data()
+    {
+        QTest::addColumn<bool>("savedQueue");
+        QTest::newRow("empty") << false;
+        QTest::newRow("saved") << true;
+    }
+
+    void startupEnqueueDuringWindowConstruction()
+    {
+        QFETCH(bool, savedQueue);
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        QJsonArray paths;
+        for (const char *name : {"a.wav", "b.wav", "c.wav"}) {
+            const QString path = audioRoot.filePath(QString::fromLatin1(name));
+            QVERIFY(writeSilentWav(path, 20));
+            paths.append(path);
+        }
+        const QVector<Track> saved = savedQueue ? syntheticQueueTracks(2) : QVector<Track>{};
+        {
+            AppCore fixture;
+            fixture.player()->resetQueue(saved);
+            fixture.queueSession()->saveQueueState();
+        }
+        AppCore core;
+        QSignalSpy resets(core.player(), &PlayerCore::queueReset);
+        QJsonObject enqueueReply;
+        QJsonObject raiseReply;
+        WindowConstructionProbe probe;
+        probe.onConstruction = [&]() {
+            QVERIFY(core.window() == nullptr);
+            enqueueReply = ipcRequest(core, QStringLiteral("enqueue"),
+                {{QStringLiteral("paths"), paths}, {QStringLiteral("play"), true}});
+            emit core.mpris()->raiseRequested();
+            raiseReply = ipcRequest(core, QStringLiteral("raise"));
+            // Deliver the queued IPC Raise while the outer constructor owns creation.
+            QCoreApplication::sendPostedEvents(&core, QEvent::MetaCall);
+        };
+        qApp->installEventFilter(&probe);
+        const auto removeProbe = qScopeGuard([&]() { qApp->removeEventFilter(&probe); });
+        core.showWindow();
+        QVERIFY(probe.fired);
+        QVERIFY(enqueueReply.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(enqueueReply.value(QStringLiteral("enqueued")).toInt(), 3);
+        QVERIFY(raiseReply.value(QStringLiteral("ok")).toBool());
+        QStringList expected = trackPaths(saved);
+        for (const QJsonValue &path : paths) expected.append(path.toString());
+        QCOMPARE(trackPaths(core.player()->queue()), expected);
+        QCOMPARE(core.player()->currentTrack().path, paths.first().toString());
+        QCOMPARE(core.player()->queueIndex(), saved.size());
+        QCOMPARE(resets.count(), 0);
+        QCOMPARE(probe.windows.size(), 1);
+        QCOMPARE(core.window()->m_queueStore->tracks().size(), expected.size());
+        core.player()->stop();
+    }
+
+    void restoredQueueIsReadyForIpcAndMprisWithoutAWindow()
+    {
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        QVector<Track> tracks = syntheticQueueTracks(2);
+        for (int i = 0; i < tracks.size(); ++i) {
+            tracks[i].path = audioRoot.filePath(QStringLiteral("%1.wav").arg(i));
+            tracks[i].codec = QStringLiteral("wav");
+            QVERIFY(writeSilentWav(tracks[i].path, 20));
+        }
+        {
+            AppCore fixture;
+            fixture.player()->resetQueue(tracks, 0, 2);
+            fixture.player()->setRepeatMode(RepeatMode::All);
+            fixture.queueSession()->saveQueueState();
+            QVERIFY(fixture.settings()->setSetting(QStringLiteral("playback.state"),
+                QString::fromUtf8(QJsonDocument(QJsonObject{{QStringLiteral("queueIndex"), 0},
+                    {QStringLiteral("trackPath"), tracks.first().path},
+                    {QStringLiteral("positionMs"), QStringLiteral("0")},
+                    {QStringLiteral("state"), QStringLiteral("paused")}}).toJson(QJsonDocument::Compact))));
+        }
+        AppCore core;
+        QVERIFY(core.window() == nullptr);
+        QVERIFY(core.backend()->hasSource());
+        QCOMPARE(trackPaths(core.player()->queue()), trackPaths(tracks));
+        QCOMPARE(core.player()->currentTrack().path, tracks.first().path);
+        QVERIFY(core.mpris()->canPlay());
+        QVERIFY(core.mpris()->canGoNext());
+        QCOMPARE(core.mpris()->loopStatus(), QStringLiteral("Playlist"));
+        const QJsonObject reply = ipcRequest(core, QStringLiteral("queue"));
+        QVERIFY(reply.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(reply.value(QStringLiteral("tracks")).toArray().size(), 2);
+        QCOMPARE(reply.value(QStringLiteral("index")).toInt(-1), 0);
+        emit core.mpris()->playRequested();
+        QCOMPARE(core.player()->currentTrack().path, tracks.first().path);
+        emit core.mpris()->nextRequested();
+        QCOMPARE(core.player()->currentTrack().path, tracks.last().path);
+        QVERIFY(core.window() == nullptr);
+        core.player()->stop();
+    }
+
+    void headlessQueueChangesPersistAndSurviveReopen()
+    {
+        QTemporaryDir audioRoot;
+        QVERIFY(audioRoot.isValid());
+        QVector<Track> tracks = syntheticQueueTracks(3);
+        for (int i = 0; i < tracks.size(); ++i) {
+            tracks[i].path = audioRoot.filePath(QStringLiteral("%1.wav").arg(i));
+            tracks[i].codec = QStringLiteral("wav");
+            QVERIFY(writeSilentWav(tracks[i].path, 20));
+        }
+        QString identity;
+        {
+            AppCore core;
+            core.player()->resetQueue(tracks.mid(0, 2), 0);
+            core.queueSession()->setQueueIdentity(QStringLiteral("queue:playlist"), QStringLiteral("playlist"),
+                                                  core.playlistDatabase()->createPlaylist(QStringLiteral("Source")),
+                                                  QStringLiteral("Source"));
+            identity = core.queueSession()->queueId();
+            core.showWindow();
+            QVERIFY(core.window()->queueIsPlaylistSourced());
+            core.releaseWindow();
+            QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+            QVERIFY(core.window() == nullptr);
+            QCOMPARE(ipcRequest(core, QStringLiteral("enqueue"),
+                {{QStringLiteral("paths"), QJsonArray{tracks.last().path}}, {QStringLiteral("next"), true}})
+                         .value(QStringLiteral("enqueued")).toInt(), 1);
+            QCOMPARE(core.playlistDatabase()->items(core.queueSession()->sourcePlaylistId()).size(), 1);
+            core.player()->next();
+            core.player()->setShuffleMode(ShuffleMode::Queue);
+            core.player()->updateTrackRating(tracks.last().path, 80, true);
+            auto *saveTimer = core.queueSession()->findChild<QTimer *>();
+            QVERIFY(saveTimer != nullptr && saveTimer->isActive());
+            // Trigger the owned debounce deterministically after window deletion.
+            QVERIFY(QMetaObject::invokeMethod(saveTimer, "timeout", Qt::DirectConnection));
+            QVERIFY(!saveTimer->isActive());
+            const QJsonObject structure = storedJsonObject(*core.settings(), QStringLiteral("queue.state"));
+            QCOMPARE(structure.value(QStringLiteral("queueId")).toString(), identity);
+            QCOMPARE(structure.value(QStringLiteral("queueSourceKind")).toString(), QStringLiteral("playlist"));
+            QCOMPARE(structure.value(QStringLiteral("tracks")).toArray().size(), 3);
+            QCOMPARE(structure.value(QStringLiteral("tracks")).toArray().at(1).toObject()
+                         .value(QStringLiteral("effectiveRating0To100")).toInt(), 80);
+            const QStringList expected = trackPaths(core.player()->queue());
+            const int index = core.player()->queueIndex();
+            const int boundary = core.player()->playNextInsertIndex();
+            QSignalSpy resets(core.player(), &PlayerCore::queueReset);
+            core.showWindow();
+            QCOMPARE(trackPaths(core.player()->queue()), expected);
+            QCOMPARE(core.player()->queueIndex(), index);
+            QCOMPARE(core.player()->playNextInsertIndex(), boundary);
+            QCOMPARE(core.player()->shuffleMode(), ShuffleMode::Queue);
+            QCOMPARE(core.queueSession()->queueId(), identity);
+            QVERIFY(core.window()->queueIsPlaylistSourced());
+            QCOMPARE(core.window()->m_playerBar->m_shuffleMode, ShuffleMode::Queue);
+            QCOMPARE(core.window()->m_queueStore->currentIndex(), index);
+            QCOMPARE(resets.count(), 0);
+            core.releaseWindow();
+            QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+            core.player()->appendTracks({tracks.first()});
+            // Destruction must flush a pending headless save as well.
+            core.player()->stop();
+        }
+        AppCore restored;
+        QVERIFY(restored.window() == nullptr);
+        QCOMPARE(restored.player()->queue().size(), 4);
+        QCOMPARE(restored.queueSession()->queueId(), identity);
+        QCOMPARE(restored.player()->shuffleMode(), ShuffleMode::Queue);
+        QCOMPARE(restored.player()->queueIndex(), 1);
+        QCOMPARE(restored.player()->playNextInsertIndex(), 2);
     }
 
     void normalSearchReopenRefreshesRetaggedRows()
@@ -260,7 +474,9 @@ private slots:
     void init()
     {
         QVERIFY(m_stateRoot.isValid());
-        const QString testStateRoot = m_stateRoot.filePath(QString::fromLatin1(QTest::currentTestFunction()));
+        QString testName = QString::fromLatin1(QTest::currentTestFunction());
+        if (qstrlen(QTest::currentDataTag()) > 0) testName += QLatin1Char('/') + QString::fromLatin1(QTest::currentDataTag());
+        const QString testStateRoot = m_stateRoot.filePath(testName);
         QVERIFY(QDir().mkpath(testStateRoot));
         qputenv("MUZAITEN_STATE_ROOT", testStateRoot.toUtf8());
         qputenv("MUZAITEN_DEMO_SILENT_AUDIO", "1");
@@ -568,6 +784,7 @@ private slots:
     void radioUiStateSurvivesWindowRebuild()
     {
         AppCore core;
+        core.player()->resetQueue(syntheticQueueTracks(3), 1, 3);
         core.setRadioLoading(true);
         core.showWindow();
         QVERIFY(core.window() != nullptr);
@@ -580,10 +797,20 @@ private slots:
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QCoreApplication::processEvents();
         QVERIFY(core.window() == nullptr);
+        core.player()->injectTracks(syntheticQueueTracks(4).mid(3));
+        core.player()->setShuffleMode(ShuffleMode::Queue);
+        const QStringList liveQueue = trackPaths(core.player()->queue());
+        const QString identity = core.queueSession()->queueId();
 
         core.showWindow();
         QVERIFY(core.window() != nullptr);
         QVERIFY(core.window()->m_playerBar->m_radioActive);
+        QCOMPARE(trackPaths(core.player()->queue()), liveQueue);
+        QCOMPARE(core.player()->queueIndex(), 1);
+        QCOMPARE(core.player()->playNextInsertIndex(), 3);
+        QCOMPARE(core.player()->shuffleMode(), ShuffleMode::Queue);
+        QCOMPARE(core.queueSession()->queueId(), identity);
+        QCOMPARE(core.window()->m_queueStore->tracks().size(), 4);
         QVERIFY(core.window()->m_playerBar->m_radio->isChecked());
         QVERIFY(core.window()->m_playerBar->m_radio->isVisible());
         QVERIFY(core.window()->m_playerBar->m_stopRadioAction->isEnabled());
@@ -742,13 +969,15 @@ private slots:
         Track current;
         current.path = QStringLiteral("/failed-radio-start.flac");
         window.m_player->resetQueue({current}, 0);
+        const QString queueId = window.m_queueSnapshotStore->queueId();
+        QVERIFY(!queueId.isEmpty());
 
         window.startMix(QStringLiteral("rediscovery"));
         window.startArtistRadio(QStringLiteral("Missing Artist"));
 
         QCOMPARE(window.m_player->queue().size(), 1);
         QCOMPARE(window.m_player->queue().first().path, current.path);
-        QVERIFY(window.m_queueId.isEmpty());
+        QCOMPARE(window.m_queueSnapshotStore->queueId(), queueId);
         QCOMPARE(window.loadQueueSnapshotsRoot().value(QStringLiteral("radioBacklog")).toArray().size(), 0);
         QVERIFY(!core.player()->radioActive());
     }
@@ -1641,7 +1870,7 @@ private slots:
         const QVector<Track> tracks = syntheticQueueTracks(3);
         window.m_player->resetQueue(tracks, 0);
         window.saveQueueState();
-        const QString queueId = window.m_queueId;
+        const QString queueId = window.m_queueSnapshotStore->queueId();
         const QString sentinel = QStringLiteral("{\"sentinel\":true}");
 
         QVERIFY(window.m_state->setSetting(QStringLiteral("queue.state"), sentinel));
@@ -1679,42 +1908,48 @@ private slots:
             MainWindow window(&core);
             window.m_player->resetQueue(tracks, 1, 3);
             window.saveQueueState();
-            queueId = window.m_queueId;
+            queueId = window.m_queueSnapshotStore->queueId();
             QVERIFY(!queueId.isEmpty());
         }
         {
             AppCore core;
             MainWindow window(&core);
             QCOMPARE(trackPaths(window.m_player->queue()), trackPaths(tracks));
-            QCOMPARE(window.m_queueId, queueId);
+            QCOMPARE(window.m_queueSnapshotStore->queueId(), queueId);
             QCOMPARE(window.m_player->queueIndex(), 1);
             QCOMPARE(window.m_player->playNextInsertIndex(), 3);
         }
         {
             // A cursor that belongs to another queue is ignored; the cursor
             // fields inside queue.state (as older documents carry them) win.
+            {
+                SettingsStore state(QDir(AppPaths::stateDir()).filePath(QStringLiteral("state.sqlite")));
+                QJsonObject structure = storedJsonObject(state, QStringLiteral("queue.state"));
+                structure.insert(QStringLiteral("index"), 2);
+                structure.insert(QStringLiteral("playNextInsertIndex"), 4);
+                QVERIFY(state.setSetting(QStringLiteral("queue.state"),
+                                                    QString::fromUtf8(QJsonDocument(structure).toJson(QJsonDocument::Compact))));
+                const QJsonObject foreignCursor{{QStringLiteral("queueId"), QStringLiteral("queue:other")},
+                                                {QStringLiteral("index"), 0},
+                                                {QStringLiteral("playNextInsertIndex"), 1}};
+                QVERIFY(state.setSetting(QStringLiteral("queue.cursor"),
+                                                    QString::fromUtf8(QJsonDocument(foreignCursor).toJson(QJsonDocument::Compact))));
+            }
             AppCore core;
-            QJsonObject structure = storedJsonObject(*core.settings(), QStringLiteral("queue.state"));
-            structure.insert(QStringLiteral("index"), 2);
-            structure.insert(QStringLiteral("playNextInsertIndex"), 4);
-            QVERIFY(core.settings()->setSetting(QStringLiteral("queue.state"),
-                                                QString::fromUtf8(QJsonDocument(structure).toJson(QJsonDocument::Compact))));
-            const QJsonObject foreignCursor{{QStringLiteral("queueId"), QStringLiteral("queue:other")},
-                                            {QStringLiteral("index"), 0},
-                                            {QStringLiteral("playNextInsertIndex"), 1}};
-            QVERIFY(core.settings()->setSetting(QStringLiteral("queue.cursor"),
-                                                QString::fromUtf8(QJsonDocument(foreignCursor).toJson(QJsonDocument::Compact))));
             MainWindow window(&core);
             QCOMPARE(window.m_player->queueIndex(), 2);
             QCOMPARE(window.m_player->playNextInsertIndex(), 4);
         }
         {
+            {
+                SettingsStore state(QDir(AppPaths::stateDir()).filePath(QStringLiteral("state.sqlite")));
+                const QJsonObject staleCursor{{QStringLiteral("queueId"), queueId},
+                                              {QStringLiteral("index"), 40},
+                                              {QStringLiteral("playNextInsertIndex"), 41}};
+                QVERIFY(state.setSetting(QStringLiteral("queue.cursor"),
+                                                    QString::fromUtf8(QJsonDocument(staleCursor).toJson(QJsonDocument::Compact))));
+            }
             AppCore core;
-            const QJsonObject staleCursor{{QStringLiteral("queueId"), queueId},
-                                          {QStringLiteral("index"), 40},
-                                          {QStringLiteral("playNextInsertIndex"), 41}};
-            QVERIFY(core.settings()->setSetting(QStringLiteral("queue.cursor"),
-                                                QString::fromUtf8(QJsonDocument(staleCursor).toJson(QJsonDocument::Compact))));
             MainWindow window(&core);
             QCOMPARE(window.m_player->queueIndex(), 3);
             QCOMPARE(window.m_player->playNextInsertIndex(), 4);
@@ -1755,22 +1990,18 @@ private slots:
             return track;
         };
 
-        AppCore core;
         const Track current = makeLibraryTrack(QStringLiteral("current.wav"), QStringLiteral("Current"));
         const Track target = makeLibraryTrack(QStringLiteral("target.wav"), QStringLiteral("Target"));
-        QVERIFY2(core.database()->upsertTrack(current), qPrintable(core.database()->lastError()));
-        QVERIFY2(core.database()->upsertTrack(target), qPrintable(core.database()->lastError()));
-
-        core.settings()->setSetting(QStringLiteral("playback.shuffleMode"), QStringLiteral("radio"));
-        core.settings()->setSetting(QStringLiteral("playback.radioShufflePercent"), QStringLiteral("100"));
-        QJsonObject queueState;
-        queueState.insert(QStringLiteral("tracks"), QJsonArray{QJsonObject{{QStringLiteral("path"), current.path}}});
-        queueState.insert(QStringLiteral("index"), 0);
-        queueState.insert(QStringLiteral("playNextInsertIndex"), 1);
-        core.settings()->setSetting(
-            QStringLiteral("queue.state"),
-            QString::fromUtf8(QJsonDocument(queueState).toJson(QJsonDocument::Compact)));
-
+        {
+            AppCore fixture;
+            QVERIFY2(fixture.database()->upsertTrack(current), qPrintable(fixture.database()->lastError()));
+            QVERIFY2(fixture.database()->upsertTrack(target), qPrintable(fixture.database()->lastError()));
+            fixture.player()->resetQueue({current}, 0, 1);
+            fixture.queueSession()->saveQueueState();
+            fixture.player()->setRadioShufflePercent(100);
+            fixture.player()->setShuffleMode(ShuffleMode::Radio);
+        }
+        AppCore core;
         MainWindow window(&core);
         QCOMPARE(core.player()->currentTrack().path, current.path);
 

@@ -11,6 +11,15 @@
 - Typing a General Standard simplified form such as 𬣙 or 𫐄 finds text
   written with its traditional form (訏, 軏), and the reverse.
 
+### Fixed
+
+- Startup IPC commands retain their acknowledged queue changes, including
+  enqueue-and-play requests received while the window opens. Queue state is
+  restored before IPC and desktop media controls accept commands. Closing to
+  the tray keeps queue saves active, and reopening preserves the live queue,
+  its source, cursor, shuffle and radio state. Raises during window creation
+  share the same window.
+
 ### Developer tooling
 
 - Han word tables accept any spelling and merge readings under simplified keys;

@@ -14,7 +14,8 @@ class MprisService final : public QObject {
     Q_OBJECT
 
 public:
-    explicit MprisService(QObject *parent = nullptr);
+    explicit MprisService(QObject *parent = nullptr, bool registerImmediately = true);
+    void registerService();
 
     // Optional: lets the service enrich the current track with the full scanned
     // record (audio props, MusicBrainz, sort/reading names, blob tags) for the
