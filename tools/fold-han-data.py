@@ -4,7 +4,10 @@
 `generate` writes the per-character pinyin and simplified mappings in
 `src/search/fold/unihan/`. Ideographs listed in authored Han tables are
 excluded from both generated files. The pinned Unihan archive is checked
-before its fields are used.
+before its fields are used. Its reference version is independent of Python's
+`unicodedata.unidata_version`. Generated keys must lie in `IDEOGRAPH_BLOCKS`
+and have category `Lo` in the running Python's Unicode database. Reproducing
+output requires the same reference, authored tables, and runtime categories.
 
 `check` validates authored rows against Unihan 16.0.0, CNS 11643, and OpenCC.
 A reading is attested when either reading reference gives it for the character
@@ -95,6 +98,7 @@ PARTICLE_READINGS = {"着": "zhe", "著": "zhe", "了": "le", "的": "de", "地"
 
 
 def unihan_archive(path: pathlib.Path | None) -> pathlib.Path:
+    """Validate the pinned reference hash independently of Python's Unicode version."""
     if path is None:
         path = TOOLS_CACHE / f"Unihan-{UNIHAN_VERSION}.zip"
         if not path.exists():
@@ -103,11 +107,6 @@ def unihan_archive(path: pathlib.Path | None) -> pathlib.Path:
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     if digest != UNIHAN_SHA256:
         sys.exit(f"{path}: sha256 {digest}, expected Unihan {UNIHAN_VERSION}'s {UNIHAN_SHA256}")
-    if unicodedata.unidata_version != UNIHAN_VERSION:
-        sys.exit(
-            f"Python Unicode data is {unicodedata.unidata_version}; "
-            f"Unihan {UNIHAN_VERSION} is required"
-        )
     return path
 
 
@@ -332,6 +331,7 @@ def authored_ideographs(directory: pathlib.Path) -> set[str]:
 
 
 def generate(unihan_path: pathlib.Path | None, authored_dir: pathlib.Path, out_dir: pathlib.Path) -> None:
+    """Generate pinned-reference mappings for runtime-recognized ideograph keys."""
     archive = unihan_archive(unihan_path)
     fields = unihan_fields(
         archive, "kMandarin", "kHanyuPinyin", "kSimplifiedVariant",
