@@ -75,6 +75,12 @@ syllable-only agreement cannot attest a tone.
 | `agreed` | No prediction matches; both lineages attest the exact reading | `cns,unihan` | `-` |
 | `single` | No prediction matches; one lineage attests the exact reading | That lineage | `-` |
 
+Reference readings are NFC tone-marked pinyin. CNS writes a third tone after a
+vowel with the spacing caron (U+02C7); it reads as the combining caron when the
+result is a tone-marked syllable. Any other reference spelling that is not
+tone-marked pinyin attests nothing and is a blocking `provenance` finding naming
+the character, the spelling and its source, such as `unparseable cns reading`.
+
 Syllable matching removes the four tone marks and preserves ü versus u and ê
 versus e. An exact prediction has priority over a syllable-only match when
 choosing its batch; within a match class, the first lexical batch is used.
@@ -99,7 +105,11 @@ Different prediction passes produce a blocking disagreement finding; they
 never count as independent attestation.
 
 Direct families join through `kSimplifiedVariant`, `kTraditionalVariant`,
-`kZVariant` and OpenCC `TSCharacters`, including self-containing pairs. The
+`kZVariant` and OpenCC `TSCharacters`, including self-containing pairs.
+Relation endpoints are NFC-normalized, which maps compatibility ideographs to
+their unified counterparts; a relation naming any other character outside the
+checker's ideograph blocks joins nothing. Tier membership lies within the same
+blocks. The
 target is an unambiguous BMP simplified candidate, otherwise an unambiguous
 `kTGH` member, otherwise an unambiguous BMP member. Preceding tiers establish
 authored/typed membership; the current tier and later tiers cannot change that
@@ -167,6 +177,8 @@ marked tables; the other authored-data findings still require resolution.
 Run the combined offline suite with
 `python3 tests/test_fold_han_data.py .`. It includes the records/assembly tests
 and requires no model access or reference downloads.
+`python3 tests/test_fold_han_rare.py` also assembles every tier from the cached
+pinned references, read-only, and skips that check when they are not cached.
 
 ## Dispatch API proposal
 

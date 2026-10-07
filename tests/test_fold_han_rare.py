@@ -280,6 +280,37 @@ class FoldHanRareTests(unittest.TestCase):
             self.reviewed.write_text(row)
             self.assertEqual(rare.main(argv), 0)
 
+    def test_compatibility_endpoints_canonicalize_and_others_leave_the_graph(self):
+        refs = self.refs_for({"kMandarin": {"𠀀": "huī", "灰": "huī", "\U0002F835": "huī"},
+                              "kSemanticVariant": {"𠀀": "U+2F835 U+FA11", "\uFA11": "U+5D0E", "\U0002F835": "U+7070"},
+                              "kZVariant": {"\uFA17": "U+76CA"}})
+        mappings, issues = rare.family_mappings(refs, {"灰", "崎"})
+        self.assertEqual(mappings["𠀀"], ("灰", "unihan:kSemanticVariant"))
+        self.assertFalse(issues)
+        self.assertFalse({"\uFA11", "\uFA17", "\U0002F835"} & set(mappings))
+        self.assertNotIn("\U0002F835", data.tiers(refs.fields, {})["extc"])
+
+    def test_cns_spacing_caron_after_a_vowel_is_the_third_tone(self):
+        self.assertEqual(data.cns_pinyin("e\u0302\u02c7"), "ê\u030c")
+        for spelling in ("mao\u02c7", "\u02c7", "mǎ"):
+            self.assertEqual(data.cns_pinyin(spelling), spelling)
+        properties, mappings = self.root / "caron-properties.zip", self.root / "caron-mappings.zip"
+        zip_fixture(properties, {"CNS_pinyin_2.txt": "ㄝˇ\tê\u02c7\nㄇㄠˇ\tmao\u02c7\n",
+                                 "CNS_phonetic.txt": "1-1111\tㄝˇ\n1-1112\tㄇㄠˇ\n"})
+        zip_fixture(mappings, {"Unicode/CNS2UNICODE_Unicode 2.txt": "1-1111\t20000\n1-1112\t20001\n"})
+        cns = data.cns_readings((properties, mappings))
+        self.assertEqual(cns, {"𠀀": {"ê\u030c"}, "𠀁": {"mao\u02c7"}})
+        records, issues = rare.ordered_readings("𠀀", self.refs_for({}, cns), rare.Predictions({}, []))
+        self.assertEqual(([r.value for r in records], issues), (["ê\u030c"], []))
+
+    def test_unparseable_reference_spellings_are_findings(self):
+        refs = self.refs_for({"kMandarin": {"𠀀": "x5 mā"}}, {"𠀀": {"mao\u02c7", "mā"}})
+        rows, records, _, findings = rare.assemble(["𠀀"], refs, rare.Predictions({}, []), set())
+        self.assertEqual(rows, [("𠀀", "mā", "")])
+        self.assertEqual([(r.value, r.attested_by) for r in records], [("mā", "cns,unihan")])
+        self.assertEqual(findings, [("𠀀", "provenance", "mao\u02c7", "unparseable cns reading"),
+                                    ("𠀀", "provenance", "x5", "unparseable kMandarin reading")])
+
     def test_decomposition_pointer_and_hash_exclude_input_text(self):
         path = self.root / "tgh-fixture-1.tsv"
         text = path.read_text(encoding="utf-8")
@@ -461,6 +492,39 @@ class FoldHanRareTests(unittest.TestCase):
         result, output = run()
         self.assertEqual(result, 1)
         self.assertIn("\tprovenance\t", output)
+
+
+def pinned_references():
+    """Return the cached pinned references without downloading, or None when one is absent or differs."""
+    paths = data.reference_cache()
+    pins = rare.shipped_pins()
+    if not all(path.is_file() and rare.digest(path) == pins[name]["sha256"] for name, path in paths.items()):
+        return None
+    return rare.References(data.unihan_fields(paths["unihan"], *rare.FIELDS),
+                           data.cns_readings((paths["cns-properties"], paths["cns-mappings"])),
+                           data.opencc_characters(paths["opencc"]), pins)
+
+
+class PinnedReferenceSmokeTests(unittest.TestCase):
+    """Assemble every tier read-only from the cached pinned references."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.refs = pinned_references()
+        if cls.refs is None:
+            raise unittest.SkipTest("pinned references are not cached")
+        cls.tiers = data.tiers(cls.refs.fields, cls.refs.cns)
+
+    def test_every_tier_assembles(self):
+        for name in (path.removesuffix(".tsv") for path in data.RARE_FILES):
+            with self.subTest(tier=name):
+                members = self.tiers[name]
+                self.assertTrue(all(data.in_ideograph_blocks(ch) for ch in members))
+                authored = rare.authored_before(data.DEFAULT_AUTHORED_DIR, name)
+                rows, _, _, findings = rare.assemble(members, self.refs, rare.Predictions({}, []), authored)
+                self.assertEqual([row[0] for row in rows], members)
+                self.assertLessEqual({f[1] for f in findings}, {"provenance", "variant-guard", "family-target"})
+                self.assertFalse([f for f in findings if f[3].startswith("unparseable")])
 
 
 if __name__ == "__main__":
