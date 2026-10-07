@@ -18,13 +18,14 @@
 
 - Opt-in local aggregate taste-profile export/import in `Radio > Taste profiles…`
   and `muzaitenctl radio-taste`, with exact previews, five-track support floors,
-  strict versioned JSON, explicit replacement and atomic writes. Exports cover
-  playable tracks in library-enabled source directories and leave out tracks
-  marked "Don't learn from this". Imported profiles become named radio seeds
-  with a bounded genre/feature score bias and named pick reasons; stopping radio
-  deactivates a seed. Exchange files round shares and quartiles to hundredths or
-  whole BPM and omit identifiers, raw counts and listening-history data. No
-  automatic export or external sharing is provided.
+  strict versioned JSON, explicit replacement and atomic writes (exclusive
+  creation on drives without hard links). Exports cover playable tracks in
+  library-enabled source directories and leave out tracks marked "Don't learn
+  from this". Imported profiles become named radio seeds with a bounded
+  genre/feature score bias and named pick reasons; stopping radio deactivates a
+  seed. Exchange files round shares and quartiles to hundredths or whole BPM and
+  omit identifiers, raw counts and listening-history data. No automatic export
+  or external sharing is provided.
 
 - Local scalar feature-pack export/import through `muzaiten-features pack`,
   with strict versioned NDJSON, dry-run counts and atomic writes. Each record

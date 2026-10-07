@@ -17,7 +17,9 @@
 #include <QTemporaryFile>
 
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
+#include <system_error>
 #include <unistd.h>
 
 namespace {
@@ -170,6 +172,44 @@ bool readBytes(const QString &path, qsizetype maximum, QByteArray *bytes, QStrin
         ? true : reject(error, QStringLiteral("Could not read bounded taste profile file."));
 }
 
+bool rejectExisting(QString *error)
+{
+    return reject(error, QStringLiteral("Taste profile file already exists. Explicit replace is required."));
+}
+
+// The errors link(2) reports on filesystems without hard links: vfat and
+// exFAT, and many FUSE and SMB mounts.
+bool lacksHardLinks(int code)
+{
+    switch (code) {
+    case EPERM:
+    case EOPNOTSUPP:
+    case EXDEV:
+        return true;
+    default:
+        return code == ENOTSUP;
+    }
+}
+
+// Creating the destination exclusively still never replaces a file; a failed
+// write removes the partial file this call created.
+bool createExclusive(const QString &path, const QByteArray &bytes, QString *error)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::NewOnly, QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
+        const QFileInfo target(path);
+        return target.exists() || target.isSymLink()
+            ? rejectExisting(error)
+            : reject(error, QStringLiteral("Could not write taste profile: %1.").arg(file.errorString()));
+    }
+    if (file.write(bytes) != bytes.size() || !file.flush() || ::fsync(file.handle()) != 0) {
+        const QString reason = file.errorString();
+        file.remove();
+        return reject(error, QStringLiteral("Could not write taste profile: %1.").arg(reason));
+    }
+    return true;
+}
+
 bool atomicWrite(const QString &path, const QByteArray &bytes, bool replace, QString *error)
 {
     if (!replace) {
@@ -180,10 +220,18 @@ bool atomicWrite(const QString &path, const QByteArray &bytes, bool replace, QSt
         }
         // Linking the completed sibling file publishes atomically without
         // replacing a destination that appeared after the preview.
-        if (::link(QFile::encodeName(temporary.fileName()).constData(), QFile::encodeName(path).constData()) != 0) {
-            return reject(error, QStringLiteral("Could not write taste profile. Existing files require explicit replace."));
+        if (::link(QFile::encodeName(temporary.fileName()).constData(), QFile::encodeName(path).constData()) == 0) {
+            return true;
         }
-        return true;
+        const int code = errno;
+        if (code == EEXIST) {
+            return rejectExisting(error);
+        }
+        if (lacksHardLinks(code)) {
+            return createExclusive(path, bytes, error);
+        }
+        return reject(error, QStringLiteral("Could not write taste profile: %1.")
+                                 .arg(QString::fromStdString(std::system_category().message(code))));
     }
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)
