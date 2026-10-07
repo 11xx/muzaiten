@@ -168,8 +168,11 @@ exact payload keys and report counts.
 
 Export excludes buckets backed by fewer than five distinct songs and feature
 distributions backed by fewer than five distinct samples. Duplicated song
-identities and content groups count once. Raw counts and discarded bucket labels are absent. The file/preview
-contain no artist, album, track, MusicBrainz ID, path, timestamp, skip, rating,
+identities and content groups count once. Raw counts and discarded bucket
+labels are absent. Shares and energy quartiles are rounded to hundredths (each
+share set sums to exactly 1.00) and tempo quartiles to whole BPM, so the file
+pins down neither exact bucket counts nor individual tracks' extractor values.
+The file/preview contain no artist, album, track, MusicBrainz ID, path, timestamp, skip, rating,
 listening-history row, content hash or per-record identifier. The user-chosen
 seed name stays local and is not an exchange field.
 

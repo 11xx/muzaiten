@@ -17,6 +17,7 @@
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QTemporaryDir>
@@ -77,6 +78,40 @@ QVector<TrackScorer::Candidate> poolFor(Database &db, const QString &featuresPat
     return RadioFilters::excludeFlaggedCandidates(pool, db.flaggedPaths(Database::TrackFlag::NeverRadio));
 }
 
+bool atQuantum(double value, double quantum)
+{
+    return std::abs(value / quantum - std::round(value / quantum)) < 1e-9;
+}
+
+// Empty when every exported number carries at most its quantum's precision:
+// shares and energy in hundredths (shares summing to exactly 1.00), tempo in
+// whole BPM, and no longer decimal spelled anywhere in the file.
+QString quantizationViolation(const TasteProfile &profile, const QByteArray &bytes)
+{
+    for (const auto *shares : {&profile.genres, &profile.decades}) {
+        qint64 hundredths = 0;
+        for (const double share : *shares) {
+            if (!atQuantum(share, 0.01)) {
+                return QStringLiteral("share %1").arg(share, 0, 'g', 17);
+            }
+            hundredths += std::llround(share * 100.0);
+        }
+        if (!shares->isEmpty() && hundredths != 100) {
+            return QStringLiteral("shares sum to %1 hundredths").arg(hundredths);
+        }
+    }
+    for (auto it = profile.features.begin(); it != profile.features.end(); ++it) {
+        const double quantum = it.key() == QLatin1String("tempo_bpm") ? 1.0 : 0.01;
+        for (const double value : {it->q25, it->q50, it->q75}) {
+            if (!atQuantum(value, quantum)) {
+                return QStringLiteral("%1 quartile %2").arg(it.key()).arg(value, 0, 'g', 17);
+            }
+        }
+    }
+    const auto precise = QRegularExpression(QStringLiteral("\\d\\.\\d{3,}|[eE][-+]?\\d")).match(QString::fromUtf8(bytes));
+    return precise.hasMatch() ? QStringLiteral("spelled %1").arg(precise.captured()) : QString{};
+}
+
 } // namespace
 
 class TasteProfileTest final : public QObject {
@@ -84,6 +119,7 @@ class TasteProfileTest final : public QObject {
 private slots:
     void initTestCase();
     void supportAndScoreBounds();
+    void quantizedAggregates();
     void strictParsing();
     void twoInstallations();
     void constraintsAndSessionSnapshots();
@@ -254,6 +290,61 @@ void TasteProfileTest::supportAndScoreBounds()
     QVERIFY(!TasteProfiles::aggregate(duplicates, true, true, &profile, &error));
 }
 
+void TasteProfileTest::quantizedAggregates()
+{
+    const auto tracksWith = [](const QList<QPair<QString, int>> &genres) {
+        QVector<TrackScorer::Candidate> tracks;
+        for (const auto &[genre, count] : genres) {
+            for (int i = 0; i < count; ++i) {
+                TrackScorer::Candidate candidate;
+                candidate.path = QStringLiteral("%1-%2").arg(genre).arg(i);
+                candidate.genresFolded = {genre};
+                const auto index = static_cast<int>(tracks.size());
+                candidate.tempoBpm = 96.123456789 + index % 50 * 0.731;
+                candidate.energy = 0.3123456789 + index % 50 * 0.0137;
+                candidate.year = 1987 + index % 3 * 10;
+                tracks.append(candidate);
+            }
+        }
+        return tracks;
+    };
+    TasteProfile profile;
+    QByteArray bytes;
+    QString error;
+
+    // 61/76 and 15/76 recover exactly as fractions at full precision.
+    QVERIFY2(TasteProfiles::aggregate(tracksWith({{QStringLiteral("jazz"), 61}, {QStringLiteral("rock"), 15}}),
+                                      true, true, &profile, &error), qPrintable(error));
+    QCOMPARE(profile.genres, (QMap<QString, double>{{QStringLiteral("jazz"), 0.8}, {QStringLiteral("rock"), 0.2}}));
+    QVERIFY(TasteProfiles::encode(profile, &bytes, &error));
+    QVERIFY2(quantizationViolation(profile, bytes).isEmpty(), qPrintable(quantizationViolation(profile, bytes)));
+    QCOMPARE(profile.decades.size(), 3);
+
+    // Equal thirds: the leftover hundredth goes to the earliest label.
+    QVERIFY(TasteProfiles::aggregate(tracksWith({{QStringLiteral("ambient"), 7}, {QStringLiteral("blues"), 7},
+                                                 {QStringLiteral("cumbia"), 7}}), true, false, &profile, &error));
+    QCOMPARE(profile.genres, (QMap<QString, double>{{QStringLiteral("ambient"), 0.34},
+                                                    {QStringLiteral("blues"), 0.33},
+                                                    {QStringLiteral("cumbia"), 0.33}}));
+    QVERIFY(TasteProfiles::encode(profile, &bytes, &error));
+    QVERIFY2(quantizationViolation(profile, bytes).isEmpty(), qPrintable(quantizationViolation(profile, bytes)));
+
+    // A supported bucket below half a hundredth rounds away entirely.
+    QVERIFY(TasteProfiles::aggregate(tracksWith({{QStringLiteral("jazz"), 1000}, {QStringLiteral("rock"), 5}}),
+                                     true, false, &profile, &error));
+    QCOMPARE(profile.genres, (QMap<QString, double>{{QStringLiteral("jazz"), 1.0}}));
+    QVERIFY(TasteProfiles::encode(profile, &bytes, &error));
+    QVERIFY2(quantizationViolation(profile, bytes).isEmpty(), qPrintable(quantizationViolation(profile, bytes)));
+    QVERIFY(profile.features.contains(QStringLiteral("tempo_bpm")));
+    QVERIFY(profile.features.contains(QStringLiteral("energy")));
+
+    // The v1 parser keeps accepting finer finite values.
+    QVERIFY(TasteProfiles::parse(R"({"format":"muzaiten-taste-profile","version":1,)"
+                                 R"("genres":{"jazz":0.8026315789473685,"rock":0.19736842105263158},)"
+                                 R"("features":{"energy":{"q25":0.39999999999999997,"q50":0.4,"q75":0.41}}})",
+                                 &profile, &error));
+}
+
 void TasteProfileTest::strictParsing()
 {
     TasteProfile profile;
@@ -323,7 +414,8 @@ void TasteProfileTest::twoInstallations()
     TasteProfile profile;
     QString error;
     QVERIFY(TasteProfiles::read(exported, &profile, &error));
-    QVERIFY(profile.genres.value(QStringLiteral("jazz")) > 0.8);
+    QCOMPARE(profile.genres, (QMap<QString, double>{{QStringLiteral("jazz"), 0.8}, {QStringLiteral("rock"), 0.2}}));
+    QVERIFY2(quantizationViolation(profile, preview).isEmpty(), qPrintable(quantizationViolation(profile, preview)));
     QVERIFY(!profile.genres.contains(QStringLiteral("rare genre")));
     QVERIFY(!profile.decades.contains(QStringLiteral("1970")));
     for (const QByteArray &token : {QByteArray("artist"), QByteArray("album"), QByteArray("track"), QByteArray("mbid"),
@@ -342,12 +434,10 @@ void TasteProfileTest::twoInstallations()
     for (QByteArray bytes : {
         QByteArray(preview).replace("\"version\": 1", "\"version\": 2"),
         QByteArray(preview).replace("\"genres\":", "\"artist\": 1, \"genres\":"),
-        QByteArray(preview).replace("0.39", "NaN"),
-        QByteArray(preview).replace("0.39", "1e999"),
+        QByteArray(preview).replace("\"q50\": 0.4", "\"q50\": NaN"),
+        QByteArray(preview).replace("\"q50\": 0.4", "\"q50\": 1e999"),
         preview.left(preview.size() - 4), QByteArray(65537, ' ')}) {
-        if (bytes == preview) {
-            bytes = "NaN";
-        }
+        QVERIFY(bytes != preview);
         const QString bad = temporary.path() + QStringLiteral("/bad-%1.json").arg(++badIndex);
         QVERIFY(writeFile(bad, bytes));
         cli(b, {"radio-taste", "import", bad, "--name", "Source taste", "--replace"}, 1);

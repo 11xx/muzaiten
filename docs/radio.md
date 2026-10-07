@@ -222,6 +222,12 @@ Shares normalize over retained buckets; multi-genre tracks support each of
 their distinct genres. Tempo and energy report interpolated q25/q50/q75
 quartiles, never individual rows or sample counts.
 
+Every exported number is rounded. Shares are whole hundredths, assigned by
+largest remainder so each set sums to exactly 1.00; a bucket that rounds to
+zero drops out. Tempo quartiles are whole BPM and energy quartiles are
+hundredths. At that precision a share does not pin down exact track counts,
+and a quartile does not reproduce any one track's exact extractor value.
+
 The selected seed contributes a fixed term from **0 to 3 score points** through
 `RadioSession` and `TrackScorer`. Genre contributes twice the largest matching
 canonical share, from 0 to 2. Tempo and energy each use
