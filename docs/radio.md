@@ -229,8 +229,9 @@ interpolated q25/q50/q75 quartiles, never individual rows or sample counts.
 Every exported number is rounded. Shares are whole hundredths, assigned by
 largest remainder so each set sums to exactly 1.00; a bucket that rounds to
 zero drops out. Tempo quartiles are whole BPM and energy quartiles are
-hundredths. At that precision a share does not pin down exact track counts,
-and a quartile does not reproduce any one track's exact extractor value.
+hundredths. Quantization limits precision and inference, but a rounded value
+can still coincide with a track's value, and distinctive aggregates can reveal
+recordings or narrow possible counts. It does not guarantee anonymity.
 
 The selected seed contributes a fixed term from **0 to 3 score points** through
 `RadioSession` and `TrackScorer`. Genre contributes twice the largest matching
@@ -249,7 +250,9 @@ radio when that seed is active. Offline CLI removal prevents future selection;
 a running or saved session owns its aggregate snapshot until stopped, so
 removal/replacement does not invalidate it. Track, artist and seedless sessions
 remain compatible. Names stay in `radio-taste-seeds.json` in the configuration
-directory and in local session state; they are absent from exchange files.
+directory, in local session state and in radio-pick history, where they remain
+after seed removal. They are absent from exchange files. Picks from seeded
+sessions can inform ordinary local learning through their other score components.
 
 The strict `muzaiten-taste-profile` v1 file is limited to 64 KiB. Unknown
 keys, versions, duplicate keys, invalid shares,
@@ -259,8 +262,9 @@ seeds require `--replace`. Writes are atomic; on filesystems without hard
 links, such as FAT and exFAT drives, a new export file is instead created
 exclusively and removed if the write fails. The app supplies no transport,
 accounts, URLs or automatic export. Aggregates still reveal library taste;
-suppression is not anonymity, and a distribution shift in a synthetic fixture
-does not establish a universal listening preference. See
+suppression and quantization do not guarantee anonymity. A seed biases picks
+toward the source library's genre and feature mix; it does not model the source
+listener's preferences. See
 [data-safety.md](data-safety.md#aggregate-taste-profile-files).
 
 ## Genre curation

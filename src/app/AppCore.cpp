@@ -284,6 +284,11 @@ QJsonArray reasonComponentsJson(const QList<TrackScorer::Component> &components)
 } // namespace
 
 AppCore::AppCore(QObject *parent)
+    : AppCore(nullptr, parent)
+{
+}
+
+AppCore::AppCore(PlaybackBackend *backend, QObject *parent)
     : QObject(parent)
 {
     const auto health = StartupStorage::inspect();
@@ -332,29 +337,31 @@ AppCore::AppCore(QObject *parent)
     if (QFileInfo::exists(featuresPath()) && !m_features->isOpen()) {
         m_storageWarnings.append(QStringLiteral("Analysis features unavailable: %1").arg(featuresPath()));
     }
-    m_player = new PlayerCore(new GStreamerPlaybackBackend(), this);
+    m_player = new PlayerCore(backend != nullptr ? backend : new GStreamerPlaybackBackend(), this);
     m_playback = m_player->backend();
     // Every direct open asks which card the profile's identity names now. The
     // resolver lives as long as playback does, window or not.
-    m_directDevices = new DirectDeviceResolver(this);
-    m_playback->setDirectDeviceCheck([this](const QString &stableId, const QString &savedDevice) {
-        const AudioDeviceControl::DirectTarget target = m_directDevices->resolve(stableId, savedDevice);
-        PlaybackBackend::DirectDevice device;
-        device.available = target.status != AudioDeviceControl::DirectTarget::Status::Unavailable
-            && !target.hwPath.isEmpty();
-        device.hwPath = target.hwPath;
-        device.label = target.status == AudioDeviceControl::DirectTarget::Status::Resolved
-            ? target.description : QString();
-        return device;
-    });
-    connect(m_directDevices, &DirectDeviceResolver::cardsChanged, m_playback, &PlaybackBackend::retryDirectDevice);
+    if (backend == nullptr) {
+        m_directDevices = new DirectDeviceResolver(this);
+        m_playback->setDirectDeviceCheck([this](const QString &stableId, const QString &savedDevice) {
+            const AudioDeviceControl::DirectTarget target = m_directDevices->resolve(stableId, savedDevice);
+            PlaybackBackend::DirectDevice device;
+            device.available = target.status != AudioDeviceControl::DirectTarget::Status::Unavailable
+                && !target.hwPath.isEmpty();
+            device.hwPath = target.hwPath;
+            device.label = target.status == AudioDeviceControl::DirectTarget::Status::Resolved
+                ? target.description : QString();
+            return device;
+        });
+        connect(m_directDevices, &DirectDeviceResolver::cardsChanged, m_playback, &PlaybackBackend::retryDirectDevice);
+    }
     connect(m_playback, &PlaybackBackend::sharedEndpointChosenExternally, this, &AppCore::saveAdoptedSharedEndpoint);
     // Apply the saved output before anything can start playback (IPC, MPRIS,
     // a tray start): the window may not exist yet, or ever. The window loads
     // the same profile and finds nothing to change.
     {
         PlaybackProfile profile = playbackProfileFromJson(m_database->setting(QStringLiteral("playback.profile")));
-        if (profile.mode == QStringLiteral("bit-perfect") && !profile.deviceId.isEmpty()) {
+        if (m_directDevices != nullptr && profile.mode == QStringLiteral("bit-perfect") && !profile.deviceId.isEmpty()) {
             const AudioDeviceControl::DirectTarget target = m_directDevices->resolve(profile.deviceId, profile.device);
             if (target.status == AudioDeviceControl::DirectTarget::Status::Resolved) {
                 profile.device = target.hwPath;
@@ -2564,11 +2571,7 @@ bool AppCore::startPoolRadio(const QString &mode, const TasteProfile *taste, con
                                                    exploration, nowSecs, nullptr, sessionWeights,
                                                    std::move(embeddings), sessionDecay);
     if (taste != nullptr) {
-        TasteProfile canonical = *taste;
-        canonical.genres.clear();
-        for (auto it = taste->genres.begin(); it != taste->genres.end(); ++it) {
-            canonical.genres[GenreTags::canonical(it.key(), genreAliases)] += it.value();
-        }
+        TasteProfile canonical = TasteProfiles::withAliases(*taste, genreAliases);
         QByteArray bytes;
         QString error;
         if (!TasteProfiles::encode(canonical, &bytes, &error)) {

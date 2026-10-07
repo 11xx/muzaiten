@@ -177,8 +177,10 @@ Export excludes buckets backed by fewer than five distinct songs and feature
 distributions backed by fewer than five distinct samples. Duplicated song
 identities and content groups count once. Raw counts and discarded bucket
 labels are absent. Shares and energy quartiles are rounded to hundredths (each
-share set sums to exactly 1.00) and tempo quartiles to whole BPM, so the file
-pins down neither exact bucket counts nor individual tracks' extractor values.
+share set sums to exactly 1.00) and tempo quartiles to whole BPM. Quantization
+limits precision and inference; it cannot guarantee anonymity or prevent
+distinctive aggregates from revealing recordings or narrowing possible counts.
+Rounded quartiles can still coincide with individual tracks' values.
 The file/preview contain no artist, album, track, MusicBrainz ID, path, timestamp, skip, rating,
 listening-history row, content hash or per-record identifier. The user-chosen
 seed name stays local and is not an exchange field.
@@ -209,7 +211,10 @@ relaxing radio eligibility or throttles. **Stop radio** deactivates it;
 GUI removal also stops the matching active seed. Offline removal prevents
 future selection while existing sessions retain their snapshot until stopped.
 The snapshot and local seed name are part of local radio session state, so
-replacement/removal cannot corrupt a saved session. Ordinary saved sessions
+replacement/removal cannot corrupt a saved session. The local seed name also
+appears in radio-pick history and remains there after seed removal. Picks from
+seeded sessions can inform ordinary local learning through their other score
+components. Ordinary saved sessions
 need no taste fields. No network transport, accounts, URLs or external sharing
 are provided. See [radio.md](radio.md#aggregate-taste-seeds) and
 [features-schema.md](features-schema.md#aggregate-taste-profile-format).

@@ -380,7 +380,8 @@ feature packs and `features.sqlite`. Its required keys are `format`, `version`,
 ```
 
 Genre keys are folded canonical labels of at most 100 characters, containing
-letters, numbers, spaces, hyphens or ampersands. Each share is finite and in
+letters, numbers, nonspacing or spacing combining marks, spaces, hyphens,
+ampersands, straight or curly apostrophes, periods or parentheses. Each share is finite and in
 (0, 1]; nonempty share maps sum to 1 within 0.000001 and hold at most 256
 buckets. Decade keys are multiples of ten from 1000 to 2990. Feature keys are
 only `tempo_bpm` and `energy`, each optional, with exactly ordered numeric
@@ -400,7 +401,8 @@ finite in-range values within the sum tolerance and cannot attest source
 support without the private source records. Embeddings, content hashes,
 extractor identifiers, library identifiers, paths and per-record data are
 absent. Feature-pack import remains the exclusive analyzer write path; taste
-import never changes feature rows.
+import never changes feature rows. Suppression and quantization limit disclosure
+and precision but do not guarantee anonymity.
 
 See [radio.md](radio.md#aggregate-taste-seeds) for the bounded scoring term and
 [data-safety.md](data-safety.md#aggregate-taste-profile-files) for consent and

@@ -52,7 +52,7 @@ QMap<QString, QByteArray> snapshot(const QString &root)
     QDirIterator it(root, QDir::Files, QDirIterator::Subdirectories);
     while (it.hasNext()) {
         const QString path = it.next();
-        files.insert(QDir(root).relativeFilePath(path), QCryptographicHash::hash(readFile(path), QCryptographicHash::Sha256));
+        files.insert(QDir(root).relativeFilePath(path), readFile(path));
     }
     return files;
 }
@@ -144,6 +144,7 @@ private slots:
     void supportAndScoreBounds();
     void quantizedAggregates();
     void libraryScope();
+    void genreLabels();
     void strictParsing();
     void twoInstallations();
     void constraintsAndSessionSnapshots();
@@ -358,8 +359,11 @@ void TasteProfileTest::quantizedAggregates()
 
 void TasteProfileTest::libraryScope()
 {
-    QTemporaryDir temporary;
+    const QString evidence = qEnvironmentVariable("MUZAITEN_TASTE_EVIDENCE");
+    QTemporaryDir temporary(evidence.isEmpty() ? QDir::tempPath() + QStringLiteral("/taste-scope-XXXXXX")
+                                               : evidence + QStringLiteral("/scope-XXXXXX"));
     QVERIFY(temporary.isValid());
+    temporary.setAutoRemove(evidence.isEmpty());
     const QString root = temporary.path();
     const QString libraryPath = root + QStringLiteral("/library.sqlite");
     {
@@ -414,6 +418,9 @@ void TasteProfileTest::libraryScope()
     // Library-disabled roots, rows outside every enabled root, unplayable rows
     // and "Don't learn from this" tracks stay out; "Never play on radio" stays in.
     QCOMPARE(profile.genres, (QMap<QString, double>{{QStringLiteral("jazz"), 0.67}, {QStringLiteral("rock"), 0.33}}));
+    QByteArray scopeBytes;
+    QVERIFY(TasteProfiles::encode(profile, &scopeBytes, &error));
+    QVERIFY(writeFile(root + QStringLiteral("/scope-export.json"), scopeBytes));
     QCOMPARE(QCryptographicHash::hash(readFile(libraryPath), QCryptographicHash::Sha256), before);
 
     const QString outdated = root + QStringLiteral("/outdated.sqlite");
@@ -434,6 +441,68 @@ void TasteProfileTest::libraryScope()
     QVERIFY(!TasteProfiles::fromLibrary(outdated, {}, true, false, &profile, &error));
     QVERIFY2(error.contains(QStringLiteral("schema")), qPrintable(error));
     QCOMPARE(readFile(outdated), outdatedBefore);
+}
+
+void TasteProfileTest::genreLabels()
+{
+    // Thai lukthung carries three nonspacing marks; Devanagari sangeet carries
+    // a nonspacing and a spacing combining mark; "cafe" + U+0301 is NFD.
+    const QStringList accepted{QStringLiteral("ลูกทุ่ง"), QStringLiteral("संगीत"),
+                               QStringLiteral("rock'n'roll"), QStringLiteral("drum\u2019n\u2019bass"),
+                               QStringLiteral("children's music"), QStringLiteral("a.o.r."),
+                               QStringLiteral("soundtrack (film)"), QStringLiteral("cafe\u0301 jazz")};
+    TasteProfile profile;
+    for (const QString &label : accepted) {
+        profile.genres.insert(label, 0.125);
+    }
+    QByteArray bytes;
+    QString error;
+    QVERIFY2(TasteProfiles::encode(profile, &bytes, &error), qPrintable(error));
+    TasteProfile parsed;
+    QVERIFY2(TasteProfiles::parse(bytes, &parsed, &error), qPrintable(error));
+    QCOMPARE(parsed.genres, profile.genres);
+    for (const QString &label : {QStringLiteral("rock/pop"), QStringLiteral("https://example.test"),
+                                 QStringLiteral("jazz\u0007"), QStringLiteral("<b>jazz</b>"),
+                                 QStringLiteral("Jazz"), QStringLiteral("unknown")}) {
+        TasteProfile single;
+        single.genres.insert(label, 1.0);
+        QVERIFY2(!TasteProfiles::encode(single, &bytes, &error), qPrintable(label));
+    }
+
+    // Export keeps a supported label in any of these scripts.
+    QVector<TrackScorer::Candidate> tracks;
+    for (int i = 0; i < 5; ++i) {
+        TrackScorer::Candidate candidate;
+        candidate.path = QString::number(i);
+        candidate.genresFolded = {accepted.first()};
+        tracks.append(candidate);
+    }
+    QVERIFY(TasteProfiles::aggregate(tracks, true, false, &profile, &error));
+    QCOMPARE(profile.genres, (QMap<QString, double>{{accepted.first(), 1.0}}));
+
+    // Aliases merge labels; a canonical label outside the rules drops alone.
+    TasteProfile source;
+    source.genres = {{QStringLiteral("bebop"), 0.3}, {QStringLiteral("hard bop"), 0.3},
+                     {QStringLiteral("noise"), 0.4}};
+    source.features.insert(QStringLiteral("energy"), {0.3, 0.4, 0.5});
+    const QHash<QString, QString> aliases{{QStringLiteral("bebop"), QStringLiteral("jazz")},
+                                          {QStringLiteral("hard bop"), QStringLiteral("jazz")},
+                                          {QStringLiteral("noise"), QStringLiteral("noise/drone")}};
+    const TasteProfile canonical = TasteProfiles::withAliases(source, aliases);
+    QCOMPARE(canonical.genres.keys(), QStringList{QStringLiteral("jazz")});
+    QVERIFY(std::abs(canonical.genres.value(QStringLiteral("jazz")) - 1.0) < 1e-12);
+    QCOMPARE(canonical.features.value(QStringLiteral("energy")).q50, 0.4);
+    QVERIFY2(TasteProfiles::encode(canonical, &bytes, &error), qPrintable(error));
+    source.genres.remove(QStringLiteral("noise"));
+    source.genres.insert(QStringLiteral("swing"), 0.4);
+    QCOMPARE(TasteProfiles::withAliases(source, aliases).genres,
+             (QMap<QString, double>{{QStringLiteral("jazz"), 0.6}, {QStringLiteral("swing"), 0.4}}));
+    source.genres = {{QStringLiteral("noise"), 1.0}};
+    const TasteProfile featureOnly = TasteProfiles::withAliases(source, aliases);
+    QVERIFY(featureOnly.genres.isEmpty());
+    QVERIFY2(TasteProfiles::encode(featureOnly, &bytes, &error), qPrintable(error));
+    source.features.clear();
+    QVERIFY(!TasteProfiles::encode(TasteProfiles::withAliases(source, aliases), &bytes, &error));
 }
 
 void TasteProfileTest::strictParsing()
@@ -519,6 +588,14 @@ void TasteProfileTest::twoInstallations()
     QCOMPARE(snapshot(b), bBefore);
     cli(b, {"radio-taste", "import", exported, "--name", "Source taste"});
     const auto bImported = snapshot(b);
+    QJsonObject hashes;
+    for (auto it = bImported.begin(); it != bImported.end(); ++it) {
+        hashes.insert(it.key(), QString::fromLatin1(QCryptographicHash::hash(it.value(), QCryptographicHash::Sha256).toHex()));
+        const QString baselinePath = temporary.path() + QStringLiteral("/B-before-rejections/") + it.key();
+        QVERIFY(QDir().mkpath(QFileInfo(baselinePath).absolutePath()));
+        QVERIFY(writeFile(baselinePath, it.value()));
+    }
+    QVERIFY(writeFile(temporary.path() + QStringLiteral("/B-unchanged-on-failure-sha256.json"), QJsonDocument(hashes).toJson()));
     cli(b, {"radio-taste", "import", exported, "--name", "Source taste"}, 1);
     QCOMPARE(snapshot(b), bImported);
     int badIndex = 0;
@@ -527,6 +604,11 @@ void TasteProfileTest::twoInstallations()
         QByteArray(preview).replace("\"genres\":", "\"artist\": 1, \"genres\":"),
         QByteArray(preview).replace("\"q50\": 0.4", "\"q50\": NaN"),
         QByteArray(preview).replace("\"q50\": 0.4", "\"q50\": 1e999"),
+        QByteArray(preview).replace("\"genres\":", "\"count\": 77, \"genres\":"),
+        QByteArray(preview).replace("\"genres\":", "\"decode_hash\": \"recording\", \"genres\":"),
+        QByteArray(preview).replace("\"version\": 1", "\"version\": 1, \"vers\\u0069on\": 1"),
+        QByteArray(preview).replace("\"jazz\": 0.8", "\"jazz\": 0.7"),
+        QByteArray(preview).replace("jazz", QByteArray(1, char(0xff))),
         preview.left(preview.size() - 4), QByteArray(65537, ' ')}) {
         QVERIFY(bytes != preview);
         const QString bad = temporary.path() + QStringLiteral("/bad-%1.json").arg(++badIndex);
@@ -534,11 +616,6 @@ void TasteProfileTest::twoInstallations()
         cli(b, {"radio-taste", "import", bad, "--name", "Source taste", "--replace"}, 1);
         QCOMPARE(snapshot(b), bImported);
     }
-    QJsonObject hashes;
-    for (auto it = bImported.begin(); it != bImported.end(); ++it) {
-        hashes.insert(it.key(), QString::fromLatin1(it.value().toHex()));
-    }
-    QVERIFY(writeFile(temporary.path() + QStringLiteral("/B-unchanged-on-failure-sha256.json"), QJsonDocument(hashes).toJson()));
     qputenv("MUZAITEN_STATE_ROOT", b.toUtf8());
     QMap<QString, TasteProfile> seeds;
     QVERIFY(TasteProfiles::load(&seeds, &error));
@@ -547,35 +624,59 @@ void TasteProfileTest::twoInstallations()
     QVERIFY(db.open(b + QStringLiteral("/data/library.sqlite")));
     const auto pool = poolFor(db, b + QStringLiteral("/data/features.sqlite"));
     QCOMPARE(pool.size(), 200);
-    QRandomGenerator baselineRng(1701), seededRng(1701);
+    QRandomGenerator baselineRng(1701), seededRng(1701), absentRng(1701);
     RadioSession baseline(pool, {}, {{"jazz", 1.6}, {"rock", 0.3}}, 30, 100000, &baselineRng);
     RadioSession seeded(pool, {}, {{"jazz", 1.6}, {"rock", 0.3}}, 30, 100000, &seededRng);
     seeded.setTasteProfile(QStringLiteral("Source taste"), seeds.value(QStringLiteral("Source taste")));
+    RadioSession absent(pool, {}, {{"jazz", 1.6}, {"rock", 0.3}}, 30, 100000, &absentRng);
+    TasteProfile absentProfile;
+    absentProfile.genres.insert(QStringLiteral("cumbia"), 1.0);
+    absent.setTasteProfile(QStringLiteral("Absent genre"), absentProfile);
     int baselineJazz = 0, seededJazz = 0;
-    QJsonArray baselinePicks, seededPicks;
+    QJsonArray baselinePicks, seededPicks, absentPicks;
     for (int i = 0; i < 40; ++i) {
         const auto resolve = [&db](const QString &path) { return db.trackForPath(path); };
         const auto baselinePick = baseline.nextTracks(1, {}, resolve);
         const auto seededPick = seeded.nextTracks(1, {}, resolve);
+        const auto absentPick = absent.nextTracks(1, {}, resolve);
         QCOMPARE(baselinePick.size(), 1);
         QCOMPARE(seededPick.size(), 1);
+        QCOMPARE(absentPick.size(), 1);
+        QCOMPARE(absentPick[0].path, baselinePick[0].path);
         const QString baselineGenre = db.radioCandidatesForPaths({baselinePick[0].path})[0].genresFolded[0];
         const QString seededGenre = db.radioCandidatesForPaths({seededPick[0].path})[0].genresFolded[0];
         baselineJazz += baselineGenre == QLatin1String("jazz");
         seededJazz += seededGenre == QLatin1String("jazz");
         QVERIFY(seeded.reasonFor(seededPick[0].path).contains(QStringLiteral("Source taste")));
         QVERIFY(ReasonText::sentence(seeded.reasonComponentsFor(seededPick[0].path)).contains(QStringLiteral("Source taste")));
+        QJsonArray components;
+        bool tasteComponent = false;
+        for (const auto &component : seeded.reasonComponentsFor(seededPick[0].path)) {
+            components.append(QJsonObject{{"name", component.name}, {"value", component.value}});
+            if (component.name == QLatin1String("taste seed: Source taste")) {
+                tasteComponent = true;
+                QVERIFY(component.value >= 0.0 && component.value <= TasteProfiles::MaximumScore);
+            }
+        }
+        QVERIFY(tasteComponent);
+        for (const auto &component : absent.reasonComponentsFor(absentPick[0].path)) {
+            if (component.name == QLatin1String("taste seed: Absent genre")) {
+                QCOMPARE(component.value, 0.0);
+            }
+        }
         baselinePicks.append(QJsonObject{{"path", baselinePick[0].path}, {"genre", baselineGenre}});
         seededPicks.append(QJsonObject{{"path", seededPick[0].path}, {"genre", seededGenre},
-                                      {"reason", seeded.reasonFor(seededPick[0].path)}});
+                                      {"reason", seeded.reasonFor(seededPick[0].path)}, {"components", components}});
+        absentPicks.append(QJsonObject{{"path", absentPick[0].path}, {"genre", baselineGenre}});
         baseline.notePlayed(baselinePick[0]);
         seeded.notePlayed(seededPick[0]);
+        absent.notePlayed(absentPick[0]);
     }
     qInfo("Fixed seed 1701, 40 picks: baseline jazz %d, taste-seeded jazz %d", baselineJazz, seededJazz);
     QVERIFY(seededJazz >= baselineJazz + 8);
     QVERIFY(writeFile(temporary.path() + QStringLiteral("/picks.json"), QJsonDocument(QJsonObject{
         {"rng_seed", 1701}, {"pick_total", 40}, {"baseline_jazz", baselineJazz}, {"seeded_jazz", seededJazz},
-        {"baseline", baselinePicks}, {"seeded", seededPicks}}).toJson()));
+        {"baseline", baselinePicks}, {"seeded", seededPicks}, {"absent_genre", absentPicks}}).toJson()));
     cli(b, {"radio-taste", "remove", "Source taste"});
     QVERIFY(TasteProfiles::load(&seeds, &error));
     QVERIFY(seeds.isEmpty());
