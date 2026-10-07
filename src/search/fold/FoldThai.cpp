@@ -402,7 +402,8 @@ private:
             // ย after ไ is silent (ไทย thai).
             if (thai(i) == u'ย' && role(i) == ThaiRole::Consonant && !attachesToConsonant(i + 1)) ++i;
         } else if (above != ThaiVowel::Count) {
-            if (above == ThaiVowel::O && thai(i) == u'อ' && role(i) == ThaiRole::Consonant
+            // Thai only: Lao spells its short o with the above vowel alone.
+            if (above == ThaiVowel::O && i < m_n && m_l[i].cp == u'อ' && role(i) == ThaiRole::Consonant
                 && isFinal(i + 1)) {
                 v = ThaiVowel::O;
                 needFinal = true;
