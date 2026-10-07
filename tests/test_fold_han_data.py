@@ -702,4 +702,5 @@ class FoldHanDataTests(unittest.TestCase):
         self.assertEqual(archaic, {("房", "páng")})
 
 if __name__ == "__main__":
+    FoldHanRareTests = load_tool("test_fold_han_rare", ROOT / "tests" / "test_fold_han_rare.py").FoldHanRareTests
     unittest.main()
