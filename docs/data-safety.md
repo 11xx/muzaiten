@@ -166,6 +166,13 @@ exact payload keys and report counts.
 - `features`: optional tempo-BPM and energy q25/q50/q75 quartiles.
 - Optional `decades`: normalized decade shares.
 
+Export summarizes the playable tracks inside source directories with
+**Library** enabled; a directory hidden from the library stays out of the
+file. Tracks marked **Don't learn from this** are left out, as that flag
+keeps a track out of every taste signal. Tracks marked **Never play on radio**
+are included: they remain part of the library's composition, which is what
+the file describes.
+
 Export excludes buckets backed by fewer than five distinct songs and feature
 distributions backed by fewer than five distinct samples. Duplicated song
 identities and content groups count once. Raw counts and discarded bucket

@@ -255,7 +255,9 @@ namespace TasteProfiles {
 
 QString contentsDescription()
 {
-    return QStringLiteral("Contains canonical genre shares, tempo and energy quartiles, and optional decade shares. "
+    return QStringLiteral("Contains canonical genre shares, tempo and energy quartiles, and optional decade shares "
+                          "of the playable tracks in source directories with Library enabled. "
+                          "Tracks marked \"Don't learn from this\" are left out. "
                           "Buckets supported by fewer than five distinct tracks are omitted. "
                           "Shares and energy quartiles are rounded to hundredths and tempo quartiles to whole BPM. "
                           "These aggregates reveal library taste. No artist, album or track names, recording identifiers, paths, timestamps, "

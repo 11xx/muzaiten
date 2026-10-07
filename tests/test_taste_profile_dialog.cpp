@@ -1,3 +1,5 @@
+#include "core/MetadataBlob.h"
+#include "db/Database.h"
 #include "reco/TasteProfile.h"
 #include "ui/TasteProfileDialog.h"
 
@@ -16,6 +18,8 @@
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QtTest>
+
+#include <tuple>
 
 class TasteProfileDialogTest final : public QObject {
     Q_OBJECT
@@ -37,23 +41,45 @@ void TasteProfileDialogTest::explicitPreviewAndImport()
     temporary.setAutoRemove(evidence.isEmpty());
     qputenv("MUZAITEN_STATE_ROOT", temporary.path().toUtf8());
     QDir().mkpath(temporary.path() + QStringLiteral("/data"));
+    const QString libraryPath = temporary.path() + QStringLiteral("/data/library.sqlite");
+    {
+        Database library(QStringLiteral("taste-ui-library"));
+        QVERIFY(library.open(libraryPath));
+        // Five library tracks, and a library-disabled root whose genre must
+        // stay out of the export.
+        for (const auto &[directory, genre, libraryEnabled] : {
+                 std::tuple{QStringLiteral("music"), QStringLiteral("Jazz"), true},
+                 std::tuple{QStringLiteral("memos"), QStringLiteral("Field recording"), false}}) {
+            QVERIFY(QDir(temporary.path()).mkpath(directory));
+            ScanRoot root;
+            root.path = temporary.filePath(directory);
+            root.libraryEnabled = libraryEnabled;
+            QVERIFY2(library.saveScanRoot(root), qPrintable(library.lastError()));
+            for (int i = 0; i < 5; ++i) {
+                Track track;
+                track.path = temporary.filePath(QStringLiteral("%1/%2.flac").arg(directory).arg(i));
+                track.parentDir = root.path;
+                track.filename = QStringLiteral("%1.flac").arg(i);
+                track.title = QStringLiteral("title-%1").arg(i);
+                track.artistName = QStringLiteral("fixture");
+                track.albumArtistName = track.artistName;
+                track.albumTitle = QStringLiteral("album-%1").arg(i);
+                track.date = QStringLiteral("1987");
+                MetadataBlob::FullMetadata metadata;
+                metadata.tags.insert(QStringLiteral("GENRE"), {genre});
+                const auto encoded = MetadataBlob::encode(metadata);
+                track.fullMetadataBlob = encoded.data;
+                track.fullMetadataRawSize = encoded.rawSize;
+                QVERIFY2(library.upsertTrack(track), qPrintable(library.lastError()));
+            }
+        }
+    }
     const QString connection = QStringLiteral("taste-ui-fixture");
     {
         QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
-        db.setDatabaseName(temporary.path() + QStringLiteral("/data/library.sqlite"));
+        db.setDatabaseName(libraryPath);
         QVERIFY(db.open());
         QSqlQuery query(db);
-        for (const QString &sql : {
-            QStringLiteral("CREATE TABLE genre_aliases(alias_folded TEXT, canonical_folded TEXT)"),
-            QStringLiteral("CREATE TABLE radio_ignored_genres(genre_folded TEXT)"),
-            QStringLiteral("CREATE TABLE tracks(id INTEGER, path TEXT, musicbrainz_recording_id TEXT, artist_name TEXT, title TEXT, original_date TEXT, date TEXT, missing INTEGER, metadata_scanned INTEGER)"),
-            QStringLiteral("CREATE TABLE track_genres(track_id INTEGER, genre_folded TEXT)")}) {
-            QVERIFY(query.exec(sql));
-        }
-        for (int i = 0; i < 5; ++i) {
-            QVERIFY(query.exec(QStringLiteral("INSERT INTO tracks VALUES(%1, 'fixture-%1', '', 'fixture', 'title-%1', '', '1987', 0, 1)").arg(i)));
-            QVERIFY(query.exec(QStringLiteral("INSERT INTO track_genres VALUES(%1, 'jazz')").arg(i)));
-        }
         TasteProfileDialog dialog;
         QSignalSpy started(&dialog, &TasteProfileDialog::startRequested);
         auto button = [](QWidget *parent, const QString &text) {
@@ -80,7 +106,10 @@ void TasteProfileDialogTest::explicitPreviewAndImport()
         });
         QTest::ignoreMessage(QtWarningMsg, "This plugin does not support propagateSizeHints()");
         exportButton->click();
-        QVERIFY(!displayed.isEmpty());
+        TasteProfile shown;
+        QString error;
+        QVERIFY2(TasteProfiles::parse(displayed, &shown, &error), qPrintable(error));
+        QCOMPARE(shown.genres, (QMap<QString, double>{{QStringLiteral("jazz"), 1.0}}));
         QVERIFY(!QFile::exists(output));
         QTimer::singleShot(0, &dialog, [&]() {
             auto *preview = qobject_cast<QDialog *>(QApplication::activeModalWidget());
