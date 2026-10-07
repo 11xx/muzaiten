@@ -190,12 +190,15 @@ private slots:
     void malformedState()
     {
         QFETCH(QJsonValue, seed);
-        AppCore core(new FakePlayback, nullptr);
         const QJsonObject state{{QStringLiteral("active"), true}, {QStringLiteral("kind"), QStringLiteral("taste")},
             {QStringLiteral("tasteSeed"), seed}};
-        QVERIFY(writeBytes(m_root->filePath(QStringLiteral("malformed-session.json")), QJsonDocument(state).toJson()));
-        core.settings()->setSetting(QStringLiteral("radio.session.state"), QString::fromUtf8(QJsonDocument(state).toJson()));
-        core.maybeRestoreRadioSession();
+        {
+            SettingsStore saved(QDir(m_root->path()).filePath(QStringLiteral("state/state.sqlite")));
+            QVERIFY(saved.isOpen());
+            QVERIFY(saved.setSetting(QStringLiteral("radio.session.state"),
+                                     QString::fromUtf8(QJsonDocument(state).toJson())));
+        }
+        AppCore core(new FakePlayback, nullptr);
         QVERIFY(!core.player()->radioActive());
         QVERIFY(core.activeTasteSeedName().isEmpty());
         QVERIFY(core.settings()->setting(QStringLiteral("radio.session.state")).isEmpty());
