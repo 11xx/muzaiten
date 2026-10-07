@@ -60,6 +60,7 @@
 #include "ui/PlaylistImportDialog.h"
 #include "ui/PlaylistView.h"
 #include "ui/RadioCustomizationDialog.h"
+#include "ui/TasteProfileDialog.h"
 #include "ui/SearchView.h"
 #include "ui/ScanController.h"
 #include "ui/RatingSyncController.h"
@@ -1083,6 +1084,21 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     });
     connect(m_playerBar, &PlayerBar::linkRootsRequested, this, &MainWindow::configureLinkRoots);
     connect(m_playerBar, &PlayerBar::radioCustomizationRequested, this, &MainWindow::showRadioCustomization);
+    connect(m_playerBar, &PlayerBar::tasteProfilesRequested, this, [this]() {
+        TasteProfileDialog dialog(this);
+        connect(&dialog, &TasteProfileDialog::startRequested, this, [this](const QString &name) {
+            if (!m_core->startTasteRadio(name)) {
+                statusBar()->showMessage(QStringLiteral("Taste radio: seed or candidate pool is unavailable"), 4000);
+            }
+        });
+        connect(&dialog, &TasteProfileDialog::stopRequested, m_core, &AppCore::stopRadio);
+        connect(&dialog, &TasteProfileDialog::removed, this, [this](const QString &name) {
+            if (m_core->activeTasteSeedName() == name) {
+                m_core->stopRadio();
+            }
+        });
+        dialog.exec();
+    });
     connect(m_playerBar, &PlayerBar::genreCurationRequested, this, &MainWindow::showGenreCuration);
     connect(m_playerBar, &PlayerBar::audioAnalysisStartRequested, this, &MainWindow::startAudioAnalysis);
     connect(m_playerBar, &PlayerBar::audioAnalysisCancelRequested, this, &MainWindow::cancelAudioAnalysis);

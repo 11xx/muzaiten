@@ -719,3 +719,21 @@ if(MUZAITEN_REGISTERED_TESTS)
     set_property(TEST ${MUZAITEN_REGISTERED_TESTS} APPEND PROPERTY
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen" "QT_QPA_PLATFORMTHEME=")
 endif()
+
+add_executable(test_taste_profile test_taste_profile.cpp)
+target_include_directories(test_taste_profile PRIVATE ../src)
+target_link_libraries(test_taste_profile PRIVATE muzaiten_db muzaiten_features muzaiten_reco Qt6::Core Qt6::Sql Qt6::Test)
+target_compile_features(test_taste_profile PRIVATE cxx_std_26)
+add_dependencies(test_taste_profile muzaitenctl)
+add_test(NAME test_taste_profile COMMAND test_taste_profile)
+
+add_executable(test_taste_profile_dialog
+    test_taste_profile_dialog.cpp
+    ../src/ui/TasteProfileDialog.cpp
+    ../src/ui/TasteProfileDialog.h
+)
+target_include_directories(test_taste_profile_dialog PRIVATE ../src)
+target_link_libraries(test_taste_profile_dialog PRIVATE muzaiten_reco Qt6::Core Qt6::Widgets Qt6::Sql Qt6::Test)
+target_compile_features(test_taste_profile_dialog PRIVATE cxx_std_26)
+add_test(NAME test_taste_profile_dialog COMMAND test_taste_profile_dialog)
+set_tests_properties(test_taste_profile_dialog PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 45)

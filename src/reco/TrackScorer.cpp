@@ -494,6 +494,12 @@ Scored score(const Candidate &candidate, const Affinity &affinity, const SeedCon
         pushIfNonZero(scored, QStringLiteral("same-artist"), effectiveWeights.sameArtistPenalty);
     }
 
+    if (seed.tasteProfile != nullptr) {
+        const double contribution = TasteProfiles::similarity(*seed.tasteProfile, candidate);
+        scored.score += contribution;
+        scored.components.append({QStringLiteral("taste seed: %1").arg(seed.tasteProfileName), contribution});
+    }
+
     return scored;
 }
 

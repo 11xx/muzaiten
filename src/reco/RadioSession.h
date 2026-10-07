@@ -99,6 +99,12 @@ public:
     // per-session album counts.
     void notePlayed(const Track &track);
 
+    // A selected aggregate seed belongs to the session snapshot. An empty name
+    // deactivates its score term for future picks.
+    void setTasteProfile(const QString &name, TasteProfile profile);
+    QString tasteProfileName() const;
+    QByteArray tasteProfileBytes() const;
+
     // Live-updates the exploration knob (e.g. the player-bar "Adventurous" boost
     // or a persisted-setting change). SeedContext::exploration0To100 is rebuilt
     // fresh from m_exploration inside nextTracks() on every call, so this takes
@@ -119,7 +125,7 @@ public:
     // sessions resume sequencing but do not resurrect pre-restart explanations.
     QVector<PickReason> pickReasons() const;
 
-    // Constraint-only session persistence. Pick reasons are deliberately not
+    // Sequencing state and the optional aggregate seed. Pick reasons are not
     // included: restored pre-restart rows can continue sequencing correctly, but
     // only new picks have freshly computed explanations.
     QJsonObject constraintState() const;
@@ -198,6 +204,8 @@ private:
     TrackScorer::Candidate m_seed;
     TrackScorer::Weights m_weights;
     TrackScorer::RadioSessionDecay m_sessionDecay = TrackScorer::defaultSessionDecay();
+    TasteProfile m_tasteProfile;
+    QString m_tasteProfileName;
     int m_generatedPickCount = 0;
     int m_exploration = 30;
     qint64 m_nowSecs = 0;

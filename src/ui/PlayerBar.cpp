@@ -679,6 +679,8 @@ PlayerBar::PlayerBar(QWidget *parent)
             &PlayerBar::radioRefillThresholdSettingsRequested);
     QAction *radioShuffleSettings = radioMenu->addAction(QStringLiteral("Radio shuffle percent…"));
     QAction *scoringWeights = radioMenu->addAction(QStringLiteral("Customization…"));
+    QAction *tasteProfiles = radioMenu->addAction(QStringLiteral("Taste profiles…"));
+    connect(tasteProfiles, &QAction::triggered, this, &PlayerBar::tasteProfilesRequested);
     radioMenu->addSeparator();
     QAction *genreCuration = radioMenu->addAction(QStringLiteral("Genre curation…"));
     connect(radioMenu, &QMenu::aboutToShow, this, [this]() {

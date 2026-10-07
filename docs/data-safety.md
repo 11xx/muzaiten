@@ -156,6 +156,50 @@ same validation are skipped and counted as invalid, never written to a pack. See
 [features-schema.md](features-schema.md#local-feature-pack-format) for
 exact payload keys and report counts.
 
+### Aggregate taste-profile files
+
+`Radio > Taste profiles…` and `muzaitenctl radio-taste` exchange local
+`muzaiten-taste-profile` version 1 JSON files. The contents are exactly:
+
+- `format`: `muzaiten-taste-profile`; `version`: 1.
+- `genres`: canonical genre labels and normalized shares.
+- `features`: optional tempo-BPM and energy q25/q50/q75 quartiles.
+- Optional `decades`: normalized decade shares.
+
+Export excludes buckets backed by fewer than five distinct songs and feature
+distributions backed by fewer than five distinct samples. Duplicated song
+identities and content groups count once. Raw counts and discarded bucket labels are absent. The file/preview
+contain no artist, album, track, MusicBrainz ID, path, timestamp, skip, rating,
+listening-history row, content hash or per-record identifier. The user-chosen
+seed name stays local and is not an exchange field.
+
+These aggregates reveal library taste. Suppression does not guarantee
+anonymity, and an imported aggregate cannot prove its source support floor.
+Genre labels are library tags: curate them before exporting. No file is
+automatically generated or exported. Every CLI export/preview requires
+`--opt-in`, with no saved consent. GUI export starts with a deliberate preview
+action and writes only after **Export these contents…**; that exact preview
+is the written file. Nothing is uploaded or transmitted by the exchange UI.
+
+Import validates and previews before writes. Unknown keys or versions,
+duplicate keys, invalid UTF-8, incomplete JSON, nonfinite/out-of-range values,
+invalid shares and files exceeding 64 KiB are rejected. A same-name seed
+requires explicit replacement; export file replacement also needs consent.
+Imported seeds live in `config/radio-taste-seeds.json` under a combined root
+(or the configured configuration directory), with at most 32 named seeds.
+Import/removal use a local write lock and an atomic file replacement. Rejected
+imports leave that store and library/features/state databases untouched.
+
+Selection is a separate user action. A seed adds 0 to 3 score points without
+relaxing radio eligibility or throttles. **Stop radio** deactivates it;
+GUI removal also stops the matching active seed. Offline removal prevents
+future selection while existing sessions retain their snapshot until stopped.
+The snapshot and local seed name are part of local radio session state, so
+replacement/removal cannot corrupt a saved session. Ordinary saved sessions
+need no taste fields. No network transport, accounts, URLs or external sharing
+are provided. See [radio.md](radio.md#aggregate-taste-seeds) and
+[features-schema.md](features-schema.md#aggregate-taste-profile-format).
+
 ### Storage locations
 
 Application-owned state belongs under XDG locations:

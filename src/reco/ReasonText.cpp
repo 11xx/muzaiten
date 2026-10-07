@@ -66,8 +66,13 @@ QString sentence(const QList<TrackScorer::Component> &components)
 {
     QStringList positiveParts;
     QStringList negativeParts;
+    QString tasteSeed;
 
     for (const TrackScorer::Component &component : sortedByMagnitude(components)) {
+        if (component.name.startsWith(QLatin1String("taste seed: "))) {
+            tasteSeed = component.name;
+            continue;
+        }
         if (std::abs(component.value) < kExplainThreshold) {
             continue;
         }
@@ -78,6 +83,10 @@ QString sentence(const QList<TrackScorer::Component> &components)
         } else if (negativeParts.size() < kMaxNegativePhrases) {
             negativeParts.push_back(phraseFor(component.name));
         }
+    }
+
+    if (!tasteSeed.isEmpty()) {
+        positiveParts.prepend(tasteSeed);
     }
 
     if (positiveParts.isEmpty() && negativeParts.isEmpty()) {

@@ -67,6 +67,36 @@ changing the recipient store. No network connection is needed. Close a running
 app before CLI import; import refuses while the app is open. Export and dry-run
 can read saved profiles while it runs.
 
+### Aggregate taste export and named radio seeds
+
+```sh
+muzaitenctl radio-taste export <file> --opt-in [--dry-run] [--decades] [--replace]
+muzaitenctl radio-taste import <file> --name <seed> [--dry-run] [--replace]
+muzaitenctl radio-taste list
+muzaitenctl radio-taste remove <seed>
+muzaitenctl start-taste-radio <seed>
+muzaitenctl stop-radio
+```
+
+Export and its dry run require explicit `--opt-in` every time. `--decades`
+adds supported decade shares. Export/import stdout is the canonical aggregate
+JSON preview (also with global `--json`); disclosure and status use stderr.
+Export writes those exact bytes unless `--dry-run`. Import previews before
+saving, without selecting a seed or changing library/features/state databases.
+A local seed name is required and kept out of the exchange file. Use dry run
+to inspect the profile before importing; a same-name seed or existing export
+file requires `--replace`. Imports are strict and bounded to 64 KiB.
+
+`list` prints one local seed name per line. `remove` deletes a saved seed;
+running/restorable sessions retain their snapshot until stopped. `start-taste-radio`
+selects a saved seed through the running application's local IPC, and
+`stop-radio` deactivates it. Pick reasons name the seed. Export/import/list/remove
+work offline, without contacting an application or external service.
+
+See [radio.md](radio.md#aggregate-taste-seeds) for contents, support floors and
+scoring, and [data-safety.md](data-safety.md#aggregate-taste-profile-files) for
+privacy and storage.
+
 ## Search and audio analysis
 
 ```sh
