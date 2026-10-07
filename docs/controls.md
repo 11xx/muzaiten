@@ -143,6 +143,13 @@ It affects muzaiten only; system defaults are never changed. The saved
 output applies from startup, including when muzaiten starts in the tray and
 plays before its window opens.
 
+**Release output device on pause** closes the playback stream while paused.
+Resuming restores the held position before audio becomes audible. With the
+native PipeWire transport, reconnecting stays silent while the stream becomes
+ready for that seek; pausing or seeking during reconnect keeps the latest
+requested state and position. Direct ALSA and native DSD pauses release their
+exclusive device regardless of the shared-output preference.
+
 While a chosen output is missing, playback pauses at its position and resumes
 there when the output returns, if it was playing; pausing, seeking or picking
 another track meanwhile is respected. With **Play through the system output

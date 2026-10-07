@@ -474,6 +474,8 @@ void GStreamerPlaybackBackend::playDsd(const QUrl &url, State targetState)
 
     // Tear down whatever pipeline is live (playbin or an earlier DSD graph) and
     // build a fresh DSD passthrough graph for this file.
+    m_nativePositionRestore = false;
+    m_nativeRestoreRelease = false;
     m_softPaused = false;
     m_pendingSeekMs = -1;
     m_lastRecoveryUri.clear();
@@ -525,6 +527,7 @@ void GStreamerPlaybackBackend::playDsd(const QUrl &url, State targetState)
 
 void GStreamerPlaybackBackend::loadUri(const QString &uri, State targetState, qint64 positionMs)
 {
+    clearNativePositionRestore();
     clearSeekInFlight();
     {
         QMutexLocker locker(&m_mutex);
@@ -559,9 +562,9 @@ void GStreamerPlaybackBackend::loadUri(const QString &uri, State targetState, qi
     m_resumeOnOutput = false;
     applyStreamTarget();
     beginTargetTransition(targetState);
-    if (targetState == State::Playing && positionMs > 0) {
-        m_pendingSeekMs = positionMs;
-        gst_element_set_state(m_playbin, GST_STATE_PAUSED);
+    if (positionMs > 0
+        && (targetState == State::Playing || m_sinkFactory == QStringLiteral("pipewiresink"))) {
+        queuePositionRestore(positionMs);
     } else {
         gst_element_set_state(m_playbin, targetState == State::Playing ? GST_STATE_PLAYING : GST_STATE_PAUSED);
         if (targetState == State::Paused && positionMs > 0) {
@@ -608,14 +611,24 @@ void GStreamerPlaybackBackend::pause()
     }
     // Native DSD holds the ALSA device exclusively, so pausing must release it
     // (READY) just like bit-perfect — otherwise the card stays locked while idle.
-    pauseInternal(m_profile.mode == QStringLiteral("bit-perfect")
-                  || m_profile.releaseSinkOnPause
-                  || m_dsdActive);
+    const bool release = m_profile.mode == QStringLiteral("bit-perfect")
+        || m_profile.releaseSinkOnPause || m_dsdActive;
+    if (m_nativePositionRestore) {
+        m_nativeRestoreRelease = release;
+        beginTargetTransition(State::Paused);
+        return;
+    }
+    pauseInternal(release);
 }
 
 void GStreamerPlaybackBackend::pauseInternal(bool release)
 {
     if (m_playbin == nullptr) {
+        return;
+    }
+
+    if (m_nativePositionRestore && release && (m_pendingSeekMs >= 0 || m_seekInFlight)) {
+        m_nativeRestoreRelease = true;
         return;
     }
 
@@ -646,7 +659,9 @@ void GStreamerPlaybackBackend::pauseInternal(bool release)
         // transiently (e.g. mid-flush); the polled position is then the best
         // truth we have — don't let a failed query reset the resume point to 0.
         gint64 pos = GST_CLOCK_TIME_NONE;
-        if (handoffPositionMs >= 0) {
+        if (m_nativePositionRestore) {
+            m_resumePositionMs = m_pendingSeekMs >= 0 ? m_pendingSeekMs : m_lastSeekMs;
+        } else if (handoffPositionMs >= 0) {
             m_resumePositionMs = handoffPositionMs;
         } else if (gst_element_query_position(m_playbin, GST_FORMAT_TIME, &pos)) {
             m_resumePositionMs = clockTimeToMs(pos);
@@ -660,6 +675,9 @@ void GStreamerPlaybackBackend::pauseInternal(bool release)
         // PLAYING→PAUSED→READY transitions are suppressed in handleMessage
         // while m_softPaused is true.
         gst_element_set_state(m_playbin, GST_STATE_READY);
+        m_pendingSeekMs = -1;
+        clearSeekInFlight();
+        clearNativePositionRestore();
         finishTargetTransition();
         updateState(m_waitingForOutput && m_resumeOnOutput ? State::Buffering : State::Paused);
     } else if (handoffPositionMs < 0) {
@@ -680,6 +698,17 @@ void GStreamerPlaybackBackend::resume()
         return;
     }
 
+    if (m_nativePositionRestore) {
+        if (m_waitingForOutput) {
+            m_resumeOnOutput = true;
+            updateState(State::Buffering);
+            publishOutputStatus();
+        } else {
+            m_nativeRestoreRelease = false;
+            beginTargetTransition(State::Playing);
+        }
+        return;
+    }
     if (m_softPaused) {
         const bool direct = m_profile.mode == QStringLiteral("bit-perfect") || m_dsdActive;
         bool present = true;
@@ -719,14 +748,9 @@ void GStreamerPlaybackBackend::resume()
         m_resumeOnOutput = false;
         m_softPaused = false;
         beginTargetTransition(State::Playing);
-        // Re-preroll asynchronously: READY→PAUSED.  We must NOT block the GUI
-        // thread waiting for preroll — a slow/contended device could freeze the
-        // UI for seconds.  Remember the resume position; handleMessage() applies
-        // the seek and transitions to PLAYING once GST_MESSAGE_ASYNC_DONE shows
-        // the pipeline has prerolled.
-        m_pendingSeekMs = std::max<qint64>(0, m_resumePositionMs);
+        // Preroll asynchronously; bus messages drive the held-position seek.
         applyStreamTarget();
-        gst_element_set_state(m_playbin, GST_STATE_PAUSED);
+        queuePositionRestore(m_resumePositionMs);
         return;
     }
     beginTargetTransition(State::Playing);
@@ -752,6 +776,7 @@ void GStreamerPlaybackBackend::stop()
     if (m_playbin != nullptr) {
         gst_element_set_state(m_playbin, GST_STATE_NULL);
     }
+    clearNativePositionRestore();
     stopReadAhead();
     // Clear all source state so hasSource() is honest after stop/end-of-queue.
     {
@@ -825,6 +850,30 @@ void GStreamerPlaybackBackend::seek(qint64 positionMs)
         return;
     }
     issueSeek(positionMs);
+}
+
+void GStreamerPlaybackBackend::queuePositionRestore(qint64 positionMs)
+{
+    m_pendingSeekMs = std::max<qint64>(0, positionMs);
+    m_nativeRestoreRelease = false;
+    m_nativePositionRestore = !m_dsdActive
+        && m_sinkFactory == QStringLiteral("pipewiresink") && m_pendingSeekMs > 0;
+    if (m_nativePositionRestore) {
+        g_object_set(G_OBJECT(m_playbin), "mute", TRUE, nullptr);
+        if (m_positionMs != m_pendingSeekMs) {
+            m_positionMs = m_pendingSeekMs;
+            emit positionChanged(m_positionMs);
+        }
+    }
+    gst_element_set_state(m_playbin, GST_STATE_PAUSED);
+}
+
+void GStreamerPlaybackBackend::clearNativePositionRestore()
+{
+    m_nativeRestoreRelease = false;
+    if (std::exchange(m_nativePositionRestore, false) && m_playbin != nullptr && !m_dsdActive) {
+        g_object_set(G_OBJECT(m_playbin), "mute", FALSE, nullptr);
+    }
 }
 
 void GStreamerPlaybackBackend::issueSeek(qint64 positionMs)
@@ -1042,6 +1091,7 @@ void GStreamerPlaybackBackend::rebuildPipeline()
         gst_object_unref(m_playbin);
         m_playbin = nullptr;
     }
+    m_nativePositionRestore = false;
     releaseAudioSink();
     // Whatever we just tore down, we are about to build a playbin, so the active
     // pipeline is no longer the native-DSD graph.
@@ -1838,7 +1888,7 @@ void GStreamerPlaybackBackend::pollBus()
 
 void GStreamerPlaybackBackend::pollPosition()
 {
-    if (m_playbin == nullptr || m_softPaused) {
+    if (m_playbin == nullptr || m_softPaused || m_nativePositionRestore) {
         return;
     }
 
@@ -1988,10 +2038,13 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
         break;
     }
     case GST_MESSAGE_ASYNC_DONE:
-        // Preroll (or a flushing seek) has completed.  If a soft-pause resume is
-        // pending, this is the safe point to seek to the saved position and
-        // start playing — without ever having blocked the GUI thread.
+        // Native PipeWire needs its PLAYING buffer pool before FLUSH_START.
+        // Other sinks restore position directly from the PAUSED preroll.
         if (m_pendingSeekMs >= 0 && GST_MESSAGE_SRC(message) == GST_OBJECT(m_playbin)) {
+            if (m_nativePositionRestore) {
+                gst_element_set_state(m_playbin, GST_STATE_PLAYING);
+                break;
+            }
             const qint64 seekTo = m_pendingSeekMs;
             m_pendingSeekMs = -1; // clear first so the post-seek ASYNC_DONE is a no-op
             if (seekTo > 0) {
@@ -2014,11 +2067,23 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
                     issueSeek(next);
                 }
             }
+            if (m_nativePositionRestore && !m_seekInFlight) {
+                if (m_nativeRestoreRelease) {
+                    pauseInternal(/*release=*/true);
+                } else {
+                    if (m_targetState == State::Paused) {
+                        gst_element_set_state(m_playbin, GST_STATE_PAUSED);
+                    }
+                    clearNativePositionRestore();
+                }
+            }
             GstState current = GST_STATE_NULL;
             GstState pending = GST_STATE_VOID_PENDING;
             gst_element_get_state(m_playbin, &current, &pending, 0);
             Q_UNUSED(pending)
-            publishObservedState(stateFromGst(current));
+            if (!m_softPaused) {
+                publishObservedState(stateFromGst(current));
+            }
         }
         break;
     case GST_MESSAGE_STATE_CHANGED:
@@ -2029,11 +2094,22 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
             gst_message_parse_state_changed(message, &oldState, &newState, &pending);
             Q_UNUSED(oldState)
             Q_UNUSED(pending)
+            if (m_nativePositionRestore && m_pendingSeekMs >= 0 && newState == GST_STATE_PLAYING) {
+                const qint64 seekTo = std::exchange(m_pendingSeekMs, -1);
+                issueSeek(seekTo);
+                if (!m_seekInFlight) {
+                    gst_element_set_state(m_playbin, GST_STATE_READY);
+                    clearNativePositionRestore();
+                    finishTargetTransition();
+                    updateState(State::Error);
+                    emit errorOccurred(QStringLiteral("Could not restore playback position"));
+                }
+            }
             // Publish transport intent, not GStreamer's transient hops. Source
             // swaps and resume preroll move through READY/PAUSED on the way to
             // PLAYING; forwarding those as user-visible Stopped/Paused drifts
             // PlayerBar, IPC/MPRIS and scrobbling away from audible playback.
-            if (!m_softPaused && m_pendingSeekMs < 0) {
+            if (!m_softPaused && m_pendingSeekMs < 0 && !m_nativePositionRestore) {
                 publishObservedState(stateFromGst(newState));
             }
         }
