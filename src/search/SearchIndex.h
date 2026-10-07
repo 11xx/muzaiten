@@ -92,6 +92,9 @@ public:
     const QVector<SearchRecord> &records() const { return m_records; }
 
 private:
+    // The offline benchmark observes backing-storage capacities.
+    friend struct SearchIndexBenchmarkAccess;
+
     struct FolderNode {
         int parent = -1;
         QString component;

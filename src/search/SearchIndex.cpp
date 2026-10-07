@@ -13,6 +13,7 @@
 #include <climits>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -21,6 +22,15 @@ namespace Search {
 namespace {
 
 std::atomic<quint64> nextGeneration{0};
+
+template <typename Size>
+Size appendCapacity(Size current, Size required)
+{
+    if (required <= current) return current;
+    const Size increment = std::max<Size>(Size{1}, current / 2);
+    if (current > std::numeric_limits<Size>::max() - increment) return required;
+    return std::max(required, current + increment);
+}
 
 // ---- highlight helpers (delegate, on-screen rows only) --------------------
 
@@ -66,8 +76,14 @@ void SearchIndex::append(QVector<SearchRecord> records)
         build(std::move(records));
         return;
     }
-    m_records.reserve(m_records.size() + records.size());
-    m_masks.reserve(static_cast<std::size_t>(m_records.size() + records.size()));
+    const qsizetype requiredRecords = m_records.size() + records.size();
+    if (requiredRecords > m_records.capacity()) {
+        m_records.reserve(appendCapacity(m_records.capacity(), requiredRecords));
+    }
+    const std::size_t requiredMasks = m_masks.size() + static_cast<std::size_t>(records.size());
+    if (requiredMasks > m_masks.capacity()) {
+        m_masks.reserve(appendCapacity(m_masks.capacity(), requiredMasks));
+    }
     for (SearchRecord &rec : records) {
         m_masks.push_back(recordNormMasks(rec));
         indexPath(rec.normPath);
