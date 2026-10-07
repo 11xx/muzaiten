@@ -133,8 +133,9 @@
 
 - Native PipeWire playback restores its held position after reconnecting without
   a flushing seek during PAUSED preroll, which can hang the sink. Reconnecting
-  stays silent until the position is restored and respects pause and seek
-  requests, including while waiting for a preferred output. The release-on-pause
+  stays silent until the position is restored, shows new seek targets immediately,
+  and respects pause and seek requests, including while waiting for a
+  preferred output. The release-on-pause
   preference and direct ALSA/DSD device release are preserved.
 - Thai `็อ` before a final consonant folds to short `o` in Latin search
   readings, including `ป็อป` (`pop`) and `ล็อก` (`lok`). Native Thai marks

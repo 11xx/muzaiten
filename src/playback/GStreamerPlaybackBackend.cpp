@@ -821,6 +821,13 @@ void GStreamerPlaybackBackend::seek(qint64 positionMs)
         return;
     }
 
+    // Native restore suppresses position polling until its seek completes.
+    // An explicit retarget is the position the controls should show meanwhile.
+    if (m_nativePositionRestore && m_positionMs != positionMs) {
+        m_positionMs = positionMs;
+        emit positionChanged(m_positionMs);
+    }
+
     // A resume/load preroll is still in flight; its ASYNC_DONE handler will
     // apply m_pendingSeekMs, so just retarget it.
     if (m_pendingSeekMs >= 0) {
@@ -1299,6 +1306,9 @@ void GStreamerPlaybackBackend::setSinkTarget(const QByteArray &target)
         return;
     }
     QMutexLocker locker(&m_sinkTargetMutex);
+    if (g_object_class_find_property(G_OBJECT_GET_CLASS(m_audioSink), property) == nullptr) {
+        return;
+    }
     g_object_set(G_OBJECT(m_audioSink), property, target.isEmpty() ? nullptr : target.constData(), nullptr);
 }
 

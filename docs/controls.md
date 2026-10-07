@@ -147,7 +147,8 @@ plays before its window opens.
 Resuming restores the held position before audio becomes audible. With the
 native PipeWire transport, reconnecting stays silent while the stream becomes
 ready for that seek; pausing or seeking during reconnect keeps the latest
-requested state and position. Direct ALSA and native DSD pauses release their
+requested state and position, and the position display follows an explicit
+seek immediately. Direct ALSA and native DSD pauses release their
 exclusive device regardless of the shared-output preference.
 
 While a chosen output is missing, playback pauses at its position and resumes
