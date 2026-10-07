@@ -87,6 +87,7 @@ VARIANT_FIELDS = ("kSimplifiedVariant", "kTraditionalVariant")
 TONE_MARKS = {"\u0304", "\u0301", "\u030c", "\u0300"}
 DIACRITIC = "\u0308"
 PINYIN_CIRCUMFLEX = "\u0302"
+SPACING_CARON = "\u02c7"
 CHECK_KINDS = (
     "format", "coverage", "default", "tone", "unattested", "archaic", "missing", "simplified",
     "family-target", "variant-guard",
@@ -101,10 +102,18 @@ PARTICLE_READINGS = {"着": "zhe", "著": "zhe", "了": "le", "的": "de", "地"
                      "得": "de", "都": "dou", "和": "he", "没": "mei", "还": "hai"}
 
 
+def reference_cache() -> dict[str, pathlib.Path]:
+    """Return where the pinned references are cached, whether or not they are present."""
+    cns = TOOLS_CACHE / "cns11643-20260805"
+    return {"unihan": TOOLS_CACHE / f"Unihan-{UNIHAN_VERSION}.zip",
+            "cns-properties": cns / "Properties.zip", "cns-mappings": cns / "MapingTables.zip",
+            "opencc": TOOLS_CACHE / "opencc-1.4.2" / "TSCharacters.txt"}
+
+
 def unihan_archive(path: pathlib.Path | None) -> pathlib.Path:
     """Validate the pinned reference hash independently of Python's Unicode version."""
     if path is None:
-        path = TOOLS_CACHE / f"Unihan-{UNIHAN_VERSION}.zip"
+        path = reference_cache()["unihan"]
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             urllib.request.urlretrieve(UNIHAN_URL, path)
@@ -128,7 +137,7 @@ def cedict_archive(path: pathlib.Path | None = None) -> pathlib.Path:
 
 def opencc_archive(path: pathlib.Path | None = None) -> pathlib.Path:
     if path is None:
-        path = TOOLS_CACHE / "opencc-1.4.2" / "TSCharacters.txt"
+        path = reference_cache()["opencc"]
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".TSCharacters-", delete=False) as temporary:
@@ -160,7 +169,7 @@ def opencc_characters(path: pathlib.Path) -> dict[str, list[str]]:
 
 def cns_archives(paths: tuple[pathlib.Path, pathlib.Path] | None = None) -> tuple[pathlib.Path, pathlib.Path]:
     if paths is None:
-        paths = tuple(TOOLS_CACHE / "cns11643-20260805" / name for name in CNS_SHA256)
+        paths = reference_cache()["cns-properties"], reference_cache()["cns-mappings"]
     for path in paths:
         expected = CNS_SHA256[path.name]
         if not path.exists():
@@ -181,10 +190,23 @@ def cns_archives(paths: tuple[pathlib.Path, pathlib.Path] | None = None) -> tupl
     return paths
 
 
+def cns_pinyin(spelling: str) -> str:
+    """Return a CNS spelling with a spacing caron after a vowel as the combining third tone.
+
+    The combining caron replaces it only when the result is a tone-marked syllable."""
+    if SPACING_CARON not in spelling:
+        return spelling
+    combined = unicodedata.normalize("NFC", re.sub(
+        "([aeiou][\u0300-\u036f]*)" + SPACING_CARON, "\\1\u030c", unicodedata.normalize("NFD", spelling)))
+    base = pinyin_base(combined)
+    return combined if base and is_tone_marked_pinyin(combined, {base}, {combined}) else spelling
+
+
 def cns_readings(paths: tuple[pathlib.Path, pathlib.Path]) -> dict[str, set[str]]:
     properties, mappings = paths
     with zipfile.ZipFile(properties) as archive:
-        pinyin = dict(line.split("\t")[:2] for line in archive.read("CNS_pinyin_2.txt").decode().splitlines())
+        pinyin = {zhuyin: cns_pinyin(spelling) for zhuyin, spelling in
+                  (line.split("\t")[:2] for line in archive.read("CNS_pinyin_2.txt").decode().splitlines())}
         by_code: dict[str, set[str]] = defaultdict(set)
         for line in archive.read("CNS_phonetic.txt").decode().splitlines():
             code, zhuyin = line.split("\t")[:2]
@@ -198,7 +220,7 @@ def cns_readings(paths: tuple[pathlib.Path, pathlib.Path]) -> dict[str, set[str]
             for line in archive.read(member).decode().splitlines():
                 code, hex_point = line.split("\t")[:2]
                 point = int(hex_point, 16)
-                if any(lo <= point <= hi for lo, hi in IDEOGRAPH_BLOCKS):
+                if in_ideograph_blocks(chr(point)):
                     result[chr(point)].update(by_code.get(code, ()))
     return {ch: readings for ch, readings in result.items() if readings}
 
@@ -308,12 +330,12 @@ def simplified_form(ch: str, fields: dict[str, dict[str, str]]) -> str | None:
     return variants[0]
 
 
+def in_ideograph_blocks(ch: str) -> bool:
+    return any(lo <= ord(ch) <= hi for lo, hi in IDEOGRAPH_BLOCKS)
+
+
 def is_unihan_ideograph(ch: str) -> bool:
-    cp = ord(ch)
-    return (
-        any(lo <= cp <= hi for lo, hi in IDEOGRAPH_BLOCKS)
-        and unicodedata.category(ch) == "Lo"
-    )
+    return in_ideograph_blocks(ch) and unicodedata.category(ch) == "Lo"
 
 
 def authored_ideographs(directory: pathlib.Path) -> set[str]:
@@ -419,7 +441,9 @@ def ks_x1001() -> list[str]:
 
 def tiers(fields: dict[str, dict[str, str]] | None = None,
           cns: dict[str, set[str]] | None = None) -> dict[str, list[str]]:
-    """Return each standard and block's ideographs absent from earlier tiers."""
+    """Return each standard and block's ideographs absent from earlier tiers.
+
+    Every member lies in `IDEOGRAPH_BLOCKS`; compatibility ideographs belong to no tier."""
     if fields is None:
         fields = unihan_fields(unihan_archive(None), "kTGH", "kUnihanCore2020",
                                *READING_FIELDS, *VARIANT_FIELDS, "kZVariant")
@@ -427,12 +451,13 @@ def tiers(fields: dict[str, dict[str, str]] | None = None,
         cns = cns_readings(cns_archives())
     seen: set[str] = set()
     result = {}
-    data = set().union(*(set(fields.get(name, {})) for name in (*READING_FIELDS, *VARIANT_FIELDS, "kZVariant")))
+    data = {ch for name in (*READING_FIELDS, *VARIANT_FIELDS, "kZVariant")
+            for ch in fields.get(name, {}) if in_ideograph_blocks(ch)}
     reverse = {ch for ch, value in fields.get("kTraditionalVariant", {}).items()
-               if ord(ch) >= 0x10000 and any(ord(v) < 0x10000 for v in variant_codes(value))}
+               if ord(ch) >= 0x10000 and in_ideograph_blocks(ch) and any(ord(v) < 0x10000 for v in variant_codes(value))}
     eligible = data | reverse
     ordered = (("gb2312", gb2312()), ("big5", big5_level1()), ("jis", jis_x0208()),
-               ("ksx", ks_x1001()), ("tgh", sorted(fields.get("kTGH", {}))),
+               ("ksx", ks_x1001()), ("tgh", sorted(ch for ch in fields.get("kTGH", {}) if in_ideograph_blocks(ch))),
                ("big5-2", [ch for ch in big5_level2() if ch in data]),
                ("core", sorted(set(fields.get("kUnihanCore2020", {})) & eligible)),
                ("uro", sorted(ch for ch in eligible if 0x4E00 <= ord(ch) <= 0x9FFF)),

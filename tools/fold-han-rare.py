@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import importlib.util
 import json
@@ -111,6 +112,36 @@ def reading(value: str) -> str:
     if not base or not data.is_tone_marked_pinyin(value, {base}, {nfc(value)}):
         raise ValueError(f"invalid pinyin reading: {value}")
     return nfc(value)
+
+
+@functools.cache
+def reference_reading(value: str) -> str | None:
+    """Return a reference spelling as NFC pinyin, or None when it is not pinyin."""
+    try:
+        return reading(value)
+    except ValueError:
+        return None
+
+
+def endpoint(value: str) -> str | None:
+    """Return the unified ideograph a relation names, or None outside the ideograph blocks.
+
+    NFC maps each compatibility ideograph to its unified counterpart."""
+    value = nfc(value)
+    return value if len(value) == 1 and data.in_ideograph_blocks(value) else None
+
+
+def links(pairs):
+    """Yield canonical (source, target) relations between distinct ideographs."""
+    for ch, targets in pairs:
+        source = endpoint(ch)
+        for target in map(endpoint, targets):
+            if source and target and source != target:
+                yield source, target
+
+
+def unihan_links(fields: dict[str, dict[str, str]], field: str):
+    return links((ch, data.variant_codes(raw)) for ch, raw in fields.get(field, {}).items())
 
 
 def document(path: pathlib.Path) -> tuple[dict[str, object], list[tuple[int, list[str]]]]:
@@ -226,22 +257,31 @@ class References:
     opencc: dict[str, list[str]]
     pins: dict
 
+    def unihan_spellings(self, ch: str, fields: tuple[str, ...]) -> list[str]:
+        return [raw for field in fields for raw in data.field_readings(field, self.fields.get(field, {}).get(ch, ""))]
+
+    def spellings(self, ch: str) -> list[tuple[str, str]]:
+        """Return (source, raw spelling) pairs; the source is a Unihan field or `cns`."""
+        return ([(field, raw) for field in data.READING_FIELDS for raw in self.unihan_spellings(ch, (field,))]
+                + [("cns", raw) for raw in sorted(self.cns.get(ch, ()))])
+
     def attestations(self, ch: str) -> dict[str, set[str]]:
         result = defaultdict(set)
-        for field in data.READING_FIELDS:
-            for raw in data.field_readings(field, self.fields.get(field, {}).get(ch, "")):
-                result[reading(raw)].add("unihan")
-        for raw in self.cns.get(ch, ()):
-            result[reading(raw)].add("cns")
+        for source, raw in self.spellings(ch):
+            if value := reference_reading(raw):
+                result[value].add("cns" if source == "cns" else "unihan")
         return dict(result)
 
+    def unparseable(self, ch: str) -> list[tuple[str, str]]:
+        return sorted({(source, raw) for source, raw in self.spellings(ch) if reference_reading(raw) is None})
+
+    def mandarin(self, ch: str) -> list[str]:
+        return [value for raw in self.unihan_spellings(ch, ("kMandarin",)) if (value := reference_reading(raw))]
+
     def mainland(self, ch: str) -> set[str]:
-        values = {reading(r) for field in MAINLAND_FIELDS
-                  for r in data.field_readings(field, self.fields.get(field, {}).get(ch, ""))}
-        mandarin = data.field_readings("kMandarin", self.fields.get("kMandarin", {}).get(ch, ""))
-        if mandarin:
-            values.add(reading(mandarin[0]))
-        return values
+        """Return readings from mainland fields and the first kMandarin spelling."""
+        raw = self.unihan_spellings(ch, MAINLAND_FIELDS) + self.unihan_spellings(ch, ("kMandarin",))[:1]
+        return {value for spelling in raw if (value := reference_reading(spelling))}
 
 
 def classify(ch: str, value: str, lineages: set[str], predictions: Predictions) -> Record:
@@ -257,7 +297,7 @@ def classify(ch: str, value: str, lineages: set[str], predictions: Predictions) 
 def ordered_readings(ch: str, refs: References, predictions: Predictions) -> tuple[list[Record], list[tuple[str, str]]]:
     attestations = refs.attestations(ch)
     records = {value: classify(ch, value, sources, predictions) for value, sources in attestations.items()}
-    mandarin = [reading(r) for r in data.field_readings("kMandarin", refs.fields.get("kMandarin", {}).get(ch, ""))]
+    mandarin = refs.mandarin(ch)
     candidates = [(p.batch, i, token) for p in predictions.rows.get(ch, ()) for i, token in enumerate(p.normalized)]
 
     def evidence(value: str):
@@ -274,6 +314,7 @@ def ordered_readings(ch: str, refs: References, predictions: Predictions) -> tup
         issues.append((" ".join(placed), "CNS-only default requires a reviewed decision"))
     elif len(placed) > 1 and (placed[0] in mainland) == (placed[1] in mainland) and evidence(placed[0])[:-1] == evidence(placed[1])[:-1]:
         issues.append((" ".join(placed), "evidence-order tie requires a reviewed decision"))
+    issues.extend((raw, f"unparseable {source} reading") for source, raw in refs.unparseable(ch))
     for rank, value in enumerate(placed, 1):
         r = records[value]
         records[value] = Record(r.ch, r.value, r.basis, r.attested_by, r.tone_from, rank, r.batch)
@@ -287,37 +328,29 @@ def family_mappings(refs: References, authored: set[str], choices: dict[str, str
     issues = defaultdict(list)
 
     def edge(a: str, b: str, label: str):
-        if a == b:
-            return
-        ideograph(a)
-        ideograph(b)
         graph[a].setdefault(b, set()).add(label)
         graph[b].setdefault(a, set()).add(label)
 
     for field in DIRECT_FIELDS:
-        for ch, raw in refs.fields.get(field, {}).items():
-            for target in data.variant_codes(raw):
-                edge(ch, target, "unihan:" + field)
-                if field == "kSimplifiedVariant" and target != ch:
-                    simplified.add(target)
-    for ch, targets in refs.opencc.items():
-        for target in targets:
-            edge(ch, target, "opencc:TSCharacters")
-            if target != ch:
+        for ch, target in unihan_links(refs.fields, field):
+            edge(ch, target, "unihan:" + field)
+            if field == "kSimplifiedVariant":
                 simplified.add(target)
+    for ch, target in links(refs.opencc.items()):
+        edge(ch, target, "opencc:TSCharacters")
+        simplified.add(target)
     typed = authored | set(refs.fields.get("kTGH", {}))
     partial = defaultdict(dict)
     for field in PARTIAL_FIELDS:
-        for ch, raw in refs.fields.get(field, {}).items():
-            for target in data.variant_codes(raw):
-                if target == ch or target in graph.get(ch, {}):
-                    continue
-                valid = (ch not in typed and target in typed
-                         and bool({syllable(r) for r in refs.attestations(ch)} & {syllable(r) for r in refs.attestations(target)}))
-                if valid:
-                    partial[ch].setdefault(target, set()).add("unihan:" + field)
-                else:
-                    issues[ch].append("variant-guard:" + field + "=" + target)
+        for ch, target in unihan_links(refs.fields, field):
+            if target in graph.get(ch, {}):
+                continue
+            valid = (ch not in typed and target in typed
+                     and bool({syllable(r) for r in refs.attestations(ch)} & {syllable(r) for r in refs.attestations(target)}))
+            if valid:
+                partial[ch].setdefault(target, set()).add("unihan:" + field)
+            else:
+                issues[ch].append("variant-guard:" + field + "=" + target)
     for ch, targets in partial.items():
         def lineage_syllables(member: str, lineage: str) -> set[str]:
             return {syllable(value) for value, sources in refs.attestations(member).items() if lineage in sources}
