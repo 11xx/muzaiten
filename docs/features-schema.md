@@ -277,6 +277,74 @@ Caveats:
 - Tempo may fold to a half/double octave at extreme BPM.
 - Tempo on non-rhythmic material is unreliable rather than NULL.
 
+## Local feature-pack format
+
+`muzaiten-features pack export|import FILE` exchanges existing scalar group
+rows without copying a database. Version 1 is UTF-8 NDJSON: one header object
+on the first line, followed by exactly the declared number of record objects.
+Every line, including the last, ends in a newline. The header contains exactly:
+
+```json
+{"format":"muzaiten-features-pack","version":1,"records":1}
+```
+
+Each record contains exactly `decode_hash`, `extractor`, `version` and
+`scalars`. `decode_hash` is 64 lowercase SHA-256 hex digits for the source
+group's lexicographically first successful path. `extractor` and `version`
+are nonempty ASCII tokens of at most 128 characters using letters, digits,
+hyphens, underscores and periods. The `scalars` object requires all nine
+columns: `tempo_bpm`, `loudness_lufs`, `loudness_std_db`,
+`spectral_centroid_mean_hz`, `spectral_centroid_std_hz`,
+`spectral_flatness_mean`, `zero_crossing_rate`, `onset_rate_hz` and `energy`.
+Each value is a finite JSON number or `null`, preserving SQL NULL semantics.
+Numbers except loudness are nonnegative; flatness, zero-crossing rate and
+energy are at most 1. Units and interpretation match the group rows above.
+
+Files are limited to 64 MiB, 100,000 records and 16 KiB per line excluding
+the newline. Unknown or missing keys at every level, unknown format versions,
+duplicate keys (including escaped spellings), duplicate hashes, invalid
+UTF-8, malformed or truncated lines, invalid values and record-count
+disagreements are rejected before opening the store. A header count detects
+truncation at a complete record boundary.
+
+Export emits one record per successful group with a valid representative
+hash and a current `muzaiten-dsp` scalar row. Missing or stale rows are
+counted as skipped; export never invokes extraction. Ambiguous representative
+hashes require repairing the identity store with refresh before export.
+Import requires an existing schema-5 store and performs no schema migration.
+Refresh identity first so the recipient's hashes describe its current audio.
+Only exact representative hashes with extractor `muzaiten-dsp` and the
+running binary's `Dsp::kDspVersion` are compatible. A nonrepresentative
+member's matching hash, similar fingerprint or matching MusicBrainz ID
+cannot authorize adoption. Ambiguous destination hashes are mismatched.
+
+The native writer holds `features.sqlite.lock` for preview, export and
+import. Valid imports write group rows in one transaction. Existing rows,
+including stale rows, require `--replace`. Import does not modify identity,
+per-file caches, semantic generations, neighbors or scan metadata. Readers
+and refresh judge imported versions by their ordinary freshness rules.
+
+The CLI report includes `format`, `version`, `operation`, `dry_run`,
+`replace`, `contents`, `records`, `adopted`, `skipped`, `mismatched`,
+`incompatible` and `existing`. For import, every incoming record is adopted,
+skipped because a local row already exists, or mismatched because its
+extractor/version or representative hash does not qualify. `incompatible`
+is the extractor/version subset of `mismatched`; `existing` is the
+existing-row subset of `skipped`. `adopted` means would adopt during dry-run.
+Import also reports `destination_groups`, `destination_unmatched_groups`,
+`destination_files` and `destination_unmatched_files`. Unmatched groups have
+no compatible incoming representative record; unmatched files have no exact
+hash in a compatible incoming record, regardless of group membership.
+Export adds `exported` (would export during dry-run) and uses `skipped` for
+groups without exportable current rows.
+
+Version 1 has no optional identifier or embedding section. It excludes paths,
+filenames, file sizes, mtimes, analysis times, internal content-group IDs,
+history, application state, ratings and timestamps. Taste/history is absent,
+but hashes identify recordings; the pack is not anonymous library data.
+Embedding exchange requires an enforceable exact model, checkpoint SHA-256,
+feature revision and dimension match, together with verified source terms.
+
 ## Embedding Rows
 
 `muzaiten-features-clap` supplies CLAP embeddings and cosine neighbors through

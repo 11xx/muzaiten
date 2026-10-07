@@ -16,6 +16,12 @@
 
 ### Added
 
+- Local scalar feature-pack export/import through `muzaiten-features pack`,
+  with strict versioned NDJSON, dry-run counts, explicit replacement and
+  atomic writes. Adoption requires exact representative decoded-audio hashes
+  and compatible extractor versions; rejected packs leave the feature store
+  unchanged. Packs omit taste/history, paths, ratings and timestamps, but
+  identify recordings by content hash. Embeddings are excluded.
 - Local radio tuning-profile export/import in `Radio > Customization…` and
   `muzaitenctl radio-weights`, preserving scoring weights and session decay
   in versioned JSON. Imports offer a preview and explicit replacement;

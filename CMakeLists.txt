@@ -995,7 +995,7 @@ target_compile_options(muzaiten_dsp PRIVATE
     $<$<AND:$<CXX_COMPILER_ID:GNU,Clang>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-O3>
 )
 
-add_executable(muzaiten-features src/indexer/FeaturesMain.cpp)
+add_executable(muzaiten-features src/indexer/FeaturesMain.cpp src/indexer/FeaturesPack.cpp)
 muzaiten_configure_executable(muzaiten-features)
 target_link_libraries(muzaiten-features PRIVATE
     muzaiten_core

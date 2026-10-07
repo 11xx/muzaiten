@@ -113,6 +113,43 @@ named profile. Profile and export writes are atomic; a failed
 import write also keeps the in-memory profile list intact. Exchange provides
 no accounts, uploads or network transport.
 
+### Local scalar feature-pack files
+
+`muzaiten-features pack export|import FILE` exchanges local
+`muzaiten-features-pack` v1 NDJSON files. There is no network transport,
+account, upload or automatic pack generation. Export uses existing current
+scalar analysis and never invokes a semantic provider. Taste, history and
+ratings are absent, but decoded-audio content hashes identify recordings
+and can reveal which recordings a library contains. Review that disclosure
+before sharing a pack. Fingerprints and MusicBrainz identifiers are not
+private; neither is included in v1.
+
+The header contains format, version and a record count. Each group record
+contains its representative's exact decoded-audio hash, extractor/version
+and the nine scalar features. No paths, filenames, file sizes, mtimes,
+analysis times, internal group IDs, history, state, ratings, timestamps or
+embeddings are included. Import only adopts an exact local representative
+hash with the running binary's compatible extractor/version. Matching tags,
+MusicBrainz IDs, fingerprints or other members of a group cannot substitute
+for that key.
+
+The complete pack is validated before store access. Unknown versions or
+keys, duplicates, malformed/truncated JSON, invalid UTF-8 and values,
+incorrect counts, files over 64 MiB, more than 100,000 records and lines over
+16 KiB are rejected without changing the feature store. `--dry-run` previews
+the same adoption decisions without writing rows or export files. Import
+holds the native writer lock and commits all adopted rows in one transaction;
+operational write failures roll back that transaction. Existing feature
+rows, including stale ones, are preserved unless `--replace` is explicit.
+Imported rows obey normal DSP-version freshness and never activate
+embeddings or modify listening state.
+
+Export uses atomic writes, requires `--replace` for an existing file and
+refuses symlink destinations or the feature database and its sidecars.
+Failed export writes retain an existing destination. See
+[features-schema.md](features-schema.md#local-feature-pack-format) for
+exact payload keys and report counts.
+
 ### Storage locations
 
 Application-owned state belongs under XDG locations:
