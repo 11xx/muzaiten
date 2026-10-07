@@ -422,7 +422,8 @@ class FeaturesPackTest(unittest.TestCase):
             new_hash, new_group_id = db.execute("SELECT decode_hash, content_group_id FROM files WHERE path=?",
                                                (str(representative),)).fetchone()
             group_scalars = db.execute(f"SELECT {SCALARS} FROM features").fetchone()
-            own_scalars = db.execute(f"SELECT {SCALARS} FROM file_features").fetchone()
+            own_scalars = db.execute(f"SELECT {SCALARS} FROM file_features WHERE path=?",
+                                     (str(representative),)).fetchone()
         self.assertEqual(new_group_id, group_id)
         self.assertNotEqual(new_hash, old_hash)
         self.assertEqual(group_scalars, old_scalars)
