@@ -262,6 +262,11 @@ Rapidly superseded queries are coalesced before scanning the index.
 | Double-click | Play now |
 | Right-click | Full track context menu (play/queue/radio/taste/copy path/…) |
 
+Exclusion patterns in `Settings > Search ranking…` apply to GUI results. The
+status line reports matches hidden by those patterns for the current query.
+It clears the pending count without shifting the search field while a query is
+running. Terminal search ignores GUI exclusions.
+
 ## Query syntax
 
 | Pattern | Meaning |

@@ -303,8 +303,7 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
                                                      fuzzyMode, &exact, &pathLookup);
             if (bound == INT_MIN) continue;
             if (excluded) {
-                if (!exact && scoreSearchRecord(rec, masks, query, termMasks,
-                                                fuzzyMode, &pathLookup) == INT_MIN) continue;
+                // Counts use the same bound as visible records below the heap floor.
                 ++out.hidden;
                 if (matchingIndices) out.indices.append(i);
                 continue;

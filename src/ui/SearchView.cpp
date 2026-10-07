@@ -30,6 +30,7 @@
 #include <QPalette>
 #include <QScrollBar>
 #include <QShowEvent>
+#include <QSizePolicy>
 #include <QStringList>
 #include <QThread>
 #include <QTimer>
@@ -130,6 +131,9 @@ void SearchView::setupUi(int idleReleaseMs)
     m_hiddenLabel = new QLabel(topBar);
     m_hiddenLabel->setObjectName(QStringLiteral("search.hiddenMatches"));
     setSecondaryTextColor(m_hiddenLabel, palette());
+    QSizePolicy hiddenPolicy = m_hiddenLabel->sizePolicy();
+    hiddenPolicy.setRetainSizeWhenHidden(true);
+    m_hiddenLabel->setSizePolicy(hiddenPolicy);
     m_hiddenLabel->hide();
     topLayout->addWidget(m_hiddenLabel);
 

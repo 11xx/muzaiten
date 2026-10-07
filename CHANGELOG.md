@@ -131,6 +131,9 @@
 
 ### Changed
 
+- Fuzzy GUI searches count matches hidden by exclusions without scoring every
+  hidden candidate. The hidden-count label keeps its space while a new query
+  runs and follows the current palette.
 - GUI search keeps answering queries while a completed index is saved to the
   cache. Superseded or canceled writes are discarded, and source changes during
   persistence trigger a refresh before a complete current cache is published.
