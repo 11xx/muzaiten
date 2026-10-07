@@ -561,6 +561,8 @@ add_test(NAME test_fold_sweep
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fold_sweep.py)
 add_test(NAME test_fold_han_data
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fold_han_data.py ${CMAKE_SOURCE_DIR})
+add_test(NAME test_fold_han_rare
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fold_han_rare.py)
 
 add_executable(test_keybindings_dialog
     test_keybindings_dialog.cpp

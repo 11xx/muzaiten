@@ -1,0 +1,86 @@
+Han reference provenance
+
+Reference versions, source URLs and archive checksums are recorded in the
+provenance headers. Per-value records distinguish blind predictions, independent
+reading agreement and transcription from one lineage. Those labels do not
+establish a public-domain status or a distribution license. A release license
+verdict depends on the assembled corpus and its retained provenance.
+Prediction logs identify decomposition sources by id and pinned revision and
+record only input checksums. Verbatim decomposition inputs, prompts and raw
+responses require their own source-license determination before distribution;
+blind prediction, source pointers and checksums do not confer those rights.
+
+Unicode Unihan
+  Provider: Unicode, Inc.
+  Source: https://www.unicode.org/Public/
+  Reading fields and variant relations are used for attestation and assembly.
+  Transcribed readings are identified by basis=single, attested_by=unihan in
+  tools/fold-han-provenance/<tier>.tsv for the corresponding <tier>.tsv table.
+  Unicode License v3 is reproduced below. The generated Unihan tier also carries
+  its own UNICODE-LICENSE.txt.
+
+CNS 11643 full character set open dataset
+  Dataset: CNS11643中文標準交換碼全字庫(簡稱全字庫), dataset 5961.
+  Source: https://data.gov.tw/dataset/5961
+  Archives: https://www.cns11643.gov.tw/opendata/Properties.zip
+            https://www.cns11643.gov.tw/opendata/MapingTables.zip
+  Source terms: https://data.gov.tw/license
+  These coordinates identify the checking and assembly reference. A distribution
+  containing CNS-derived rows must record the applicable terms and full dataset
+  attribution with those rows after a license decision for that corpus. Reference
+  metadata alone does not select a distribution license or establish compatibility.
+
+OpenCC TSCharacters
+  Provider: the OpenCC contributors.
+  Source: https://github.com/BYVoid/OpenCC
+  Reference commits and content checksums appear in provenance headers.
+  Character relations are used to check and assemble variant families; they
+  are not an independent reading lineage. Upstream source and license notices
+  must accompany any distributed transcription as applicable.
+
+Transcribed-file inventory
+  The per-tier provenance sidecar and table basis counts identify the scope of
+  transcription. Distribution preparation must enumerate the actual files that
+  contain transcribed readings or mappings and retain their source notices.
+
+UNICODE LICENSE V3
+
+COPYRIGHT AND PERMISSION NOTICE
+
+Copyright © 2016-2025 Unicode, Inc.
+
+NOTICE TO USER: Carefully read the following legal agreement. BY
+DOWNLOADING, INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR
+SOFTWARE, YOU UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE
+TERMS AND CONDITIONS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT
+DOWNLOAD, INSTALL, COPY, DISTRIBUTE OR USE THE DATA FILES OR SOFTWARE.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of data files and any associated documentation (the "Data Files") or
+software and any associated documentation (the "Software") to deal in the
+Data Files or Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, and/or sell
+copies of the Data Files or Software, and to permit persons to whom the
+Data Files or Software are furnished to do so, provided that either (a)
+this copyright and permission notice appear with all copies of the Data
+Files or Software, or (b) this copyright and permission notice appear in
+associated Documentation.
+
+THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF
+THIRD PARTY RIGHTS.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE
+BE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES,
+OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA
+FILES OR SOFTWARE.
+
+Except as contained in this notice, the name of a copyright holder shall
+not be used in advertising or otherwise to promote the sale, use or other
+dealings in these Data Files or Software without prior written
+authorization of the copyright holder.
+
+SPDX-License-Identifier: Unicode-3.0

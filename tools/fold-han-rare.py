@@ -1,0 +1,632 @@
+#!/usr/bin/env python3
+"""Assemble and audit rare Han proposals from pinned references and blind logs."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import importlib.util
+import json
+import pathlib
+import re
+import sys
+import unicodedata
+from collections import Counter, defaultdict, deque
+from dataclasses import dataclass
+from datetime import date
+from urllib.parse import urlsplit
+
+
+def load_checker():
+    if "fold_han_data" not in sys.modules:
+        spec = importlib.util.spec_from_file_location("fold_han_data", pathlib.Path(__file__).with_name("fold-han-data.py"))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+    return sys.modules["fold_han_data"]
+
+
+data = load_checker()
+PREDICTION_SCHEMA = "fold-han-predictions/2"
+PROVENANCE_SCHEMA = "fold-han-provenance/1"
+REFERENCE_SCHEMA = "fold-han-references/1"
+PREDICTION_COLUMNS = "ideograph readings confidence sound_component stated_basis decomposition_sha256 hint normalized_readings simplified".split()
+PROVENANCE_COLUMNS = "ideograph value basis attested_by tone_from rank batch".split()
+DIRECT_FIELDS = (*data.VARIANT_FIELDS, "kZVariant")
+PARTIAL_FIELDS = ("kSemanticVariant", "kSpecializedSemanticVariant")
+MAINLAND_FIELDS = ("kHanyuPinyin", "kXHC1983", "kTGHZ2013")
+FIELDS = (*data.READING_FIELDS, *DIRECT_FIELDS, *PARTIAL_FIELDS, "kTGH", "kUnihanCore2020")
+SHA256 = re.compile(r"[a-f0-9]{64}\Z")
+TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+/#:-]*\Z")
+
+
+def canonical(value) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def digest(path: pathlib.Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def keys(value: dict, expected: set[str], label: str) -> None:
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ValueError(f"{label}: expected keys {', '.join(sorted(expected))}")
+
+
+def coordinate(value: str, source: bool = False) -> None:
+    if not isinstance(value, str) or not value or re.search(r"\s|[\x00-\x1f]|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value, re.I):
+        raise ValueError("invalid portable source coordinate")
+    if source:
+        url = urlsplit(value)
+        if url.scheme == "fixture" and TOKEN.fullmatch(value):
+            return
+        if url.scheme not in {"https", "http"} or not url.hostname or url.username or url.password:
+            raise ValueError("source must be a public HTTP URL or fixture identifier")
+    elif not TOKEN.fullmatch(value):
+        raise ValueError("coordinate must be a portable identifier")
+
+
+def source_pin(value: dict) -> None:
+    keys(value, {"source", "revision", "sha256"}, "source pin")
+    coordinate(value["source"], source=True)
+    coordinate(value["revision"])
+    if not isinstance(value["sha256"], str) or not SHA256.fullmatch(value["sha256"]):
+        raise ValueError("source pin: invalid sha256")
+
+
+def validate_pins(pins: dict) -> None:
+    keys(pins, {"schema", "unihan", "cns-properties", "cns-mappings", "opencc"}, "references")
+    if pins["schema"] != REFERENCE_SCHEMA:
+        raise ValueError("unsupported reference schema")
+    for name in ("unihan", "cns-properties", "cns-mappings", "opencc"):
+        source_pin(pins[name])
+
+
+def shipped_pins() -> dict:
+    return {
+        "schema": REFERENCE_SCHEMA,
+        "unihan": {"source": data.UNIHAN_URL, "revision": data.UNIHAN_VERSION, "sha256": data.UNIHAN_SHA256},
+        **{f"cns-{kind}": {"source": data.CNS_URL + name, "revision": "2026-08-05", "sha256": data.CNS_SHA256[name]}
+           for kind, name in (("properties", "Properties.zip"), ("mappings", "MapingTables.zip"))},
+        "opencc": {"source": data.OPENCC_URL, "revision": data.OPENCC_URL.split("/")[5], "sha256": data.OPENCC_SHA256},
+    }
+
+
+def ideograph(value: str) -> None:
+    if len(value) != 1 or not any(lo <= ord(value) <= hi for lo, hi in data.IDEOGRAPH_BLOCKS):
+        raise ValueError("expected one CJK ideograph")
+
+
+def nfc(value: str) -> str:
+    return unicodedata.normalize("NFC", value)
+
+
+def syllable(value: str) -> str:
+    """Remove tones, preserving the diaeresis and circumflex vowel distinctions."""
+    return nfc("".join(ch for ch in unicodedata.normalize("NFD", value) if ch not in data.TONE_MARKS))
+
+
+def reading(value: str) -> str:
+    base = data.pinyin_base(value)
+    if not base or not data.is_tone_marked_pinyin(value, {base}, {nfc(value)}):
+        raise ValueError(f"invalid pinyin reading: {value}")
+    return nfc(value)
+
+
+def document(path: pathlib.Path) -> tuple[dict[str, object], list[tuple[int, list[str]]]]:
+    headers = {}
+    rows = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        if line.startswith("# "):
+            if line == "# complete":
+                headers["complete"] = True
+                continue
+            key, separator, value = line[2:].partition(": ")
+            if key in {"schema", "metadata", "references", "inputs", "authored", "counts", "columns"} and separator:
+                if key in headers:
+                    raise ValueError(f"{path.name}:{number}: duplicate {key} header")
+                headers[key] = json.loads(value) if key not in {"schema", "columns"} else value
+            continue
+        if line.lstrip().startswith("#"):
+            continue
+        rows.append((number, line.split("\t")))
+    return headers, rows
+
+
+@dataclass(frozen=True)
+class Prediction:
+    ch: str
+    raw: tuple[str, ...]
+    normalized: tuple[str, ...]
+    simplified: str
+    batch: str
+    decomposition_sha256: str
+
+
+@dataclass
+class Predictions:
+    rows: dict[str, list[Prediction]]
+    inputs: list[dict[str, str]]
+
+
+def read_predictions(paths: list[pathlib.Path]) -> Predictions:
+    rows = defaultdict(list)
+    inputs = []
+    batches = set()
+    for path in paths:
+        headers, lines = document(path)
+        if headers.get("schema") != PREDICTION_SCHEMA or headers.get("columns") != "\t".join(PREDICTION_COLUMNS):
+            raise ValueError(f"{path.name}: missing prediction schema or columns")
+        meta = headers.get("metadata")
+        keys(meta, {"batch", "model", "effort", "date", "prompt_sha256", "decomposition", "hint"}, "prediction metadata")
+        for key in ("batch", "model", "effort"):
+            coordinate(meta[key])
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", meta["batch"]):
+            raise ValueError("batch must be a filename-safe identifier")
+        date.fromisoformat(meta["date"])
+        if not SHA256.fullmatch(meta["prompt_sha256"]):
+            raise ValueError("invalid prompt sha256")
+        decomposition = meta["decomposition"]
+        keys(decomposition, {"id", "source", "revision", "sha256"}, "decomposition pointer")
+        coordinate(decomposition["id"])
+        source_pin({key: value for key, value in decomposition.items() if key != "id"})
+        source_pin(meta["hint"])
+        batch = meta["batch"]
+        if batch in batches:
+            raise ValueError(f"duplicate prediction batch: {batch}")
+        batches.add(batch)
+        inputs.append({"batch": batch, "sha256": digest(path)})
+        seen = set()
+        for number, columns in lines:
+            if len(columns) != len(PREDICTION_COLUMNS):
+                raise ValueError(f"{path.name}:{number}: expected nine prediction columns")
+            ch, raw, confidence, component, basis, decomposition_sha, hint, normalized, simple = columns
+            ideograph(ch)
+            if ch in seen:
+                raise ValueError(f"{path.name}:{number}: duplicate ideograph")
+            seen.add(ch)
+            if confidence not in {"c", "g", "unknown"} or not basis:
+                raise ValueError(f"{path.name}:{number}: invalid confidence or empty stated basis")
+            if any(any(ord(c) < 32 for c in text) for text in columns):
+                raise ValueError(f"{path.name}:{number}: control character")
+            if decomposition_sha != "-" and not SHA256.fullmatch(decomposition_sha):
+                raise ValueError(f"{path.name}:{number}: expected decomposition sha256 or -")
+            raw_tokens = () if raw == "-" else tuple(raw.split())
+            forms = tuple(reading(token) for token in raw_tokens)
+            if not raw or len(forms) != len(set(forms)) or normalized != (" ".join(forms) or "-"):
+                raise ValueError(f"{path.name}:{number}: readings must be distinct with exact NFC audit forms")
+            if simple:
+                ideograph(simple)
+                if simple == ch:
+                    raise ValueError("predicted mapping must name another ideograph")
+            rows[ch].append(Prediction(ch, raw_tokens, forms, simple, batch, decomposition_sha))
+    return Predictions({ch: sorted(values, key=lambda p: p.batch) for ch, values in rows.items()}, sorted(inputs, key=lambda p: p["batch"]))
+
+
+@dataclass(frozen=True)
+class Record:
+    ch: str
+    value: str
+    basis: str
+    attested_by: str
+    tone_from: str
+    rank: int
+    batch: str
+
+    def columns(self) -> list[str]:
+        return [self.ch, self.value, self.basis, self.attested_by, self.tone_from, str(self.rank), self.batch]
+
+
+@dataclass
+class References:
+    fields: dict[str, dict[str, str]]
+    cns: dict[str, set[str]]
+    opencc: dict[str, list[str]]
+    pins: dict
+
+    def attestations(self, ch: str) -> dict[str, set[str]]:
+        result = defaultdict(set)
+        for field in data.READING_FIELDS:
+            for raw in data.field_readings(field, self.fields.get(field, {}).get(ch, "")):
+                result[reading(raw)].add("unihan")
+        for raw in self.cns.get(ch, ()):
+            result[reading(raw)].add("cns")
+        return dict(result)
+
+    def mainland(self, ch: str) -> set[str]:
+        values = {reading(r) for field in MAINLAND_FIELDS
+                  for r in data.field_readings(field, self.fields.get(field, {}).get(ch, ""))}
+        mandarin = data.field_readings("kMandarin", self.fields.get("kMandarin", {}).get(ch, ""))
+        if mandarin:
+            values.add(reading(mandarin[0]))
+        return values
+
+
+def classify(ch: str, value: str, lineages: set[str], predictions: Predictions) -> Record:
+    candidates = [(p.batch, i, token) for p in predictions.rows.get(ch, ()) for i, token in enumerate(p.normalized)]
+    exact = [p for p in candidates if p[2] == value]
+    matches = exact or [p for p in candidates if syllable(p[2]) == syllable(value)]
+    sources = ",".join(sorted(lineages))
+    if matches:
+        return Record(ch, value, "predicted", sources, "-" if exact else sources, 1, min(matches)[0])
+    return Record(ch, value, "agreed" if len(lineages) == 2 else "single", sources, sources, 1, "-")
+
+
+def ordered_readings(ch: str, refs: References, predictions: Predictions) -> tuple[list[Record], list[tuple[str, str]]]:
+    attestations = refs.attestations(ch)
+    records = {value: classify(ch, value, sources, predictions) for value, sources in attestations.items()}
+    mandarin = [reading(r) for r in data.field_readings("kMandarin", refs.fields.get("kMandarin", {}).get(ch, ""))]
+    candidates = [(p.batch, i, token) for p in predictions.rows.get(ch, ()) for i, token in enumerate(p.normalized)]
+
+    def evidence(value: str):
+        record = records[value]
+        group = 0 if len(attestations[value]) == 2 else 1 if record.basis == "predicted" else 2
+        model = min(((batch, i) for batch, i, token in candidates if syllable(token) == syllable(value)), default=("~", sys.maxsize))
+        return group, mandarin.index(value) if value in mandarin else sys.maxsize, model, value
+
+    mainland = refs.mainland(ch)
+    placed = sorted(records, key=lambda value: (value not in mainland, evidence(value)))
+    issues = []
+    cns_only = all(attested == {"cns"} for attested in attestations.values())
+    if len(placed) > 1 and cns_only and not any(r.basis == "predicted" for r in records.values()):
+        issues.append((" ".join(placed), "CNS-only default requires a reviewed decision"))
+    elif len(placed) > 1 and (placed[0] in mainland) == (placed[1] in mainland) and evidence(placed[0])[:-1] == evidence(placed[1])[:-1]:
+        issues.append((" ".join(placed), "evidence-order tie requires a reviewed decision"))
+    for rank, value in enumerate(placed, 1):
+        r = records[value]
+        records[value] = Record(r.ch, r.value, r.basis, r.attested_by, r.tone_from, rank, r.batch)
+    return [records[value] for value in placed], issues
+
+
+def family_mappings(refs: References, authored: set[str], choices: dict[str, str] | None = None) -> tuple[dict[str, tuple[str, str]], dict[str, list[str]]]:
+    """Resolve direct families and partial links ranked by independent lineages."""
+    graph = defaultdict(dict)
+    simplified = set()
+    issues = defaultdict(list)
+
+    def edge(a: str, b: str, label: str):
+        if a == b:
+            return
+        ideograph(a)
+        ideograph(b)
+        graph[a].setdefault(b, set()).add(label)
+        graph[b].setdefault(a, set()).add(label)
+
+    for field in DIRECT_FIELDS:
+        for ch, raw in refs.fields.get(field, {}).items():
+            for target in data.variant_codes(raw):
+                edge(ch, target, "unihan:" + field)
+                if field == "kSimplifiedVariant" and target != ch:
+                    simplified.add(target)
+    for ch, targets in refs.opencc.items():
+        for target in targets:
+            edge(ch, target, "opencc:TSCharacters")
+            if target != ch:
+                simplified.add(target)
+    typed = authored | set(refs.fields.get("kTGH", {}))
+    partial = defaultdict(dict)
+    for field in PARTIAL_FIELDS:
+        for ch, raw in refs.fields.get(field, {}).items():
+            for target in data.variant_codes(raw):
+                if target == ch or target in graph.get(ch, {}):
+                    continue
+                valid = (ch not in typed and target in typed
+                         and bool({syllable(r) for r in refs.attestations(ch)} & {syllable(r) for r in refs.attestations(target)}))
+                if valid:
+                    partial[ch].setdefault(target, set()).add("unihan:" + field)
+                else:
+                    issues[ch].append("variant-guard:" + field + "=" + target)
+    for ch, targets in partial.items():
+        def lineage_syllables(member: str, lineage: str) -> set[str]:
+            return {syllable(value) for value, sources in refs.attestations(member).items() if lineage in sources}
+
+        scores = {target: sum(bool(lineage_syllables(ch, lineage) & lineage_syllables(target, lineage))
+                              for lineage in ("unihan", "cns")) for target in targets}
+        maximum = max(scores.values())
+        best = sorted(target for target, score in scores.items() if score == maximum)
+        if len(best) > 1:
+            issues[ch].append("variant-guard:tied-lineages=" + " ".join(f"{target}:{maximum}" for target in best))
+            target = (choices or {}).get(ch)
+            if target not in best:
+                continue
+        else:
+            target = best[0]
+        for label in targets[target]:
+            edge(ch, target, label)
+
+    result = {}
+    visited = set()
+    for start in sorted(graph):
+        if start in visited:
+            continue
+        component = set()
+        queue = [start]
+        while queue:
+            ch = queue.pop()
+            if ch in component:
+                continue
+            component.add(ch)
+            queue.extend(graph[ch])
+        visited.update(component)
+        bmp = {ch for ch in component if ord(ch) < 0x10000}
+        choices = bmp & simplified or component & set(refs.fields.get("kTGH", {})) or bmp
+        if len(choices) != 1:
+            for ch in component:
+                issues[ch].append("family-target:unresolved=" + " ".join(sorted(choices or component)))
+            continue
+        target = next(iter(choices))
+        queue = deque([(target, ())])
+        reached = {target}
+        while queue:
+            ch, relations = queue.popleft()
+            for neighbor in sorted(graph[ch]):
+                if neighbor in reached:
+                    continue
+                reached.add(neighbor)
+                path = tuple(sorted(set(relations) | graph[ch][neighbor]))
+                result[neighbor] = (target, ",".join(path))
+                queue.append((neighbor, path))
+    return result, dict(issues)
+
+
+def assemble(members: list[str], refs: References, predictions: Predictions, authored: set[str],
+             mapping_choices: dict[str, str] | None = None):
+    if len(members) != len(set(members)):
+        raise ValueError("duplicate tier member")
+    for ch in members:
+        ideograph(ch)
+    outside = set(predictions.rows) - set(members)
+    if outside:
+        raise ValueError("predictions outside tier: " + " ".join(sorted(outside)))
+    mappings, family_issues = family_mappings(refs, authored, mapping_choices)
+    rows, records, gaps, findings = [], [], [], []
+    for ch in members:
+        readings, issues = ordered_readings(ch, refs, predictions)
+        text = " ".join(r.value for r in readings) or "-"
+        target, relations = mappings.get(ch, ("", ""))
+        rows.append((ch, text, target))
+        records.extend(readings)
+        if target:
+            blind = [p.batch for p in predictions.rows.get(ch, ()) if p.simplified == target]
+            records.append(Record(ch, target, "predicted" if blind else "single", relations, "-", 0, min(blind) if blind else "-"))
+        findings.extend((ch, "provenance", ours, reference) for ours, reference in issues)
+        findings.extend((ch, issue.split(":", 1)[0], target or "-", issue) for issue in family_issues.get(ch, ()))
+        available = {syllable(r.value) for r in readings}
+        for prediction in predictions.rows.get(ch, ()):
+            for raw, normalized in zip(prediction.raw, prediction.normalized):
+                if syllable(normalized) not in available:
+                    gaps.append((ch, raw, normalized, prediction.batch, "unattested-syllable"))
+            if prediction.simplified and prediction.simplified != target:
+                gaps.append((ch, prediction.simplified, prediction.simplified, prediction.batch, "unconfirmed-mapping"))
+        passes = {p.normalized for p in predictions.rows.get(ch, ())}
+        if len(passes) > 1:
+            findings.append((ch, "provenance", text, "prediction-pass disagreement"))
+    return rows, records, gaps, findings
+
+
+def authored_before(directory: pathlib.Path, tier: str) -> set[str]:
+    """Only preceding tiers establish typed targets for a rare-tier proposal."""
+    names = [path.removesuffix(".tsv") for path in data.TIER_FILES]
+    if tier not in names:
+        raise ValueError("unknown authored tier")
+    result = set()
+    for name in names[:names.index(tier)]:
+        path = directory / (name + ".tsv")
+        if path.is_file():
+            for _, columns in document(path)[1]:
+                if len(columns) != 3:
+                    raise ValueError("invalid preceding authored row")
+                ideograph(columns[0])
+                result.add(columns[0])
+    return result
+
+
+def authored_pin(authored: set[str]) -> dict:
+    sha = hashlib.sha256("".join(ch + "\n" for ch in sorted(authored)).encode("utf-8")).hexdigest()
+    return {"source": "preceding-authored-tier-membership", "revision": sha, "sha256": sha}
+
+
+def header(schema: str, refs: References, predictions: Predictions, authored: set[str]) -> str:
+    return (f"# schema: {schema}\n# references: {canonical(refs.pins)}\n# inputs: {canonical(predictions.inputs)}\n"
+            + f"# authored: {canonical(authored_pin(authored))}\n")
+
+
+def write_assembly(out: pathlib.Path, tier: str, members: list[str], refs: References, predictions: Predictions, authored: set[str]):
+    rows, records, gaps, findings = assemble(members, refs, predictions, authored)
+    counts = dict(sorted(Counter(r.basis for r in records if r.rank).items()))
+    out.mkdir(parents=True, exist_ok=True)
+    common = header(PROVENANCE_SCHEMA, refs, predictions, authored)
+    files = {
+        f"{tier}.tsv": common + "# complete\n# Mainland readings precede Taiwan-only readings; unresolved order choices require reviewed rows.\n"
+        + "# Readings marked single are transcribed from the named source; see NOTICE.\n"
+        + f"# counts: {canonical(counts)}\n# columns: ideograph\treadings\tsimplified\n"
+        + "".join("\t".join(row) + "\n" for row in rows),
+        f"{tier}-provenance.tsv": common + "# columns: " + "\t".join(PROVENANCE_COLUMNS) + "\n"
+        + "".join("\t".join(r.columns()) + "\n" for r in records),
+        f"{tier}-gaps.tsv": header("fold-han-gaps/1", refs, predictions, authored)
+        + "# columns: ideograph\traw\tnormalized\tbatch\treason\n"
+        + "".join("\t".join(row) + "\n" for row in gaps),
+        f"{tier}-findings.tsv": common + "# columns: ideograph\tkind\tours\treference\n"
+        + "".join("\t".join(row) + "\n" for row in findings),
+    }
+    for name, content in files.items():
+        (out / name).write_text(content, encoding="utf-8", newline="\n")
+    return findings
+
+
+def read_records(path: pathlib.Path) -> tuple[dict, list[Record]]:
+    headers, lines = document(path)
+    if headers.get("schema") != PROVENANCE_SCHEMA or headers.get("columns") != "\t".join(PROVENANCE_COLUMNS):
+        raise ValueError("missing provenance schema or columns")
+    records = []
+    seen = set()
+    for number, columns in lines:
+        if len(columns) != 7:
+            raise ValueError(f"{path.name}:{number}: expected seven provenance columns")
+        ch, value, basis, attested, tone, rank_text, batch = columns
+        ideograph(ch)
+        if not re.fullmatch(r"0|[1-9][0-9]*", rank_text):
+            raise ValueError("invalid provenance rank")
+        rank = int(rank_text)
+        if rank:
+            if value != reading(value):
+                raise ValueError("provenance reading must be NFC")
+            sources = attested.split(",")
+            if sources != sorted(set(sources)) or not set(sources) <= {"unihan", "cns"}:
+                raise ValueError("invalid reading attestation")
+        else:
+            ideograph(value)
+            if value == ch or not attested or tone != "-":
+                raise ValueError("invalid mapping provenance")
+        if basis not in {"predicted", "agreed", "single"} or not batch:
+            raise ValueError("invalid provenance basis or batch")
+        if (ch, value) in seen:
+            raise ValueError("duplicate provenance record")
+        seen.add((ch, value))
+        records.append(Record(ch, value, basis, attested, tone, rank, batch))
+    return headers, records
+
+
+def check_provenance(table: pathlib.Path, provenance: pathlib.Path, refs: References, predictions: Predictions,
+                     authored: set[str]) -> list[tuple[str, str, str, str, str, str]]:
+    def finding(ch: str, ours: str, reference: str, kind: str = "provenance"):
+        return table.name, "-", ch, kind, ours, reference
+
+    try:
+        headers, lines = document(table)
+        ph, actual = read_records(provenance)
+        for h in (headers, ph):
+            validate_pins(h.get("references"))
+            if h["references"] != refs.pins or h.get("inputs") != predictions.inputs:
+                raise ValueError("provenance source pins or prediction checksums differ")
+            if h.get("authored") != authored_pin(authored):
+                raise ValueError("preceding authored membership checksum differs")
+        if headers.get("schema") != PROVENANCE_SCHEMA:
+            raise ValueError("missing table provenance schema")
+        if headers.get("columns") != "ideograph\treadings\tsimplified":
+            raise ValueError("missing authored table columns")
+        members = []
+        observed = {}
+        for number, columns in lines:
+            if len(columns) != 3:
+                raise ValueError(f"table row {number}: expected three columns")
+            ch, text, simple = columns
+            ideograph(ch)
+            forms = [] if text == "-" else text.split()
+            if not text or len(forms) != len(set(forms)) or any(reading(r) != r for r in forms):
+                raise ValueError("table readings must be distinct NFC pinyin")
+            if simple:
+                ideograph(simple)
+            members.append(ch)
+            observed[ch] = text, simple
+        tiers = data.tiers(refs.fields, refs.cns)
+        if table.stem in tiers and set(predictions.rows) - set(tiers[table.stem]):
+            raise ValueError("prediction contains an ideograph outside the tier")
+        selected_predictions = Predictions({ch: values for ch, values in predictions.rows.items() if ch in observed}, predictions.inputs)
+        mapping_choices = {ch: simple for ch, (_, simple) in observed.items() if simple}
+        proposed, expected, gaps, issues = assemble(members, refs, selected_predictions, authored, mapping_choices)
+        undecided_defaults = {ch for ch, kind, _, reference in issues
+                              if kind == "provenance" and reference == "CNS-only default requires a reviewed decision"}
+        for ch in undecided_defaults:
+            actual_order = observed[ch][0].split()
+            predicted_order = [r.value for r in expected if r.ch == ch and r.rank]
+            if len(actual_order) == len(predicted_order) and set(actual_order) == set(predicted_order):
+                expected = [Record(r.ch, r.value, r.basis, r.attested_by, r.tone_from,
+                                   actual_order.index(r.value) + 1, r.batch) if r.ch == ch and r.rank else r for r in expected]
+                proposed = [(key, observed[ch][0], simple) if key == ch else (key, text, simple) for key, text, simple in proposed]
+                issues = [(key, kind, observed[ch][0], reference) if key == ch and reference == "CNS-only default requires a reviewed decision"
+                          else (key, kind, ours, reference) for key, kind, ours, reference in issues]
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        return [finding("-", "invalid records", str(exc))]
+
+    findings = [finding(ch, ours, reference, kind) for ch, kind, ours, reference in issues]
+    if headers.get("complete"):
+        if table.stem not in tiers:
+            findings.append(finding("-", table.stem, "unknown complete tier", "coverage"))
+        else:
+            required = set(tiers[table.stem])
+            for ch in sorted(required - set(members)):
+                findings.append(finding(ch, "-", "required by tier", "coverage"))
+            for ch in sorted(set(members) - required):
+                findings.append(finding(ch, "listed", "not in tier", "coverage"))
+    actual_by_key = {(r.ch, r.value): r for r in actual}
+    for r in expected:
+        found = actual_by_key.pop((r.ch, r.value), None)
+        if found != r:
+            findings.append(finding(r.ch, canonical(found.columns()) if found else "-", canonical(r.columns())))
+    for r in actual_by_key.values():
+        findings.append(finding(r.ch, canonical(r.columns()), "no shipped attested value"))
+    for ch, text, simple in proposed:
+        ours = observed[ch]
+        if ours != (text, simple):
+            findings.append(finding(ch, " / ".join(ours), " / ".join((text, simple))))
+    counts = dict(sorted(Counter(r.basis for r in actual if r.rank).items()))
+    if headers.get("counts") != counts:
+        findings.append(finding("-", canonical(headers.get("counts")), canonical(counts)))
+    return findings
+
+
+def reference_arguments(parser):
+    parser.add_argument("--references", type=pathlib.Path, help="pin manifest for explicit offline reference files")
+    parser.add_argument("--unihan", type=pathlib.Path)
+    parser.add_argument("--cns-properties", type=pathlib.Path)
+    parser.add_argument("--cns-mappings", type=pathlib.Path)
+    parser.add_argument("--opencc", type=pathlib.Path)
+    parser.add_argument("--authored", type=pathlib.Path, default=data.DEFAULT_AUTHORED_DIR)
+    parser.add_argument("--predictions", nargs="*", type=pathlib.Path, default=[])
+
+
+def read_references(args) -> References:
+    explicit = (args.unihan, args.cns_properties, args.cns_mappings, args.opencc)
+    pins = json.loads(args.references.read_text(encoding="utf-8")) if args.references else shipped_pins()
+    validate_pins(pins)
+    if args.references and not all(explicit):
+        raise ValueError("a reference manifest requires all four explicit files")
+    if bool(args.cns_properties) != bool(args.cns_mappings):
+        raise ValueError("provide both CNS archives")
+    unihan = args.unihan or data.unihan_archive(None)
+    cns = (args.cns_properties, args.cns_mappings) if args.cns_properties else data.cns_archives()
+    opencc = args.opencc or data.opencc_archive()
+    for name, path in zip(("unihan", "cns-properties", "cns-mappings", "opencc"), (unihan, *cns, opencc)):
+        if digest(path) != pins[name]["sha256"]:
+            raise ValueError(f"{name}: reference sha256 mismatch")
+    return References(data.unihan_fields(unihan, *FIELDS), data.cns_readings(cns), data.opencc_characters(opencc), pins)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    assembly = commands.add_parser("assemble", help="write tier proposals, provenance, gaps and blocking findings")
+    reference_arguments(assembly)
+    assembly.add_argument("--tier", choices=[p.removesuffix(".tsv") for p in data.RARE_FILES], required=True)
+    assembly.add_argument("--output", type=pathlib.Path, required=True)
+    check = commands.add_parser("check", help="audit a table and its provenance without word checks")
+    reference_arguments(check)
+    check.add_argument("--provenance", type=pathlib.Path, required=True)
+    check.add_argument("--reviewed", type=pathlib.Path, default=data.DEFAULT_REVIEWED_FILE)
+    check.add_argument("table", type=pathlib.Path)
+    args = parser.parse_args(argv)
+    try:
+        refs = read_references(args)
+        predictions = read_predictions(args.predictions)
+        authored = authored_before(args.authored, args.tier if args.command == "assemble" else args.table.stem)
+        if args.command == "assemble":
+            members = data.tiers(refs.fields, refs.cns)[args.tier]
+            findings = write_assembly(args.output, args.tier, members, refs, predictions, authored)
+        else:
+            findings = check_provenance(args.table, args.provenance, refs, predictions, authored)
+            reviewed = data.read_reviewed(args.reviewed)
+            findings = [f for f in findings if data.finding_key(f) not in reviewed]
+            for f in findings:
+                print("\t".join(data.clean_tsv(value) for value in f))
+        print(f"{args.command}: blocking findings={len(findings)}", file=sys.stderr)
+        return int(bool(findings))
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -18,6 +18,9 @@ semantic variants, then applies exact reviewed-disagreement suppressions. Author
 rows use `ideograph<TAB>readings<TAB>simplified`; readings are tone-marked
 Mandarin pinyin or `-`, and the simplified field is empty when no form applies.
 Reviewed rows use `ideograph-or-word<TAB>kind<TAB>ours<TAB>reference<TAB>reason`.
+Rare tiers require per-reading and per-mapping provenance and pinned blind
+prediction logs. Marked essential tables use the same audit. Provenance is
+checked by `fold-han-rare.py`; its records are developer inputs, not build data.
 Directory mode requires the four essential tier files and checks each existing
 rare-tier file; explicit FILE arguments select the character files. The checker
 also checks `words.tsv`, whose rows use
@@ -36,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import os
 import pathlib
 import re
@@ -87,7 +91,7 @@ CHECK_KINDS = (
     "format", "coverage", "default", "tone", "unattested", "archaic", "missing", "simplified",
     "family-target", "variant-guard",
     "reading", "cedict", "cedict-extra", "uncommon", "edge-particle", "opencc",
-    "duplicate", "joined-key",
+    "duplicate", "joined-key", "provenance",
 )
 TIER_FILES = ("gb2312.tsv", "big5.tsv", "jis.tsv", "ksx.tsv")
 RARE_FILES = ("tgh.tsv", "big5-2.tsv", "core.tsv", "uro.tsv", "exta.tsv", "extb.tsv", "extc.tsv", "cns.tsv")
@@ -724,7 +728,9 @@ def check_words(
 
 def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pathlib.Path | None = None,
           authored_dir: pathlib.Path = DEFAULT_AUTHORED_DIR,
-          opencc_path: pathlib.Path | None = None) -> int:
+          opencc_path: pathlib.Path | None = None,
+          provenance_dir: pathlib.Path | None = None,
+          predictions_dir: pathlib.Path | None = None) -> int:
     opencc = (opencc_characters(opencc_archive(opencc_path))
               if any(path.name in TIER_FILES for path in files) else {})
     archive = unihan_archive(None)
@@ -756,6 +762,24 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pa
 
         listed: set[str] = set()
         per_file_start = len(findings)
+        has_provenance = any(line == "# schema: fold-han-provenance/1" for line in lines)
+        if has_provenance or path.name in RARE_FILES or provenance_dir is not None:
+            if "fold_han_rare" not in sys.modules:
+                spec = importlib.util.spec_from_file_location("fold_han_rare", ROOT / "tools" / "fold-han-rare.py")
+                rare = importlib.util.module_from_spec(spec)
+                sys.modules[spec.name] = rare
+                spec.loader.exec_module(rare)
+            rare = sys.modules["fold_han_rare"]
+            provenance = (provenance_dir or ROOT / "tools" / "fold-han-provenance") / path.name
+            prediction_root = predictions_dir or ROOT / "tools" / "fold-han-predictions"
+            prediction_paths = sorted(p for p in prediction_root.glob(f"{path.stem}-*.tsv") if not p.name.endswith("-gaps.tsv"))
+            try:
+                predictions = rare.read_predictions(prediction_paths)
+                references = rare.References(fields, cns, opencc, rare.shipped_pins())
+                prior_authored = rare.authored_before(authored_dir, path.stem)
+                findings.extend(rare.check_provenance(path, provenance, references, predictions, prior_authored))
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                add(path, "-", "-", "provenance", "invalid predictions", str(exc))
         for row_number, line in enumerate(lines, 1):
             if not line.strip() or line.lstrip().startswith("#"):
                 continue
@@ -859,7 +883,7 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pa
             our_first = readings[0] if readings else None
             ours_base = toneless(our_first) if our_first else None
             reference_base = toneless(mandarin) if mandarin else None
-            if mandarin and ours_base != reference_base:
+            if not has_provenance and mandarin and ours_base != reference_base:
                 add(path, row_number, raw_ch, "default", our_first or "-", mandarin)
 
             # A reading is often recorded only under the character's simplified
@@ -975,6 +999,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                               help="word readings TSV (default: words.tsv in the authored directory)")
     check_parser.add_argument("--opencc", type=pathlib.Path,
                               help="OpenCC TSCharacters.txt instead of the cached reference")
+    check_parser.add_argument("--provenance", type=pathlib.Path,
+                              help="directory of per-tier provenance TSVs; required for marked tables")
+    check_parser.add_argument("--predictions", type=pathlib.Path,
+                              help="directory of prediction logs (default: tools/fold-han-predictions)")
     check_parser.add_argument("files", nargs="*", type=pathlib.Path,
                               help="specific files to check; these replace the directory scan")
     return parser.parse_args(argv)
@@ -996,8 +1024,11 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         files = required + [args.authored / name for name in RARE_FILES if (args.authored / name).is_file()]
     try:
+        options = {}
+        if args.provenance is not None or args.predictions is not None:
+            options = {"provenance_dir": args.provenance, "predictions_dir": args.predictions}
         return check(files, args.reviewed, args.words or args.authored / "words.tsv", args.authored,
-                     args.opencc)
+                     args.opencc, **options)
     except (OSError, ValueError) as exc:
         print(exc, file=sys.stderr)
         return 2
