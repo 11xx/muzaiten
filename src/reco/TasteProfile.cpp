@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
+#include <string_view>
 #include <system_error>
 #include <unistd.h>
 
@@ -95,9 +96,14 @@ bool genreLabel(const QString &label)
         || GenreTags::isNonGenre(label)) {
         return false;
     }
-    for (const QChar ch : label) {
-        if (!ch.isLetterOrNumber() && ch != QLatin1Char(' ') && ch != QLatin1Char('-')
-            && ch != QLatin1Char('&')) {
+    // Letters, numbers and combining marks (Thai, Indic and decomposed
+    // accents), plus the punctuation common genre names carry.
+    constexpr std::u32string_view punctuation = U" -&'\u2019.()";
+    for (const char32_t codePoint : label.toUcs4()) {
+        const QChar::Category category = QChar::category(codePoint);
+        if (!QChar::isLetterOrNumber(codePoint) && category != QChar::Mark_NonSpacing
+            && category != QChar::Mark_SpacingCombining
+            && punctuation.find(codePoint) == std::u32string_view::npos) {
             return false;
         }
     }
@@ -308,7 +314,8 @@ QString contentsDescription()
                           "Tracks marked \"Don't learn from this\" are left out. "
                           "Buckets supported by fewer than five distinct tracks are omitted. "
                           "Shares and energy quartiles are rounded to hundredths and tempo quartiles to whole BPM. "
-                          "These aggregates reveal library taste. No artist, album or track names, recording identifiers, paths, timestamps, "
+                          "These aggregates reveal library taste. Suppression and quantization do not guarantee anonymity. "
+                          "No artist, album or track names, recording identifiers, paths, timestamps, "
                           "raw counts, listening history, skips or ratings are included.");
 }
 
@@ -477,6 +484,29 @@ bool aggregate(const QVector<TrackScorer::Candidate> &tracks, bool optIn, bool i
     return true;
 }
 
+TasteProfile withAliases(const TasteProfile &profile, const QHash<QString, QString> &aliases)
+{
+    TasteProfile canonical = profile;
+    canonical.genres.clear();
+    double retained = 0.0;
+    bool dropped = false;
+    for (auto it = profile.genres.begin(); it != profile.genres.end(); ++it) {
+        const QString label = GenreTags::canonical(it.key(), aliases);
+        if (genreLabel(label)) {
+            canonical.genres[label] += it.value();
+            retained += it.value();
+        } else {
+            dropped = true;
+        }
+    }
+    if (dropped && retained > 0.0) {
+        for (double &share : canonical.genres) {
+            share /= retained;
+        }
+    }
+    return canonical;
+}
+
 double similarity(const TasteProfile &profile, const TrackScorer::Candidate &candidate)
 {
     double genre = 0.0;
@@ -561,7 +591,7 @@ bool importProfile(const QString &name, const TasteProfile &profile, bool replac
         return true;
     }
     if (profiles.contains(name) && !replace) {
-        return reject(error, QStringLiteral("Taste seed already exists. Explicit --replace is required."));
+        return reject(error, QStringLiteral("Taste seed already exists. Explicit replacement is required."));
     }
     profiles.insert(name, profile);
     return saveSeeds(profiles, error);

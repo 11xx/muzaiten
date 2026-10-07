@@ -25,7 +25,11 @@
   genre/feature score bias and named pick reasons; stopping radio deactivates a
   seed. Exchange files round shares and quartiles to hundredths or whole BPM and
   omit identifiers, raw counts and listening-history data. No automatic export
-  or external sharing is provided.
+  or external sharing is provided. Quantization limits inference without
+  guaranteeing anonymity. Genre labels support combining marks and common
+  punctuation; invalid alias targets drop individually. Local radio-pick history
+  retains seed names after seed removal. Import errors refer to the GUI's
+  replacement checkbox.
 
 - Local scalar feature-pack export/import through `muzaiten-features pack`,
   with strict versioned NDJSON, dry-run counts and atomic writes. Each record

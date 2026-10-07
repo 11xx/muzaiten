@@ -9,6 +9,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QProcessEnvironment>
 #include <QPushButton>
@@ -153,6 +154,44 @@ void TasteProfileDialogTest::explicitPreviewAndImport()
         QTest::ignoreMessage(QtWarningMsg, "This plugin does not support propagateSizeHints()");
         button(&dialog, QStringLiteral("Preview import…"))->click();
         QCOMPARE(started.count(), 0);
+        QFile seedFile(TasteProfiles::storagePath());
+        QVERIFY(seedFile.open(QIODevice::ReadOnly));
+        const QByteArray seedBefore = seedFile.readAll();
+        seedFile.close();
+        QString duplicateError;
+        QTimer::singleShot(0, &dialog, [&]() {
+            auto *source = qobject_cast<QFileDialog *>(QApplication::activeModalWidget());
+            QVERIFY(source != nullptr);
+            source->setDirectory(temporary.path());
+            source->selectFile(QStringLiteral("export.json"));
+            QTimer::singleShot(0, &dialog, [&]() {
+                auto *preview = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                QVERIFY(preview != nullptr);
+                preview->findChild<QLineEdit *>()->setText(QStringLiteral("Synthetic seed"));
+                QTimer::singleShot(0, &dialog, [&]() {
+                    auto *message = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+                    QVERIFY(message != nullptr);
+                    duplicateError = message->text();
+                    QVERIFY(duplicateError.contains(QStringLiteral("Replace an existing seed with this name")));
+                    QVERIFY(!duplicateError.contains(QStringLiteral("--replace")));
+                    message->accept();
+                });
+                button(preview, QStringLiteral("Import seed"))->click();
+            });
+            QVERIFY(QMetaObject::invokeMethod(source, "accept", Qt::DirectConnection));
+        });
+        QTest::ignoreMessage(QtWarningMsg, "This plugin does not support propagateSizeHints()");
+        QTest::ignoreMessage(QtWarningMsg, "This plugin does not support propagateSizeHints()");
+        QTest::ignoreMessage(QtWarningMsg, "This plugin does not support propagateSizeHints()");
+        button(&dialog, QStringLiteral("Preview import…"))->click();
+        QVERIFY(!duplicateError.isEmpty());
+        QVERIFY(seedFile.open(QIODevice::ReadOnly));
+        QCOMPARE(seedFile.readAll(), seedBefore);
+        seedFile.close();
+        QCOMPARE(started.count(), 0);
+        QFile errorEvidence(temporary.filePath(QStringLiteral("duplicate-import-error.txt")));
+        QVERIFY(errorEvidence.open(QIODevice::WriteOnly));
+        QCOMPARE(errorEvidence.write(duplicateError.toUtf8()), duplicateError.toUtf8().size());
         auto *seeds = dialog.findChild<QComboBox *>(QStringLiteral("tasteSeeds"));
         QCOMPARE(seeds->currentText(), QStringLiteral("Synthetic seed"));
         button(&dialog, QStringLiteral("Start radio"))->click();

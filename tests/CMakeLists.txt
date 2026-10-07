@@ -737,3 +737,10 @@ target_link_libraries(test_taste_profile_dialog PRIVATE muzaiten_db muzaiten_rec
 target_compile_features(test_taste_profile_dialog PRIVATE cxx_std_26)
 add_test(NAME test_taste_profile_dialog COMMAND test_taste_profile_dialog)
 set_tests_properties(test_taste_profile_dialog PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 45)
+
+add_executable(test_taste_radio_appcore test_taste_radio_appcore.cpp)
+target_include_directories(test_taste_radio_appcore PRIVATE ../src)
+target_link_libraries(test_taste_radio_appcore PRIVATE muzaiten_app muzaiten_ui_app Qt6::Test)
+target_compile_features(test_taste_radio_appcore PRIVATE cxx_std_26)
+add_test(NAME test_taste_radio_appcore COMMAND test_taste_radio_appcore)
+set_tests_properties(test_taste_radio_appcore PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 45)

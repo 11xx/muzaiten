@@ -56,6 +56,8 @@ public:
     };
 
     explicit AppCore(QObject *parent = nullptr);
+    // An injected backend is owned by the player and supplies its device policy.
+    AppCore(PlaybackBackend *backend, QObject *parent);
     ~AppCore() override;
 
     PlayerCore          *player() const;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QHash>
 #include <QMap>
 #include <QString>
 #include <QVector>
@@ -34,6 +35,8 @@ bool aggregate(const QVector<TrackScorer::Candidate> &tracks, bool optIn, bool i
                TasteProfile *profile, QString *error);
 bool fromLibrary(const QString &libraryPath, const QString &featuresPath, bool optIn,
                  bool includeDecades, TasteProfile *profile, QString *error);
+// Merge alias-canonicalized labels, drop invalid labels and normalize retained shares.
+TasteProfile withAliases(const TasteProfile &profile, const QHash<QString, QString> &aliases);
 double similarity(const TasteProfile &profile, const TrackScorer::Candidate &candidate);
 
 // Names are local seed labels and are absent from exchange files. Import does

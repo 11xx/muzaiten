@@ -107,9 +107,9 @@ void TasteProfileDialog::exportProfile()
     QByteArray bytes;
     QString error;
     const auto generate = [&]() {
-        const QDir data(AppPaths::dataDir());
-        return TasteProfiles::fromLibrary(data.filePath(QStringLiteral("library.sqlite")),
-            data.filePath(QStringLiteral("features.sqlite")), true, decades->isChecked(), &profile, &error)
+        const QDir dataDirectory(AppPaths::dataDir());
+        return TasteProfiles::fromLibrary(dataDirectory.filePath(QStringLiteral("library.sqlite")),
+            dataDirectory.filePath(QStringLiteral("features.sqlite")), true, decades->isChecked(), &profile, &error)
             && TasteProfiles::encode(profile, &bytes, &error);
     };
     if (!generate()) {
@@ -185,6 +185,15 @@ void TasteProfileDialog::importProfile()
     connect(buttons, &QDialogButtonBox::rejected, &preview, &QDialog::reject);
     layout->addWidget(buttons);
     if (preview.exec() != QDialog::Accepted) {
+        return;
+    }
+    QMap<QString, TasteProfile> seeds;
+    if (!TasteProfiles::load(&seeds, &error)) {
+        showError(this, error);
+        return;
+    }
+    if (seeds.contains(name->text()) && !replace->isChecked()) {
+        showError(this, QStringLiteral("Taste seed already exists. Select \"Replace an existing seed with this name\" in the import preview to replace it."));
         return;
     }
     if (!TasteProfiles::importProfile(name->text(), profile, replace->isChecked(), false, &error)) {
