@@ -1,5 +1,6 @@
-// Offline search latency probe. Built by default, deliberately absent from CTest.
+// Offline search probes. Built by default, deliberately absent from CTest.
 // Usage: bench_search --library PATH [--scale N] [--queries FILE] [--repeat R]
+//        bench_search --append-capacity
 
 #include "db/Database.h"
 #include "search/IndexCache.h"
@@ -7,6 +8,8 @@
 #include "search/SearchMatcher.h"
 
 #include <QCoreApplication>
+#include <QByteArrayView>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -14,6 +17,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
 #include <QSet>
 #include <QTemporaryDir>
 #include <QTextStream>
@@ -23,9 +27,361 @@
 #include <random>
 #include <climits>
 
+#ifdef Q_OS_LINUX
+#include <sys/resource.h>
+#endif
+
+namespace Search {
+
+struct SearchIndexBenchmarkAccess {
+    struct Snapshot {
+        qsizetype recordCapacity = 0;
+        const void *recordData = nullptr;
+        std::size_t maskCapacity = 0;
+        const void *maskData = nullptr;
+        std::size_t pathSegmentCapacity = 0;
+        const void *pathSegmentData = nullptr;
+        std::size_t pathOffsetCapacity = 0;
+        const void *pathOffsetData = nullptr;
+        std::size_t folderCapacity = 0;
+    };
+
+    static Snapshot snapshot(const SearchIndex &index)
+    {
+        return {
+            index.m_records.capacity(), index.m_records.constData(),
+            index.m_masks.capacity(), index.m_masks.data(),
+            index.m_pathSegments.capacity(), index.m_pathSegments.data(),
+            index.m_pathOffsets.capacity(), index.m_pathOffsets.data(),
+            static_cast<std::size_t>(index.m_folderIds.capacity()),
+        };
+    }
+};
+
+} // namespace Search
+
 namespace {
 
 using Records = QVector<Search::SearchRecord>;
+
+double ms(qint64 ns);
+qint64 percentile(QVector<qint64> values, double fraction);
+
+constexpr int kAppendCapacityBaseRecords = 29'921;
+constexpr int kAppendCapacityScale = 10;
+constexpr int kAppendCapacityBatchSize = 3'000;
+constexpr int kAppendCapacityRepeats = 3;
+
+using IndexSnapshot = Search::SearchIndexBenchmarkAccess::Snapshot;
+
+struct GrowthObservations {
+    quint64 capacityGrowths = 0;
+    quint64 storageMoves = 0;
+};
+
+void observeGrowth(GrowthObservations &observations, qsizetype oldCapacity,
+                   const void *oldData, qsizetype newCapacity, const void *newData,
+                   bool skipAdoptedStorage)
+{
+    if (newCapacity > oldCapacity && !(skipAdoptedStorage && oldCapacity == 0)) {
+        ++observations.capacityGrowths;
+    }
+    if (oldCapacity > 0 && oldData != newData) ++observations.storageMoves;
+}
+
+void observeGrowth(GrowthObservations &observations, std::size_t oldCapacity,
+                   const void *oldData, std::size_t newCapacity, const void *newData,
+                   bool skipAdoptedStorage)
+{
+    if (newCapacity > oldCapacity && !(skipAdoptedStorage && oldCapacity == 0)) {
+        ++observations.capacityGrowths;
+    }
+    if (oldCapacity > 0 && oldData != newData) ++observations.storageMoves;
+}
+
+Records syntheticSearchRecords(int first, int count, QHash<QString, QString> &normPool)
+{
+    Records records;
+    records.reserve(count);
+    for (int offset = 0; offset < count; ++offset) {
+        const int number = first + offset;
+        const QString id = QString::number(number).rightJustified(6, QLatin1Char('0'));
+        const QString artistNumber = QString::number(number % 128).rightJustified(3, QLatin1Char('0'));
+        const QString albumNumber = QString::number(number / 12).rightJustified(5, QLatin1Char('0'));
+        Search::SearchRecord record;
+        record.title = QStringLiteral("Track ") + id;
+        record.artistName = QStringLiteral("Artist ") + artistNumber;
+        record.albumArtistName = record.artistName;
+        record.albumTitle = QStringLiteral("Album ") + albumNumber;
+        record.date = QStringLiteral("2026");
+        record.filename = QStringLiteral("Track ") + id + QStringLiteral(".flac");
+        record.path = QStringLiteral("/synthetic/artist-") + artistNumber
+            + QStringLiteral("/album-") + albumNumber + QLatin1Char('/') + record.filename;
+        record.codec = QStringLiteral("flac");
+        record.durationMs = 180'000 + number;
+        record.trackNumber = number % 12 + 1;
+        record.discNumber = number / 1'000 + 1;
+        Search::foldRecordNorms(record, &normPool);
+        records.push_back(std::move(record));
+    }
+    return records;
+}
+
+void hashString(QCryptographicHash &hash, const QString &value)
+{
+    const QByteArray bytes = value.toUtf8();
+    hash.addData(QByteArrayView(bytes));
+    hash.addData(QByteArrayView("\0", 1));
+}
+
+QByteArray recordOrderDigest(const Search::SearchIndex &index)
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for (const Search::SearchRecord &record : index.records()) {
+        hashString(hash, record.title);
+        hashString(hash, record.path);
+        hashString(hash, record.normTitle);
+        hashString(hash, record.normPath);
+    }
+    return hash.result().toHex();
+}
+
+QByteArray queryDigest(const Search::SearchIndex &index)
+{
+    static const QStringList queryTexts = {
+        QStringLiteral("title:track 000042"),
+        QStringLiteral("artist:artist 042"),
+        QStringLiteral("path:album 00012"),
+        QStringLiteral("track 009920"),
+    };
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for (const QString &text : queryTexts) {
+        for (const bool fuzzy : {false, true}) {
+            const Search::SearchQuery query = Search::SearchQuery::parse(text);
+            int total = 0;
+            QVector<int> matchingIndices;
+            const auto results = index.match(query, fuzzy, {}, &total, &matchingIndices);
+            hashString(hash, text);
+            hash.addData(QByteArrayView(fuzzy ? "fuzzy\0" : "plain\0", 6));
+            hash.addData(QByteArray::number(total));
+            hash.addData(QByteArrayView("\0", 1));
+            for (int matchIndex : matchingIndices) {
+                hash.addData(QByteArray::number(matchIndex));
+                hash.addData(QByteArrayView("\0", 1));
+            }
+            for (const Search::ScoredResult &result : results) {
+                hash.addData(QByteArray::number(result.index));
+                hash.addData(QByteArrayView(":", 1));
+                hash.addData(QByteArray::number(result.score));
+                hash.addData(QByteArrayView("\0", 1));
+            }
+        }
+    }
+    return hash.result().toHex();
+}
+
+qint64 peakResidentKiB()
+{
+#ifdef Q_OS_LINUX
+    rusage usage{};
+    if (getrusage(RUSAGE_SELF, &usage) == 0) return usage.ru_maxrss;
+#endif
+    return -1;
+}
+
+int appendCapacityWorker(const QString &method, int recordCount)
+{
+    if ((method != QStringLiteral("build") && method != QStringLiteral("append"))
+        || (recordCount != kAppendCapacityBaseRecords
+            && recordCount != kAppendCapacityBaseRecords * kAppendCapacityScale)) {
+        std::fprintf(stderr, "invalid append-capacity worker arguments\n");
+        return 2;
+    }
+
+    QHash<QString, QString> normPool;
+    Search::SearchIndex index;
+    const IndexSnapshot empty = Search::SearchIndexBenchmarkAccess::snapshot(index);
+    GrowthObservations recordGrowth;
+    GrowthObservations maskGrowth;
+    qint64 elapsedNs = 0;
+    int batches = 0;
+
+    if (method == QStringLiteral("build")) {
+        Records records = syntheticSearchRecords(0, recordCount, normPool);
+        QElapsedTimer timer;
+        timer.start();
+        index.build(std::move(records));
+        elapsedNs = timer.nsecsElapsed();
+        const IndexSnapshot after = Search::SearchIndexBenchmarkAccess::snapshot(index);
+        observeGrowth(maskGrowth, empty.maskCapacity, empty.maskData,
+                      after.maskCapacity, after.maskData, false);
+    } else {
+        for (int first = 0; first < recordCount; first += kAppendCapacityBatchSize) {
+            const int count = std::min(kAppendCapacityBatchSize, recordCount - first);
+            Records batch = syntheticSearchRecords(first, count, normPool);
+            const IndexSnapshot before = Search::SearchIndexBenchmarkAccess::snapshot(index);
+            QElapsedTimer timer;
+            timer.start();
+            index.append(std::move(batch));
+            elapsedNs += timer.nsecsElapsed();
+            const IndexSnapshot after = Search::SearchIndexBenchmarkAccess::snapshot(index);
+            const bool firstCallAdoptsRecords = batches == 0;
+            observeGrowth(recordGrowth, before.recordCapacity, before.recordData,
+                          after.recordCapacity, after.recordData, firstCallAdoptsRecords);
+            observeGrowth(maskGrowth, before.maskCapacity, before.maskData,
+                          after.maskCapacity, after.maskData, false);
+            ++batches;
+        }
+    }
+
+    const int expectedBatches = (recordCount + kAppendCapacityBatchSize - 1) / kAppendCapacityBatchSize;
+    const quint64 expectedGeneration = method == QStringLiteral("build")
+        ? 1 : static_cast<quint64>(expectedBatches);
+    const QString recordDigest = QString::fromLatin1(recordOrderDigest(index));
+    const QString queriesHash = QString::fromLatin1(queryDigest(index));
+    int cancelledTotal = -1;
+    QVector<int> cancelledIndices{1};
+    const auto cancelledResults = index.match(Search::SearchQuery::parse(QStringLiteral("track")), false,
+                                              {}, &cancelledTotal, &cancelledIndices, nullptr,
+                                              [] { return true; });
+    const bool cancellationPreserved = cancelledResults.isEmpty() && cancelledTotal == 0
+        && cancelledIndices.isEmpty();
+    const IndexSnapshot final = Search::SearchIndexBenchmarkAccess::snapshot(index);
+
+    QJsonObject result;
+    result.insert(QStringLiteral("method"), method);
+    result.insert(QStringLiteral("records"), recordCount);
+    result.insert(QStringLiteral("batches"), method == QStringLiteral("build") ? expectedBatches : batches);
+    result.insert(QStringLiteral("elapsed_ns"), static_cast<double>(elapsedNs));
+    result.insert(QStringLiteral("peak_rss_kib"), static_cast<double>(peakResidentKiB()));
+    result.insert(QStringLiteral("record_capacity"), static_cast<double>(final.recordCapacity));
+    result.insert(QStringLiteral("record_growths"), static_cast<double>(recordGrowth.capacityGrowths));
+    result.insert(QStringLiteral("record_storage_moves"), static_cast<double>(recordGrowth.storageMoves));
+    result.insert(QStringLiteral("mask_capacity"), static_cast<double>(final.maskCapacity));
+    result.insert(QStringLiteral("mask_growths"), static_cast<double>(maskGrowth.capacityGrowths));
+    result.insert(QStringLiteral("mask_storage_moves"), static_cast<double>(maskGrowth.storageMoves));
+    result.insert(QStringLiteral("path_segment_capacity"), static_cast<double>(final.pathSegmentCapacity));
+    result.insert(QStringLiteral("path_offset_capacity"), static_cast<double>(final.pathOffsetCapacity));
+    result.insert(QStringLiteral("folder_capacity"), static_cast<double>(final.folderCapacity));
+    result.insert(QStringLiteral("generation"), static_cast<double>(index.generation()));
+    result.insert(QStringLiteral("generation_expected"), static_cast<double>(expectedGeneration));
+    result.insert(QStringLiteral("record_order_sha256"), recordDigest);
+    result.insert(QStringLiteral("query_results_sha256"), queriesHash);
+    result.insert(QStringLiteral("cancellation_preserved"), cancellationPreserved);
+    const QByteArray output = QJsonDocument(result).toJson(QJsonDocument::Compact);
+    std::fwrite(output.constData(), 1, static_cast<std::size_t>(output.size()), stdout);
+    std::fputc('\n', stdout);
+
+    return index.size() == recordCount && index.generation() == expectedGeneration
+            && cancellationPreserved ? 0 : 1;
+}
+
+bool runAppendCapacityWorker(const QString &method, int recordCount, QJsonObject *result)
+{
+    QProcess process;
+    process.setProgram(QCoreApplication::applicationFilePath());
+    process.setArguments({QStringLiteral("--append-capacity-worker"), method,
+                          QString::number(recordCount)});
+    process.start();
+    if (!process.waitForStarted() || !process.waitForFinished(-1) || process.exitCode() != 0) return false;
+    QJsonParseError error{};
+    const QJsonDocument document = QJsonDocument::fromJson(process.readAllStandardOutput().trimmed(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) return false;
+    *result = document.object();
+    return true;
+}
+
+bool sameStructuralResult(const QJsonObject &left, const QJsonObject &right)
+{
+    static const QStringList keys = {
+        QStringLiteral("records"), QStringLiteral("batches"),
+        QStringLiteral("record_capacity"), QStringLiteral("record_growths"),
+        QStringLiteral("record_storage_moves"), QStringLiteral("mask_capacity"),
+        QStringLiteral("mask_growths"), QStringLiteral("mask_storage_moves"),
+        QStringLiteral("path_segment_capacity"), QStringLiteral("path_offset_capacity"),
+        QStringLiteral("folder_capacity"), QStringLiteral("generation"),
+        QStringLiteral("generation_expected"), QStringLiteral("record_order_sha256"),
+        QStringLiteral("query_results_sha256"), QStringLiteral("cancellation_preserved"),
+    };
+    for (const QString &key : keys) {
+        if (left.value(key) != right.value(key)) return false;
+    }
+    return true;
+}
+
+int appendCapacityBenchmark()
+{
+    std::printf("SearchIndex append capacity benchmark (synthetic data; 3,000-record batches)\n");
+    std::printf("Fixture: %d records at 1x and %d at 10x; each method runs in a separate process\n",
+                kAppendCapacityBaseRecords, kAppendCapacityBaseRecords * kAppendCapacityScale);
+    std::printf("Elapsed time covers index build or append calls; peak RSS is the process high-water mark\n");
+
+    for (int scale : {1, kAppendCapacityScale}) {
+        const int recordCount = kAppendCapacityBaseRecords * scale;
+        QJsonObject representative[2];
+        QVector<qint64> elapsed[2];
+        QVector<qint64> peakRss[2];
+        bool initialized[2] = {false, false};
+        for (int repeat = 0; repeat < kAppendCapacityRepeats; ++repeat) {
+            for (int methodIndex = 0; methodIndex < 2; ++methodIndex) {
+                const QString method = methodIndex == 0 ? QStringLiteral("build") : QStringLiteral("append");
+                QJsonObject result;
+                if (!runAppendCapacityWorker(method, recordCount, &result)) {
+                    std::fprintf(stderr, "append-capacity worker failed for %s at scale %dx\n",
+                                 qPrintable(method), scale);
+                    return 1;
+                }
+                if (initialized[methodIndex]) {
+                    if (!sameStructuralResult(representative[methodIndex], result)) {
+                        std::fprintf(stderr, "append-capacity measurements varied structurally across runs\n");
+                        return 1;
+                    }
+                } else {
+                    representative[methodIndex] = result;
+                    initialized[methodIndex] = true;
+                }
+                elapsed[methodIndex].append(static_cast<qint64>(result.value(QStringLiteral("elapsed_ns")).toDouble()));
+                peakRss[methodIndex].append(static_cast<qint64>(result.value(QStringLiteral("peak_rss_kib")).toDouble()));
+            }
+        }
+
+        if (representative[0].value(QStringLiteral("record_order_sha256"))
+                != representative[1].value(QStringLiteral("record_order_sha256"))
+            || representative[0].value(QStringLiteral("query_results_sha256"))
+                != representative[1].value(QStringLiteral("query_results_sha256"))) {
+            std::fprintf(stderr, "build and append produced different records or query results at scale %dx\n", scale);
+            return 1;
+        }
+
+        std::printf("\n%d records (%dx)\n", recordCount, scale);
+        for (int methodIndex = 0; methodIndex < 2; ++methodIndex) {
+            const QJsonObject &result = representative[methodIndex];
+            std::printf("  %-6s median=%.3f ms peak_rss=%lld KiB generation=%lld/%lld\n",
+                        methodIndex == 0 ? "build" : "append",
+                        ms(percentile(elapsed[methodIndex], 0.5)),
+                        static_cast<long long>(*std::max_element(peakRss[methodIndex].begin(), peakRss[methodIndex].end())),
+                        static_cast<long long>(result.value(QStringLiteral("generation")).toDouble()),
+                        static_cast<long long>(result.value(QStringLiteral("generation_expected")).toDouble()));
+            std::printf("         records cap=%lld growths=%lld storage_moves=%lld; masks cap=%lld growths=%lld storage_moves=%lld\n",
+                        static_cast<long long>(result.value(QStringLiteral("record_capacity")).toDouble()),
+                        static_cast<long long>(result.value(QStringLiteral("record_growths")).toDouble()),
+                        static_cast<long long>(result.value(QStringLiteral("record_storage_moves")).toDouble()),
+                        static_cast<long long>(result.value(QStringLiteral("mask_capacity")).toDouble()),
+                        static_cast<long long>(result.value(QStringLiteral("mask_growths")).toDouble()),
+                        static_cast<long long>(result.value(QStringLiteral("mask_storage_moves")).toDouble()));
+            std::printf("         path segments cap=%lld offsets cap=%lld folders cap=%lld cancellation=%s\n",
+                        static_cast<long long>(result.value(QStringLiteral("path_segment_capacity")).toDouble()),
+                        static_cast<long long>(result.value(QStringLiteral("path_offset_capacity")).toDouble()),
+                        static_cast<long long>(result.value(QStringLiteral("folder_capacity")).toDouble()),
+                        result.value(QStringLiteral("cancellation_preserved")).toBool() ? "ok" : "failed");
+        }
+        std::printf("  record-order SHA-256: %s\n",
+                    qPrintable(representative[0].value(QStringLiteral("record_order_sha256")).toString()));
+        std::printf("  query-results SHA-256: %s\n",
+                    qPrintable(representative[0].value(QStringLiteral("query_results_sha256")).toString()));
+    }
+    return 0;
+}
 
 double ms(qint64 ns) { return static_cast<double>(ns) / 1'000'000.0; }
 
@@ -379,6 +735,20 @@ int verifyIndex(const Records &records, int samples)
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
+    if (argc == 2 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--append-capacity")) {
+        return appendCapacityBenchmark();
+    }
+    if (argc == 4 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--append-capacity-worker")) {
+        bool ok = false;
+        const int records = QString::fromLocal8Bit(argv[3]).toInt(&ok);
+        if (!ok) return 2;
+        return appendCapacityWorker(QString::fromLocal8Bit(argv[2]), records);
+    }
+    if (argc == 2 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--help")) {
+        std::printf("usage: bench_search --library PATH [--scale N] [--queries FILE] [--repeat R]\n"
+                    "       bench_search --append-capacity\n");
+        return 0;
+    }
     QString library;
     QString queriesFile;
     int scale = 1;
@@ -430,7 +800,8 @@ int main(int argc, char **argv)
                 else repeats = number;
             }
         } else {
-            std::fprintf(stderr, "usage: bench_search --library PATH [--scale N] [--queries FILE] [--repeat R]\n");
+            std::fprintf(stderr, "usage: bench_search --library PATH [--scale N] [--queries FILE] [--repeat R]\n"
+                                 "       bench_search --append-capacity\n");
             return 2;
         }
     }

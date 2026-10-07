@@ -204,6 +204,15 @@ or failed builds do not publish a partial cache. A GUI build whose source change
 while it was working schedules another refresh. The status label's tooltip
 reports its cache decision and source revision.
 
+## Developer benchmark
+
+`build/tests/bench_search --append-capacity` compares one-shot index construction
+with the streaming append path on the same synthetic records. It runs a bounded
+29,921-record fixture and a 299,210-record fixture in separate processes, uses the
+worker's 3,000-record batch size, and reports elapsed time, resident-memory
+high-water mark, observed buffer capacity changes, index generation, and matching
+digests. The mode does not open a library database and is not part of CTest.
+
 ## Keybindings
 
 An explicit rebuild bypasses the saved cache and reads the database, including
