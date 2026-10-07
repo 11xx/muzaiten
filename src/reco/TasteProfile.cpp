@@ -194,6 +194,45 @@ bool atomicWrite(const QString &path, const QByteArray &bytes, bool replace, QSt
     return true;
 }
 
+// Retained buckets as shares in whole hundredths. Largest-remainder rounding
+// keeps each set summing to exactly 1.00; a bucket that rounds to nothing is
+// dropped. Ties go to the earlier label so the result is deterministic.
+QMap<QString, double> retainedShares(const QMap<QString, int> &support)
+{
+    qint64 total = 0;
+    for (const int count : support) {
+        if (count >= TasteProfiles::MinimumSupport) {
+            total += count;
+        }
+    }
+    struct Bucket {
+        QString label;
+        qint64 hundredths;
+        qint64 remainder;
+    };
+    QList<Bucket> buckets;
+    qint64 assigned = 0;
+    for (auto it = support.begin(); it != support.end(); ++it) {
+        if (it.value() >= TasteProfiles::MinimumSupport) {
+            const qint64 scaled = qint64{it.value()} * 100;
+            buckets.append({it.key(), scaled / total, scaled % total});
+            assigned += scaled / total;
+        }
+    }
+    std::stable_sort(buckets.begin(), buckets.end(),
+                     [](const Bucket &left, const Bucket &right) { return left.remainder > right.remainder; });
+    for (qsizetype i = 0; assigned < 100 && i < buckets.size(); ++i, ++assigned) {
+        ++buckets[i].hundredths;
+    }
+    QMap<QString, double> shares;
+    for (const Bucket &bucket : buckets) {
+        if (bucket.hundredths > 0) {
+            shares.insert(bucket.label, static_cast<double>(bucket.hundredths) / 100.0);
+        }
+    }
+    return shares;
+}
+
 bool saveSeeds(const QMap<QString, TasteProfile> &profiles, QString *error)
 {
     QJsonArray entries;
@@ -218,6 +257,7 @@ QString contentsDescription()
 {
     return QStringLiteral("Contains canonical genre shares, tempo and energy quartiles, and optional decade shares. "
                           "Buckets supported by fewer than five distinct tracks are omitted. "
+                          "Shares and energy quartiles are rounded to hundredths and tempo quartiles to whole BPM. "
                           "These aggregates reveal library taste. No artist, album or track names, recording identifiers, paths, timestamps, "
                           "raw counts, listening history, skips or ratings are included.");
 }
@@ -359,21 +399,6 @@ bool aggregate(const QVector<TrackScorer::Candidate> &tracks, bool optIn, bool i
             ++decadeSupport[QString::number(track.year / 10 * 10)];
         }
     }
-    const auto retainedShares = [](const QMap<QString, int> &support) {
-        QMap<QString, double> result;
-        double total = 0.0;
-        for (auto it = support.begin(); it != support.end(); ++it) {
-            if (it.value() >= MinimumSupport) {
-                total += it.value();
-            }
-        }
-        for (auto it = support.begin(); it != support.end(); ++it) {
-            if (it.value() >= MinimumSupport) {
-                result.insert(it.key(), it.value() / total);
-            }
-        }
-        return result;
-    };
     TasteProfile aggregated;
     aggregated.genres = retainedShares(genreSupport);
     aggregated.decades = retainedShares(decadeSupport);
@@ -382,11 +407,15 @@ bool aggregate(const QVector<TrackScorer::Candidate> &tracks, bool optIn, bool i
             continue;
         }
         std::sort(it->begin(), it->end());
-        const auto quantile = [&values = it.value()](double fraction) {
+        // An interpolated quartile can equal one track's exact extractor value,
+        // so tempo rounds to whole BPM and energy to hundredths.
+        const bool tempo = it.key() == QLatin1String("tempo_bpm");
+        const auto quantile = [&values = it.value(), tempo](double fraction) {
             const double index = fraction * static_cast<double>(values.size() - 1);
             const auto lower = static_cast<qsizetype>(std::floor(index));
             const auto upper = static_cast<qsizetype>(std::ceil(index));
-            return values[lower] + (values[upper] - values[lower]) * (index - static_cast<double>(lower));
+            const double value = values[lower] + (values[upper] - values[lower]) * (index - static_cast<double>(lower));
+            return tempo ? std::clamp(std::round(value), 1.0, 1000.0) : std::round(value * 100.0) / 100.0;
         };
         aggregated.features.insert(it.key(), {quantile(0.25), quantile(0.5), quantile(0.75)});
     }

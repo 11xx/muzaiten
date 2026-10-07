@@ -21,7 +21,8 @@
   strict versioned JSON, explicit replacement and atomic writes. Imported
   profiles become named radio seeds with a bounded genre/feature score bias
   and named pick reasons; stopping radio deactivates a seed. Exchange files
-  omit identifiers, raw counts and listening-history data. No automatic export
+  round shares and quartiles to hundredths or whole BPM and omit identifiers,
+  raw counts and listening-history data. No automatic export
   or external sharing is provided.
 
 - Local scalar feature-pack export/import through `muzaiten-features pack`,

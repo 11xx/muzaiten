@@ -389,14 +389,18 @@ At least one genre or feature distribution is required for a usable seed.
 Input is complete UTF-8 JSON of at most 64 KiB; duplicate keys are rejected.
 
 Export computes linear interpolated quartiles from existing fresh DSP values
-served by `FeatureStore`. It drops each genre/decade bucket supported by fewer
-than five distinct songs and each feature with fewer than five distinct
-samples, counting duplicate song identities and content groups once. It renormalizes
-retained shares without writing support counts or discarded labels. Import
-validates aggregate values but cannot attest source support without the private
-source records. Embeddings, content hashes, extractor identifiers, library
-identifiers, paths and per-record data are absent. Feature-pack import remains
-the exclusive analyzer write path; taste import never changes feature rows.
+served by `FeatureStore`, rounded to whole BPM for tempo and to hundredths for
+energy. It drops each genre/decade bucket supported by fewer than five
+distinct songs and each feature with fewer than five distinct samples,
+counting duplicate song identities and content groups once. It renormalizes
+retained shares without writing support counts or discarded labels, rounding
+them to whole hundredths by largest remainder so each exported set sums to
+exactly 1.00; a bucket that rounds to zero is left out. Import accepts any
+finite in-range values within the sum tolerance and cannot attest source
+support without the private source records. Embeddings, content hashes,
+extractor identifiers, library identifiers, paths and per-record data are
+absent. Feature-pack import remains the exclusive analyzer write path; taste
+import never changes feature rows.
 
 See [radio.md](radio.md#aggregate-taste-seeds) for the bounded scoring term and
 [data-safety.md](data-safety.md#aggregate-taste-profile-files) for consent and
