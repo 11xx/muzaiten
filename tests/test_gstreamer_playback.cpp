@@ -158,8 +158,12 @@ private slots:
         backend.play(QUrl::fromLocalFile(tone));
         QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
         backend.m_sinkFactory = QStringLiteral("pipewiresink");
+        QSignalSpy positions(&backend, &PlaybackBackend::positionChanged);
         backend.reloadCurrentAtPosition(5000, PlaybackBackend::State::Playing);
         backend.seek(6000);
+        QCOMPARE(backend.position(), qint64{6000});
+        QVERIFY(!positions.isEmpty());
+        QCOMPARE(positions.last().at(0).toLongLong(), qint64{6000});
         backend.pause();
         QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Paused, 3000);
         QVERIFY(std::abs(backend.position() - 6000) < 250);
