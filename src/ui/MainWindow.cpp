@@ -811,70 +811,6 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         QMessageBox::warning(this, QStringLiteral("Playback"),
                              QStringLiteral("Could not resolve a readable file for %1").arg(track.path));
     });
-    m_player->setPlaybackStartPlanner([this](const Track &track) {
-        PlayerCore::PlaybackStartPlan plan;
-        if (!isDsdTrack(track)) {
-            return plan;
-        }
-
-        const PlaybackBackend::DsdSupport support = m_playback->dsdSupport();
-        const auto skip = [](const QString &reason) {
-            PlayerCore::PlaybackStartPlan rejected;
-            rejected.action = PlayerCore::PlaybackStartPlan::Action::Skip;
-            rejected.reason = reason;
-            return rejected;
-        };
-        // No DFF/DSDIFF demuxer ships with GStreamer or ffmpeg today, so neither
-        // the native passthrough nor the decode-to-PCM path can even parse a .dff
-        // container (avdemux_dsf is DSF-only). Skip honestly up front rather than
-        // routing it to playbin, which would only surface a decode error — and
-        // rather than implying resampling could rescue it, which it cannot.
-        if (track.codec.compare(QStringLiteral("dff"), Qt::CaseInsensitive) == 0) {
-            return skip(QStringLiteral("DFF/DSDIFF playback isn't supported by the installed GStreamer plugins (DSF only)"));
-        }
-
-        // Shared output with resampling is deliberately the straightforward
-        // decode-to-PCM path: playbin chooses the installed DSD decoder and no
-        // device takeover or skip is involved.
-        if (m_playbackProfile.mode != QStringLiteral("bit-perfect")
-            && m_playbackProfile.allowResample) {
-            if (support.pcmDecode) {
-                return plan;
-            }
-            return skip(QStringLiteral("DSD PCM playback needs gst-plugins-bad and gst-libav"));
-        }
-        if (!support.nativePassthrough) {
-            return skip(QStringLiteral("Native DSD playback needs gst-plugins-bad and gst-libav"));
-        }
-
-        QString device = m_playbackProfile.device;
-        if (m_playbackProfile.mode != QStringLiteral("bit-perfect")) {
-            if (m_playbackProfile.deviceId.isEmpty()) {
-                return skip(QStringLiteral("Choose a direct output device in Playback → Output profile before native DSD playback"));
-            }
-            const auto dev = AudioDeviceControl::findByStableId(m_playbackProfile.deviceId);
-            if (!dev || dev->hwPath.isEmpty()) {
-                return skip(QStringLiteral("The configured native DSD device is no longer available"));
-            }
-            device = dev->hwPath;
-            plan.device = device;
-            plan.action = dev->heldByPipeWire()
-                ? PlayerCore::PlaybackStartPlan::Action::DeferForDsdTakeover
-                : PlayerCore::PlaybackStartPlan::Action::NativeDsd;
-            return plan;
-        }
-
-        if (device.isEmpty() && m_playbackProfile.deviceId.isEmpty()) {
-            return skip(QStringLiteral("Choose a bit-perfect output device before native DSD playback"));
-        }
-        // The backend checks the card again when it opens it, and waits
-        // while the selected one is absent.
-        const AudioDeviceControl::DirectTarget target =
-            m_directDevices->resolve(m_playbackProfile.deviceId, device);
-        plan.action = PlayerCore::PlaybackStartPlan::Action::NativeDsd;
-        plan.device = target.hwPath.isEmpty() ? device : target.hwPath;
-        return plan;
-    });
     connect(m_player, &PlayerCore::dsdTakeoverRequested, this, &MainWindow::showDsdTakeoverPrompt);
     connect(m_player, &PlayerCore::trackStartSkipped, this, [this](const Track &track, const QString &reason) {
         const QString title = track.title.isEmpty() ? track.filename : track.title;
@@ -3707,8 +3643,8 @@ void MainWindow::restoreCurrentSourceSelection()
 
 void MainWindow::loadPlaybackProfile()
 {
-    m_playbackProfile = playbackProfileFromJson(m_database->setting(QStringLiteral("playback.profile")));
-    // The persisted hw:N can drift across reboots / device launch order; recover
+    m_playbackProfile = m_core->activePlaybackProfile();
+    // The cached hw:N can drift across reboots / device launch order; recover
     // the current index from the stable device id when we have one. When the
     // card is absent the saved number stays a stale cache: the backend checks
     // the identity again before opening and waits instead.
@@ -3720,13 +3656,17 @@ void MainWindow::loadPlaybackProfile()
             m_playbackProfile.device = target.hwPath;
         }
     }
+    m_core->setActivePlaybackProfile(m_playbackProfile);
     m_playback->setProfile(m_playbackProfile);
     m_playerBar->setVolumeControlEnabled(m_playbackProfile.softwareVolume);
 }
 
 void MainWindow::savePlaybackProfile()
 {
-    m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(m_playbackProfile));
+    if (!m_core->saveActivePlaybackProfile(m_playbackProfile)) {
+        statusBar()->showMessage(QStringLiteral("Could not save output profile: %1")
+                                     .arg(m_core->playbackProfileSaveError()), 8000);
+    }
 }
 
 void MainWindow::loadPlaybackResumeSettings()
@@ -3912,10 +3852,15 @@ void MainWindow::updateOutputIndicator()
 
 void MainWindow::adoptSharedEndpoint(const QString &name, const QString &label)
 {
-    // The backend already requests it and AppCore has saved it; keep this
-    // window's copy of the profile in step.
+    // The backend requests the route and AppCore owns its current profile;
+    // keep this window's copy in step.
     m_playbackProfile.sharedEndpoint = name;
     m_playbackProfile.sharedEndpointLabel = label;
+    if (!m_core->playbackProfileSaveError().isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("Output changed for this session; could not save it: %1")
+                                     .arg(m_core->playbackProfileSaveError()), 8000);
+        return;
+    }
     statusBar()->showMessage(QStringLiteral("Output set to %1, as chosen in a mixer")
                                  .arg(label.isEmpty() ? name : label), 6000);
 }

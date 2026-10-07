@@ -72,6 +72,11 @@ and are not restored after restart.
   bit-perfect DSD
   (`.dsf`) needs a direct-capable device selected here with resampling
   off; with **Allow resampling** DSD decodes to PCM for shared output.
+  A DSD track that needs an interactive device takeover is skipped while the
+  window is closed; open the window to approve a takeover.
+  If an output choice cannot be saved, the status bar reports the storage
+  error. The choice remains active until the app exits; the next launch uses
+  the last saved profile.
   See [Audio output](#audio-output) for how the destination is chosen.
 - `Playback > Resume behavior…` — whether position and playback state are
   restored across launches.
