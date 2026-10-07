@@ -208,6 +208,9 @@ private slots:
     void supersededSearchDoesNotRestoreHiddenCount()
     {
         SearchView view;
+        view.resize(900, 400);
+        view.show();
+        QCoreApplication::processEvents();
         QVERIFY(QMetaObject::invokeMethod(&view, "onIndexLoaded", Qt::DirectConnection,
                                           Q_ARG(int, 5)));
         auto *query = view.findChild<QLineEdit *>();
@@ -221,13 +224,37 @@ private slots:
                                           Q_ARG(QVector<Search::ScoredResult>, results),
                                           Q_ARG(int, 0), Q_ARG(int, 2)));
         QVERIFY(!hidden->isHidden());
+        QCoreApplication::processEvents();
+        const int searchWidth = query->width();
         query->setText(QStringLiteral("green"));
         QVERIFY(hidden->isHidden());
+        QCoreApplication::processEvents();
+        QCOMPARE(query->width(), searchWidth);
         QVERIFY(QMetaObject::invokeMethod(&view, "onResultsReady", Qt::DirectConnection,
                                           Q_ARG(quint64, quint64{1}),
                                           Q_ARG(QVector<Search::ScoredResult>, results),
                                           Q_ARG(int, 0), Q_ARG(int, 2)));
         QVERIFY(hidden->isHidden());
+    }
+
+    void hiddenCountColorTracksPalette()
+    {
+        SearchView view;
+        auto *hidden = view.findChild<QLabel *>(QStringLiteral("search.hiddenMatches"));
+        QVERIFY(hidden != nullptr);
+        const auto check = [&view, hidden](const QColor &foreground, const QColor &background) {
+            QPalette palette = view.palette();
+            palette.setColor(QPalette::WindowText, foreground);
+            palette.setColor(QPalette::Window, background);
+            view.setPalette(palette);
+            QCoreApplication::processEvents();
+            QCOMPARE(hidden->palette().color(QPalette::WindowText),
+                     QColor((2 * foreground.red() + background.red()) / 3,
+                            (2 * foreground.green() + background.green()) / 3,
+                            (2 * foreground.blue() + background.blue()) / 3));
+        };
+        check(QColor(15, 35, 55), QColor(225, 235, 245));
+        check(QColor(235, 225, 215), QColor(25, 35, 45));
     }
 
     void startupEnqueueDuringWindowConstruction_data()
