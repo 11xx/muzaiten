@@ -13,12 +13,14 @@ public:
     void setProfile(const PlaybackProfile &) override {}
     void play(const QUrl &url) override
     {
+        noteTransportRequest();
         m_source = url;
         m_state = State::Playing;
         playedUrls.push_back(url);
     }
     void loadPaused(const QUrl &url) override
     {
+        noteTransportRequest();
         m_source = url;
         m_state = loadPausedLeavesStopped ? State::Stopped : State::Paused;
         positionMs = 0;
@@ -44,11 +46,12 @@ public:
     void resume() override { m_state = State::Playing; }
     void stop() override
     {
+        noteTransportRequest();
         m_source.clear();
         m_state = State::Stopped;
         ++stopCalls;
     }
-    void seek(qint64 positionMs) override { lastSeekMs = positionMs; }
+    void seek(qint64 positionMs) override { noteTransportRequest(); lastSeekMs = positionMs; }
     void setVolume(double volume0To1) override { lastVolume = volume0To1; }
     void setOutputMode(OutputMode mode, const QString &device = QString()) override
     {
@@ -174,6 +177,7 @@ private slots:
     void radioEmptyProviderFallsBackToEndOfQueue();
     void radioInactiveLeavesShuffleUntouched();
     void dsdTakeoverDefersThenStartsNatively();
+    void deferredDsdTakeoverRestoresSavedPosition();
     void declinedDsdSkipsContiguousBlockUntilPlaybackStarts();
     void stopAfterStartsUnarmed();
     void stopAfterDeadlineExpiresAfterShortDuration();
@@ -939,6 +943,33 @@ void PlayerCoreTest::dsdTakeoverDefersThenStartsNatively()
     QCOMPARE(m_backend->playedUrls.last(), QUrl::fromLocalFile(dsd.path));
     QCOMPARE(m_backend->outputModes.last(), PlaybackBackend::OutputMode::NativeDsd);
     QCOMPARE(m_backend->outputDevices.last(), QStringLiteral("hw:3"));
+}
+
+void PlayerCoreTest::deferredDsdTakeoverRestoresSavedPosition()
+{
+    Track dsd = makeTrack(QStringLiteral("/music/restore.dsf"));
+    dsd.codec = QStringLiteral("dsf");
+    m_core->resetQueue({dsd});
+    m_core->setPlaybackStartPlanner([](const Track &) {
+        PlayerCore::PlaybackStartPlan plan;
+        plan.action = PlayerCore::PlaybackStartPlan::Action::DeferForDsdTakeover;
+        plan.device = QStringLiteral("hw:999");
+        return plan;
+    });
+
+    m_core->playAt(0, false, true, false);
+    QVERIFY(m_core->setPendingDsdResumePosition(42000));
+    const auto pending = m_core->pendingDsdTakeoverRequest();
+    QVERIFY(pending.has_value());
+    QCOMPARE(pending->track.path, dsd.path);
+    QCOMPARE(pending->resumePositionMs, qint64{42000});
+    QCOMPARE(m_backend->lastSeekMs, qint64{-1});
+
+    m_core->resolveDsdTakeover(true);
+    QCOMPARE(m_backend->loadedPausedUrls.size(), 1);
+    QCOMPARE(m_backend->lastSeekMs, qint64{-1});
+    QTRY_COMPARE_WITH_TIMEOUT(m_backend->lastSeekMs, qint64{42000}, 1000);
+    QVERIFY(!m_core->pendingDsdTakeoverRequest().has_value());
 }
 
 void PlayerCoreTest::declinedDsdSkipsContiguousBlockUntilPlaybackStarts()

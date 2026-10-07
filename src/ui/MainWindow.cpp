@@ -3005,6 +3005,9 @@ void MainWindow::adoptQueueSession()
     }
     m_playerBar->setPlaying(m_playback->state() == PlaybackBackend::State::Playing
                             || m_playback->state() == PlaybackBackend::State::Buffering);
+    if (const auto pending = m_player->pendingDsdTakeoverRequest()) {
+        showDsdTakeoverPrompt(pending->track, pending->device);
+    }
 }
 
 void MainWindow::saveQueueState() { m_queueSnapshotStore->saveQueueState(); }
@@ -3556,6 +3559,7 @@ void MainWindow::loadPlaybackProfile()
 void MainWindow::savePlaybackProfile()
 {
     if (!m_core->saveActivePlaybackProfile(m_playbackProfile)) {
+        qWarning("muzaiten: could not save output profile: %s", qPrintable(m_core->playbackProfileSaveError()));
         statusBar()->showMessage(QStringLiteral("Could not save output profile: %1")
                                      .arg(m_core->playbackProfileSaveError()), 8000);
     }
@@ -3820,8 +3824,17 @@ void MainWindow::applyOutputProfile(const PlaybackProfile &next, const QString &
     }
     const quint64 stopAfterTriggerGeneration = m_stopAfterTriggerGeneration;
     const quint64 transition = ++m_outputTransitionGeneration;
+    const QString saveError = m_core->playbackProfileSaveError();
+    const auto showStatus = [this, saveError](const QString &message, int durationMs) {
+        if (saveError.isEmpty()) {
+            statusBar()->showMessage(message, durationMs);
+        } else {
+            statusBar()->showMessage(QStringLiteral("Output changed for this session; could not save it: %1")
+                                         .arg(saveError), 8000);
+        }
+    };
     const auto apply = [this, applied, releasedId, queueIndex, positionMs, wasActive, wasPlaying,
-                        stopAfterTriggerGeneration, transition]() {
+                        stopAfterTriggerGeneration, transition, showStatus]() {
         if (transition != m_outputTransitionGeneration) {
             return;  // a newer output choice owns the backend now
         }
@@ -3839,7 +3852,7 @@ void MainWindow::applyOutputProfile(const PlaybackProfile &next, const QString &
             // delay lets the freshly-built sink preroll before the seek.
             resumePlaybackAt(queueIndex, positionMs, wasPlaying, /*settleDelayMs=*/600);
         }
-        statusBar()->showMessage(QStringLiteral("Playback output updated"), 3000);
+        showStatus(QStringLiteral("Playback output updated"), 3000);
     };
 
     // Figure out which device-ownership change (if any) must settle first:
@@ -3868,7 +3881,7 @@ void MainWindow::applyOutputProfile(const PlaybackProfile &next, const QString &
         apply();
         return;
     }
-    statusBar()->showMessage(QStringLiteral("Switching output…"), 10000);
+    showStatus(QStringLiteral("Switching output…"), 10000);
     waitForDeviceOwnership(waitHw, waitId, wantHeld, previousSinkNodeId, apply);
 }
 
