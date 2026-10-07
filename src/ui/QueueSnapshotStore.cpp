@@ -1,130 +1,21 @@
 #include "ui/QueueSnapshotStore.h"
-#include "ui/MainWindow.h"
 
-#include "Version.h"
-#include "app/AppCore.h"
-#include "app/AppPaths.h"
-#include "core/MusicSort.h"
 #include "core/Rating.h"
 #include "db/Database.h"
 #include "db/PlaylistDatabase.h"
 #include "db/SettingsStore.h"
-#include "fs/LinkRoot.h"
-#include "playback/AudioDeviceControl.h"
 #include "player/PlayerCore.h"
-#include "playback/PlaybackBackend.h"
-#include "mpd/MpdConfig.h"
-#include "mpd/MpdImportWorker.h"
-#include "ipc/IpcServer.h"
-#include "mpris/MprisService.h"
-#include "scanner/ArtworkCache.h"
-#include "scanner/ScanPipeline.h"
-#include "scanner/RatingTagSyncWorker.h"
-#include "scrobble/LastFmCredentials.h"
-#include "scrobble/LastFmScrobbler.h"
-#include "scrobble/ListenBrainzScrobbler.h"
-#include "scrobble/ListenHistoryStore.h"
-#include "scrobble/ListenTracker.h"
-#include "scrobble/ScrobbleBackfill.h"
-#include "ui/AlbumGrid.h"
-#include "ui/ArtistSidebar.h"
-#include "ui/AudioAnalysisDialogs.h"
-#include "ui/FileExplorerKeybindings.h"
-#include "ui/FileExplorerView.h"
-#include "ui/GenreCurationDialog.h"
-#include "ui/IdleReleaseController.h"
-#include "ui/KeybindingsDialog.h"
-#include "ui/LinkRootsDialog.h"
-#include "ui/ListeningHistoryPanel.h"
-#include "ui/PlayerBar.h"
-#include "ui/PanelBorderStyle.h"
-#include "ui/PanelOrderDialog.h"
-#include "ui/PanelSearchController.h"
-#include "ui/PlaybackProfileDialog.h"
-#include "ui/PlaybackResumeDialog.h"
-#include "ui/QueueKeybindings.h"
-#include "ui/QueueScreen.h"
-#include "ui/QueueStore.h"
-#include "ui/RankingDialog.h"
-#include "ui/RightSidebar.h"
-#include "ui/PlaylistAddDialog.h"
-#include "playlist/PlaylistDropImportWorker.h"
-#include "ui/PlaylistImportDialog.h"
-#include "ui/PlaylistView.h"
-#include "ui/RadioCustomizationDialog.h"
-#include "ui/SearchView.h"
-#include "ui/ScanController.h"
-#include "ui/RatingSyncController.h"
-#include "ui/ViewStatePersistence.h"
-#include "ui/SemanticSearchDialog.h"
-#include "ui/SourceDirectoriesDialog.h"
-#include "ui/SplitterPersistence.h"
-#include "ui/MainPanelKeybindings.h"
-#include "ui/MusicExplorerView.h"
-#include "ui/TableNavigationScroll.h"
-#include "search/Exclusion.h"
-#include "search/RankConfig.h"
-#include "search/SearchIndex.h"
-#include "ui/TrackPropertiesDialog.h"
-#include "ui/TrackTable.h"
-#include "ui/UiMetrics.h"
 
-#include <QAction>
-#include <QApplication>
 #include <QCoreApplication>
-#include <QDesktopServices>
-#include <QDialog>
-#include <QDialogButtonBox>
-#include <QDir>
-#include <QEvent>
-#include <QEventLoop>
-#include <QFileInfo>
-#include <QFileDialog>
-#include <QCheckBox>
-#include <QFormLayout>
-#include <QGroupBox>
-#include <QHash>
-#include <QHBoxLayout>
-#include <QDateTime>
-#include <QImage>
-#include <QInputDialog>
-#include <QLabel>
-#include <QJsonDocument>
-#include <QJsonArray>
-#include <QJsonObject>
-#include <QLineEdit>
-#include <QListWidget>
-#include <QLocale>
-#include <QLoggingCategory>
-#include <QMenu>
-#include <QMessageBox>
-#include <QCloseEvent>
 #include <QCryptographicHash>
-#include <QProcess>
-#include <QProgressBar>
-#include <QPushButton>
-#include <QRegularExpression>
-#include <QScopedValueRollback>
-#include <QShortcut>
+#include <QDateTime>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QSet>
-#include <QSpinBox>
-#include <QSplitter>
-#include <QStackedWidget>
-#include <QStatusBar>
-#include <QStandardPaths>
-#include <QThread>
 #include <QTimer>
-#include <QToolButton>
-#include <QDBusConnection>
-#include <QDBusConnectionInterface>
-#include <QDBusMessage>
-#include <QUrl>
-#include <QVBoxLayout>
 #include <QUuid>
-
 #include <algorithm>
-#include <cmath>
-
 
 namespace {
 constexpr int kAutomaticSavedQueueLimit = 15;
@@ -308,7 +199,26 @@ Track trackFromJson(const QJsonObject &root)
 }
 }
 
-QueueSnapshotStore::QueueSnapshotStore(MainWindow &window) : QObject(&window), m_window(window) {}
+QueueSnapshotStore::QueueSnapshotStore(PlayerCore &player, Database &database, PlaylistDatabase &playlists,
+                                       SettingsStore &state, QObject *parent)
+    : QObject(parent), m_player(player), m_database(database), m_playlists(playlists), m_state(state),
+      m_saveTimer(new QTimer(this))
+{
+    m_saveTimer->setSingleShot(true);
+    m_saveTimer->setInterval(500);
+    connect(m_saveTimer, &QTimer::timeout, this, &QueueSnapshotStore::saveQueueState);
+    connect(qApp, &QCoreApplication::aboutToQuit, this, &QueueSnapshotStore::saveQueueState);
+    connect(&m_player, &PlayerCore::queueChanged, this, &QueueSnapshotStore::syncQueueIdentity);
+    connect(&m_player, &PlayerCore::queueReset, this, &QueueSnapshotStore::syncQueueIdentity);
+    connect(&m_player, &PlayerCore::currentIndexChanged, this, [this]() { scheduleQueueStateSave(); });
+    connect(&m_player, &PlayerCore::playNextRangeChanged, this, [this]() { scheduleQueueStateSave(); });
+    connect(&m_player, &PlayerCore::queueTracksChanged, this, [this]() { scheduleQueueStateSave(); });
+    connect(&m_player, &PlayerCore::aboutToAddTracks, this, &QueueSnapshotStore::prepareQueueForTrackAddition);
+    connect(&m_player, &PlayerCore::aboutToInjectLibraryTrack, this, &QueueSnapshotStore::prepareQueueForLibraryInjection);
+    connect(&m_player, &PlayerCore::radioActiveChanged, this, [this](bool active) {
+        if (active) markQueueAsSpontaneous();
+    });
+}
 
 // The persisted queue lives in two settings. `queue.state` holds the tracks and
 // the queue identity and is rewritten only when this fingerprint changes;
@@ -328,11 +238,11 @@ QByteArray QueueSnapshotStore::currentQueueStructureFingerprint() const
     const auto addInt = [&hash](qint64 value) {
         hash.addData(QByteArrayView(reinterpret_cast<const char *>(&value), sizeof(value)));
     };
-    addString(m_window.m_queueId);
-    addString(m_window.m_queueSourceKind);
-    addInt(m_window.m_queueSourcePlaylistId);
-    addString(m_window.m_queueSourceName);
-    const QVector<Track> &queue = m_window.m_player->queue();
+    addString(m_queueId);
+    addString(m_queueSourceKind);
+    addInt(m_queueSourcePlaylistId);
+    addString(m_queueSourceName);
+    const QVector<Track> &queue = m_player.queue();
     addInt(queue.size());
     for (const Track &track : queue) {
         addString(track.path);
@@ -345,15 +255,17 @@ QByteArray QueueSnapshotStore::currentQueueStructureFingerprint() const
 
 void QueueSnapshotStore::loadQueueState()
 {
+    if (m_restored) return;
+    m_restored = true;
     m_savedStructureFingerprint.clear();
-    const QJsonObject root = QJsonDocument::fromJson(m_window.m_state->setting(QStringLiteral("queue.state")).toUtf8()).object();
+    const QJsonObject root = QJsonDocument::fromJson(m_state.setting(QStringLiteral("queue.state")).toUtf8()).object();
     const QJsonArray trackValues = root.value(QStringLiteral("tracks")).toArray();
     QVector<Track> tracks;
     tracks.reserve(trackValues.size());
     for (const QJsonValue &value : trackValues) {
         Track track = trackFromJson(value.toObject());
         if (!track.path.isEmpty()) {
-            const Track refreshed = m_window.m_database->trackForPath(track.path);
+            const Track refreshed = m_database.trackForPath(track.path);
             if (!refreshed.path.isEmpty()) {
                 track = refreshed;
             }
@@ -365,45 +277,25 @@ void QueueSnapshotStore::loadQueueState()
     // from the cursor fields a structure document may carry. resetQueue() clamps
     // both fields to the loaded track count.
     const QString queueId = root.value(QStringLiteral("queueId")).toString();
-    const QJsonObject cursor = QJsonDocument::fromJson(m_window.m_state->setting(QStringLiteral("queue.cursor")).toUtf8()).object();
+    const QJsonObject cursor = QJsonDocument::fromJson(m_state.setting(QStringLiteral("queue.cursor")).toUtf8()).object();
     const bool cursorMatches = !queueId.isEmpty() && cursor.value(QStringLiteral("queueId")).toString() == queueId;
     const QJsonObject &cursorSource = cursorMatches ? cursor : root;
     const int savedIndex = cursorSource.value(QStringLiteral("index")).toInt(-1);
-    m_window.m_player->resetQueue(tracks, savedIndex,
+    m_queueId = queueId;
+    m_queueSourceKind = normalizedQueueSourceKind(root.value(QStringLiteral("queueSourceKind")).toString(QStringLiteral("queue")));
+    m_queueSourcePlaylistId = root.value(QStringLiteral("queueSourcePlaylistId")).toString().toLongLong();
+    if (m_queueSourcePlaylistId <= 0) {
+        m_queueSourcePlaylistId = static_cast<qint64>(root.value(QStringLiteral("queueSourcePlaylistId")).toDouble(0));
+    }
+    m_queueSourceName = root.value(QStringLiteral("queueSourceName")).toString();
+    m_player.resetQueue(tracks, savedIndex,
                          cursorSource.value(QStringLiteral("playNextInsertIndex")).toInt(savedIndex + 1));
-    m_window.m_queueId = queueId;
-    m_window.m_queueSourceKind = normalizedQueueSourceKind(root.value(QStringLiteral("queueSourceKind")).toString(QStringLiteral("queue")));
-    m_window.m_queueSourcePlaylistId = root.value(QStringLiteral("queueSourcePlaylistId")).toString().toLongLong();
-    if (m_window.m_queueSourcePlaylistId <= 0) {
-        m_window.m_queueSourcePlaylistId = static_cast<qint64>(root.value(QStringLiteral("queueSourcePlaylistId")).toDouble(0));
-    }
-    m_window.m_queueSourceName = root.value(QStringLiteral("queueSourceName")).toString();
-    if (m_window.m_player->queue().isEmpty()) {
-        m_window.m_queueId.clear();
-        m_window.m_queueSourceKind = QStringLiteral("queue");
-        m_window.m_queueSourcePlaylistId = 0;
-        m_window.m_queueSourceName.clear();
-    } else {
-        ensureCurrentQueueIdentity();
-    }
-    // resetQueue() does not emit queueChanged, so push the source-dependent UI
-    // (playlist-mirror items, merge gating) directly for the restored queue.
-    m_window.refreshQueueSourceDependentUi();
-    m_window.m_queueStore->setSnapshot(m_window.m_player->queue(), m_window.m_player->queueIndex(),
-                              m_window.m_player->queueIndex() + 1, m_window.m_player->playNextInsertIndex());
-    m_window.m_rightSidebar->setCurrentIndex(m_window.m_player->queueIndex(), /*reveal=*/true);
-    m_window.refreshPlayNextRange();
-    if (m_window.m_player->queueIndex() >= 0) {
-        m_window.m_player->presentTrack(m_window.m_player->queue().at(m_window.m_player->queueIndex()));
-    }
 }
 
 void QueueSnapshotStore::saveQueueState()
 {
-    if (m_window.m_queueStateSaveTimer != nullptr) {
-        m_window.m_queueStateSaveTimer->stop();
-    }
-    if (!m_window.m_player->queue().isEmpty()) {
+    m_saveTimer->stop();
+    if (!m_player.queue().isEmpty()) {
         ensureCurrentQueueIdentity();
     }
     // The structure is written before the cursor: a crash between the two
@@ -411,26 +303,26 @@ void QueueSnapshotStore::saveQueueState()
     const QByteArray fingerprint = currentQueueStructureFingerprint();
     if (fingerprint != m_savedStructureFingerprint) {
         QJsonArray tracks;
-        for (const Track &track : m_window.m_player->queue()) {
+        for (const Track &track : m_player.queue()) {
             tracks.append(trackToJson(track));
         }
         QJsonObject root;
         root.insert(QStringLiteral("tracks"), tracks);
-        root.insert(QStringLiteral("queueId"), m_window.m_queueId);
-        root.insert(QStringLiteral("queueSourceKind"), m_window.m_queueSourceKind);
-        root.insert(QStringLiteral("queueSourcePlaylistId"), QString::number(m_window.m_queueSourcePlaylistId));
-        root.insert(QStringLiteral("queueSourceName"), m_window.m_queueSourceName);
-        if (m_window.m_state->setSetting(QStringLiteral("queue.state"),
+        root.insert(QStringLiteral("queueId"), m_queueId);
+        root.insert(QStringLiteral("queueSourceKind"), m_queueSourceKind);
+        root.insert(QStringLiteral("queueSourcePlaylistId"), QString::number(m_queueSourcePlaylistId));
+        root.insert(QStringLiteral("queueSourceName"), m_queueSourceName);
+        if (m_state.setSetting(QStringLiteral("queue.state"),
                                          QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)))) {
             m_savedStructureFingerprint = fingerprint;
         }
     }
 
     QJsonObject cursor;
-    cursor.insert(QStringLiteral("queueId"), m_window.m_queueId);
-    cursor.insert(QStringLiteral("index"), m_window.m_player->queueIndex());
-    cursor.insert(QStringLiteral("playNextInsertIndex"), m_window.m_player->playNextInsertIndex());
-    m_window.m_state->setSetting(QStringLiteral("queue.cursor"), QString::fromUtf8(QJsonDocument(cursor).toJson(QJsonDocument::Compact)));
+    cursor.insert(QStringLiteral("queueId"), m_queueId);
+    cursor.insert(QStringLiteral("index"), m_player.queueIndex());
+    cursor.insert(QStringLiteral("playNextInsertIndex"), m_player.playNextInsertIndex());
+    m_state.setSetting(QStringLiteral("queue.cursor"), QString::fromUtf8(QJsonDocument(cursor).toJson(QJsonDocument::Compact)));
 }
 
 void QueueSnapshotStore::scheduleQueueStateSave(bool immediate)
@@ -439,26 +331,24 @@ void QueueSnapshotStore::scheduleQueueStateSave(bool immediate)
         saveQueueState();
         return;
     }
-    if (m_window.m_queueStateSaveTimer != nullptr) {
-        m_window.m_queueStateSaveTimer->start();
-    }
+    m_saveTimer->start();
 }
 
 QJsonObject QueueSnapshotStore::queueSnapshotObject(const QString &name, const QString &source) const
 {
     QJsonArray tracks;
-    for (const Track &track : m_window.m_player->queue()) {
+    for (const Track &track : m_player.queue()) {
         tracks.append(trackToJson(track));
     }
     QJsonObject snapshot;
-    snapshot.insert(QStringLiteral("id"), m_window.m_queueId);
+    snapshot.insert(QStringLiteral("id"), m_queueId);
     snapshot.insert(QStringLiteral("name"), name);
     snapshot.insert(QStringLiteral("savedAt"), QDateTime::currentSecsSinceEpoch());
-    snapshot.insert(QStringLiteral("index"), m_window.m_player->queueIndex());
-    snapshot.insert(QStringLiteral("playNextInsertIndex"), m_window.m_player->playNextInsertIndex());
-    snapshot.insert(QStringLiteral("sourceKind"), m_window.m_queueSourceKind);
-    snapshot.insert(QStringLiteral("sourcePlaylistId"), QString::number(m_window.m_queueSourcePlaylistId));
-    snapshot.insert(QStringLiteral("sourceName"), m_window.m_queueSourceName);
+    snapshot.insert(QStringLiteral("index"), m_player.queueIndex());
+    snapshot.insert(QStringLiteral("playNextInsertIndex"), m_player.playNextInsertIndex());
+    snapshot.insert(QStringLiteral("sourceKind"), m_queueSourceKind);
+    snapshot.insert(QStringLiteral("sourcePlaylistId"), QString::number(m_queueSourcePlaylistId));
+    snapshot.insert(QStringLiteral("sourceName"), m_queueSourceName);
     const QString trimmedSource = source.trimmed();
     if (!trimmedSource.isEmpty()) {
         snapshot.insert(QStringLiteral("source"), trimmedSource);
@@ -469,14 +359,14 @@ QJsonObject QueueSnapshotStore::queueSnapshotObject(const QString &name, const Q
 
 QJsonObject QueueSnapshotStore::loadQueueSnapshotsRoot() const
 {
-    return QJsonDocument::fromJson(m_window.m_state->setting(QStringLiteral("queue.snapshots")).toUtf8()).object();
+    return QJsonDocument::fromJson(m_state.setting(QStringLiteral("queue.snapshots")).toUtf8()).object();
 }
 
 void QueueSnapshotStore::saveQueueSnapshotsRoot(const QJsonObject &root)
 {
-    m_window.m_state->setSetting(QStringLiteral("queue.snapshots"),
+    m_state.setSetting(QStringLiteral("queue.snapshots"),
                         QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
-    m_window.refreshSavedQueuePlaylistEntries();
+    emit snapshotsChanged();
 }
 
 QJsonObject QueueSnapshotStore::queueSnapshotByKey(const QString &keyOrId) const
@@ -511,30 +401,30 @@ int QueueSnapshotStore::radioSavedQueueLimitSetting() const
 
 bool QueueSnapshotStore::savedQueueUnlimitedSetting() const
 {
-    const QString value = m_window.m_state->setting(QStringLiteral("queue.savedQueueUnlimited")).trimmed();
+    const QString value = m_state.setting(QStringLiteral("queue.savedQueueUnlimited")).trimmed();
     return value == QStringLiteral("1") || value == QStringLiteral("true");
 }
 
 bool QueueSnapshotStore::radioSavedQueueUnlimitedSetting() const
 {
-    const QString value = m_window.m_state->setting(QStringLiteral("queue.radioSavedQueueUnlimited")).trimmed();
+    const QString value = m_state.setting(QStringLiteral("queue.radioSavedQueueUnlimited")).trimmed();
     return value == QStringLiteral("1") || value == QStringLiteral("true");
 }
 
 void QueueSnapshotStore::ensureCurrentQueueIdentity()
 {
-    if (m_window.m_queueId.isEmpty()) {
-        m_window.m_queueId = newQueueIdentity();
+    if (m_queueId.isEmpty()) {
+        m_queueId = newQueueIdentity();
     }
-    m_window.m_queueSourceKind = normalizedQueueSourceKind(m_window.m_queueSourceKind);
-    if (m_window.m_queueSourceKind != QStringLiteral("playlist")) {
-        m_window.m_queueSourcePlaylistId = 0;
+    m_queueSourceKind = normalizedQueueSourceKind(m_queueSourceKind);
+    if (m_queueSourceKind != QStringLiteral("playlist")) {
+        m_queueSourcePlaylistId = 0;
     }
 }
 
 bool QueueSnapshotStore::currentQueueBacklogEligible() const
 {
-    return !m_window.m_player->queue().isEmpty() && m_window.m_queueSourceKind == QStringLiteral("queue");
+    return !m_player.queue().isEmpty() && m_queueSourceKind == QStringLiteral("queue");
 }
 
 QJsonObject QueueSnapshotStore::captureCurrentQueueSnapshot(const QString &source)
@@ -598,8 +488,68 @@ void QueueSnapshotStore::snapshotCurrentQueueAsPrevious(const QString &source)
 
 void QueueSnapshotStore::markQueueAsSpontaneous(const QString &id)
 {
-    m_window.m_queueId = id.isEmpty() ? newQueueIdentity() : id;
-    m_window.m_queueSourceKind = QStringLiteral("queue");
-    m_window.m_queueSourcePlaylistId = 0;
-    m_window.m_queueSourceName.clear();
+    setQueueIdentity(id.isEmpty() ? newQueueIdentity() : id);
+}
+
+void QueueSnapshotStore::setQueueIdentity(const QString &id, const QString &kind,
+                                          qint64 playlistId, const QString &name)
+{
+    m_queueId = id;
+    m_queueSourceKind = normalizedQueueSourceKind(kind);
+    m_queueSourcePlaylistId = m_queueSourceKind == QStringLiteral("playlist") ? playlistId : 0;
+    m_queueSourceName = name;
+    emit sourceChanged();
+    scheduleQueueStateSave();
+}
+
+void QueueSnapshotStore::syncQueueIdentity()
+{
+    if (m_player.queue().isEmpty()) {
+        setQueueIdentity({});
+    } else {
+        ensureCurrentQueueIdentity();
+    }
+    scheduleQueueStateSave();
+}
+
+void QueueSnapshotStore::prepareQueueForTrackAddition(const QVector<Track> &tracks)
+{
+    if (tracks.isEmpty()) return;
+    if (m_queueSourceKind == QStringLiteral("playlist")) {
+        if (m_suppressPlaylistMirror || m_queueSourcePlaylistId <= 0) return;
+        QSet<QString> existingPaths;
+        for (const PlaylistItem &item : m_playlists.items(m_queueSourcePlaylistId)) {
+            if (!item.trackPath.isEmpty()) existingPaths.insert(item.trackPath);
+        }
+        bool changed = false;
+        for (const Track &track : tracks) {
+            if (track.path.isEmpty() || existingPaths.contains(track.path)) continue;
+            PlaylistItem item;
+            item.trackPath = track.path;
+            item.titleSnapshot = track.title.isEmpty() ? track.filename : track.title;
+            item.artistSnapshot = track.artistName.isEmpty() ? track.albumArtistName : track.artistName;
+            item.albumSnapshot = track.albumTitle;
+            item.durationMs = track.durationMs;
+            item.status = PlaylistItemStatus::Matched;
+            item.effectiveRating0To100 = track.effectiveRating0To100;
+            changed = m_playlists.addItem(m_queueSourcePlaylistId, item) > 0 || changed;
+            existingPaths.insert(track.path);
+        }
+        if (changed) emit playlistItemsChanged();
+    } else if (m_queueSourceKind == QStringLiteral("album")) {
+        markQueueAsSpontaneous();
+    } else {
+        ensureCurrentQueueIdentity();
+    }
+}
+
+void QueueSnapshotStore::prepareQueueForLibraryInjection(const Track &track)
+{
+    // Player-selected library/radio tracks stay queue-only in a playlist session.
+    if (track.path.isEmpty() || m_queueSourceKind == QStringLiteral("playlist")) return;
+    if (m_queueSourceKind == QStringLiteral("album")) {
+        markQueueAsSpontaneous();
+    } else {
+        ensureCurrentQueueIdentity();
+    }
 }

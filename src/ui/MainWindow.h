@@ -164,7 +164,7 @@ private:
     static QString browsableDirectoryPath(const QString &path);
     static QString restoredFreeRoamDirectory(const QString &path);
     void refreshLibraryFileExplorer();
-    void loadQueueState();
+    void adoptQueueSession();
     void saveQueueState();
     void scheduleQueueStateSave(bool immediate = false);
     QJsonObject queueSnapshotObject(const QString &name, const QString &source = {}) const;
@@ -186,9 +186,6 @@ private:
     bool currentQueueBacklogEligible() const;
     void pushCurrentQueueToBacklog(const QString &name, const QString &source = {});
     void adoptQueueSnapshot(const QJsonObject &snapshot, const QVector<Track> &tracks, int playIndex);
-    void prepareQueueForTrackAddition(const QVector<Track> &tracks);
-    void prepareQueueForLibraryInjection(const Track &track);
-    void appendTracksToCurrentPlaylist(const QVector<Track> &tracks);
     void markQueueAsSpontaneous(const QString &id = {});
     void loadExplorerState();
     void saveExplorerState();
@@ -266,7 +263,6 @@ private:
     void configureMemoryReclaim();
     void configureKeybindings();
     void loadSearchRankingConfig();
-    void loadPlaybackModes();
     int idleReleaseMs() const;
     int deepReleaseMs() const;
     void jumpToTrackInfoArtist(const QString &artistName);
@@ -526,17 +522,9 @@ private:
     QString m_mpdArtist;
     QString m_mpdAlbumTitle;
     PlaybackProfile m_playbackProfile;
-    QString m_queueId;
-    QString m_queueSourceKind = QStringLiteral("queue");
-    qint64 m_queueSourcePlaylistId = 0;
-    QString m_queueSourceName;
-    // Set transiently around a queue add to tell prepareQueueForTrackAddition to
-    // skip mirroring the added tracks into the source playlist (the "(don't save
-    // to playlist)" / "queue only" path).
-    bool m_suppressPlaylistMirror = false;
     // Playlist id for which the user ticked "don't ask again" in the mirror
     // warning. Auto-expires when a different playlist (or no playlist) backs the
-    // queue, since it is compared against m_queueSourcePlaylistId.
+    // queue, since it is compared against the session's source playlist id.
     qint64 m_mirrorPromptSuppressedForPlaylist = 0;
     // The choice the user locked in alongside "don't ask again" — replayed for
     // every later add while that playlist backs the queue, so ticking the box on
@@ -597,7 +585,6 @@ private:
     int m_activeScanRootId = 0;
     QString m_activeScanRootPath;
     QTimer *m_playbackStateSaveTimer = nullptr;
-    QTimer *m_queueStateSaveTimer = nullptr;
     bool m_savePlaybackPositionEnabled = true;
     bool m_restorePlaybackStateEnabled = true;
     qint64 m_lastSavedPlaybackPositionMs = -1;

@@ -320,13 +320,19 @@ private:
 
 } // namespace
 
-MprisService::MprisService(QObject *parent)
+MprisService::MprisService(QObject *parent, bool registerImmediately)
     : QObject(parent)
 {
     new MprisRootAdaptor(this);
     new MprisPlayerAdaptor(this);
     new MuzaitenPlayerAdaptor(this);
 
+    if (registerImmediately) registerService();
+}
+
+void MprisService::registerService()
+{
+    if (m_registered) return;
     auto bus = QDBusConnection::sessionBus();
     const QString baseName = QStringLiteral("org.mpris.MediaPlayer2.muzaiten");
     m_serviceName = baseName;
