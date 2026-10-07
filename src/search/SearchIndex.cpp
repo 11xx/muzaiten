@@ -94,8 +94,7 @@ void SearchIndex::append(QVector<SearchRecord> records)
 
 void SearchIndex::clear()
 {
-    m_records.clear();
-    m_records.squeeze();
+    m_records = QVector<SearchRecord>{};
     m_masks.clear();
     m_masks.shrink_to_fit();
     m_folders.clear();

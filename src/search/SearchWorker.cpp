@@ -6,17 +6,28 @@
 
 #include <QUuid>
 #include <QFileInfo>
+#include <QThread>
 
 namespace Search {
 
-SearchWorker::SearchWorker(const QString &dbPath, QObject *parent)
+SearchWorker::SearchWorker(const QString &dbPath, QObject *parent, CacheWriter writer)
     : QObject(parent)
     , m_dbPath(dbPath)
+    , m_cacheWriter(writer ? std::move(writer) : CacheWriter{
+          [](const QString &path, const CacheSignature &signature,
+             const QVector<SearchRecord> &records, const std::function<bool()> &cancelled) {
+              return IndexCache::prepare(path, signature, records, cancelled);
+          }})
 {
 }
 
 SearchWorker::~SearchWorker()
 {
+    cancelCacheWrite();
+    if (m_cacheThread) {
+        m_cacheThread->wait();
+        delete m_cacheThread;
+    }
     closeSnapshot();
     delete m_db;
 }
@@ -43,6 +54,7 @@ void SearchWorker::rebuildIndex()
 void SearchWorker::startBuild(bool forceRefresh)
 {
     ++m_buildGeneration;
+    cancelCacheWrite();
     closeSnapshot();
     m_staging.clear();
     // Open (or reuse) a DB connection on this worker thread.
@@ -145,6 +157,7 @@ void SearchWorker::readChunk(quint64 generation)
 
 void SearchWorker::finishBuild(quint64 generation)
 {
+    if (generation != m_buildGeneration) return;
     closeSnapshot();
     if (m_buildMode == BuildMode::Background) {
         m_index = std::move(m_staging); // atomic swap (worker is single-threaded)
@@ -153,14 +166,13 @@ void SearchWorker::finishBuild(quint64 generation)
     } else {
         emit indexLoaded(m_index.size());
     }
-    // Seed/refresh the on-disk cache (best-effort; a failure just means the next
-    // start rebuilds). Generation-guarded so a superseded build doesn't write.
     if (generation == m_buildGeneration) {
         const auto live = IndexCache::currentSignature(*m_db);
         if (!live.valid()) {
             emit indexError(QStringLiteral("Search content revision is unavailable"));
         } else if (live == m_pendingSignature) {
-            IndexCache::write(IndexCache::defaultPath(), m_pendingSignature, m_index.records());
+            m_cacheWritePending = true;
+            startCacheWrite();
         } else {
             QMetaObject::invokeMethod(this, [this, generation] {
                 if (m_buildGeneration == generation) buildIndex();
@@ -169,9 +181,57 @@ void SearchWorker::finishBuild(quint64 generation)
     }
 }
 
+void SearchWorker::cancelCacheWrite()
+{
+    m_cacheWritePending = false;
+    if (m_cacheCancelled) m_cacheCancelled->store(true);
+}
+
+void SearchWorker::startCacheWrite()
+{
+    if (m_cacheThread || !m_cacheWritePending) return;
+    m_cacheWritePending = false;
+    const quint64 generation = m_buildGeneration;
+    const CacheSignature signature = m_pendingSignature;
+    const auto cancelled = std::make_shared<std::atomic<bool>>(false);
+    m_cacheCancelled = cancelled;
+    auto prepared = std::make_shared<std::unique_ptr<IndexCache::PreparedWrite>>();
+    m_cacheThread = QThread::create(
+        [writer = m_cacheWriter, path = IndexCache::defaultPath(), signature,
+         records = m_index.records(), cancelled, prepared]() mutable {
+            *prepared = writer(path, signature, records, [cancelled] { return cancelled->load(); });
+            records = QVector<SearchRecord>{};
+        });
+    connect(m_cacheThread, &QThread::finished, this,
+            [this, generation, signature, cancelled, prepared] {
+        m_cacheThread->wait();
+        delete m_cacheThread;
+        m_cacheThread = nullptr;
+        m_cacheCancelled.reset();
+        bool published = false;
+        if (!cancelled->load() && generation == m_buildGeneration) {
+            const auto live = IndexCache::currentSignature(*m_db);
+            if (!live.valid()) {
+                emit indexError(QStringLiteral("Search content revision is unavailable"));
+            } else if (live == signature) {
+                if (*prepared) published = (*prepared)->publish();
+            } else {
+                QMetaObject::invokeMethod(this, [this, generation] {
+                    if (generation == m_buildGeneration) buildIndex();
+                }, Qt::QueuedConnection);
+            }
+        }
+        prepared->reset();
+        emit cacheWriteFinished(published);
+        startCacheWrite();
+    }, Qt::QueuedConnection);
+    m_cacheThread->start();
+}
+
 void SearchWorker::clearIndex()
 {
     ++m_buildGeneration; // abort any in-flight stream
+    cancelCacheWrite();
     closeSnapshot();
     m_staging.clear();
     m_index.clear();

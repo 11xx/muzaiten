@@ -20,6 +20,7 @@
 #include <QtTypes>
 
 #include <functional>
+#include <memory>
 
 class Database;
 
@@ -63,6 +64,31 @@ struct ChunkLimits {
 // Returns false on any I/O or encoding error (caller falls back to a live build).
 bool write(const QString &path, const CacheSignature &signature,
            const QVector<SearchRecord> &records, const ChunkLimits &limits = {});
+
+// A complete cache staged beside its destination. Destruction discards it;
+// publish atomically replaces the destination after the caller checks freshness.
+class PreparedWrite {
+public:
+    PreparedWrite(const PreparedWrite &) = delete;
+    PreparedWrite &operator=(const PreparedWrite &) = delete;
+    ~PreparedWrite();
+    bool publish();
+
+private:
+    friend std::unique_ptr<PreparedWrite> prepare(
+        const QString &, const CacheSignature &, const QVector<SearchRecord> &,
+        const std::function<bool()> &, const ChunkLimits &);
+    PreparedWrite(QString destination, QString staged);
+    QString m_destination;
+    QString m_staged;
+};
+
+// Serialization and compression run on the calling thread. Cancellation is
+// checked between records/chunks. The result can be published on another thread.
+std::unique_ptr<PreparedWrite> prepare(
+    const QString &path, const CacheSignature &signature,
+    const QVector<SearchRecord> &records, const std::function<bool()> &cancelled = {},
+    const ChunkLimits &limits = {});
 
 struct Loaded {
     bool ok = false;            // false if missing / unreadable / corrupt

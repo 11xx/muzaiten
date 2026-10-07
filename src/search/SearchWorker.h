@@ -20,13 +20,18 @@
 
 class Database;
 class TrackSearchCursor;
+class QThread;
 
 namespace Search {
 
 class SearchWorker : public QObject {
     Q_OBJECT
 public:
-    explicit SearchWorker(const QString &dbPath, QObject *parent = nullptr);
+    using CacheWriter = std::function<std::unique_ptr<IndexCache::PreparedWrite>(
+        const QString &, const CacheSignature &, const QVector<SearchRecord> &,
+        const std::function<bool()> &)>;
+    // The writer runs on the persistence thread and must honor cancellation.
+    explicit SearchWorker(const QString &dbPath, QObject *parent = nullptr, CacheWriter writer = {});
     ~SearchWorker() override;
     // Thread-safe submission: queued queries superseded before execution are skipped.
     void submitQuery(quint64 queryId, const QString &queryString, bool fuzzyMode);
@@ -60,6 +65,7 @@ public slots:
     void setExclusions(QVector<Search::ExcludeRule> rules);
 
 signals:
+    void cacheWriteFinished(bool published);
     void cacheDecision(QString reason, qint64 revision);
     void indexGrew(int trackCount);   // a cold-build batch landed — queries can run on the partial index
     void indexLoaded(int trackCount); // index queryable: cold build done, or a (possibly stale) cache loaded
@@ -78,6 +84,8 @@ private:
     void finishBuild(quint64 generation);
     void startBuild(bool forceRefresh);
     void closeSnapshot();
+    void cancelCacheWrite();
+    void startCacheWrite();
     bool m_snapshotOpen = false;
 
     QString   m_dbPath;
@@ -95,6 +103,13 @@ private:
     BuildMode m_buildMode = BuildMode::Foreground;
     CacheSignature m_pendingSignature;  // signature to stamp the cache the in-flight build will write
     std::unique_ptr<TrackSearchCursor> m_cursor;
+
+    CacheWriter m_cacheWriter;
+    QThread *m_cacheThread = nullptr;
+    std::shared_ptr<std::atomic<bool>> m_cacheCancelled;
+    // Only the active writer holds a COW record snapshot. A pending write uses
+    // the live index when the active writer exits, so rebuilds cannot queue copies.
+    bool m_cacheWritePending = false;
 };
 
 } // namespace Search

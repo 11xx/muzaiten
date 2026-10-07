@@ -54,6 +54,23 @@ class TestSearchIndex : public QObject {
     Q_OBJECT
 
 private slots:
+    void persistenceSnapshotSurvivesClearAndRebuild()
+    {
+        SearchIndex index;
+        index.build({makeRecord(QStringLiteral("Original"), {}, {})});
+        const QVector<SearchRecord> snapshot = index.records();
+        QVERIFY(snapshot.isSharedWith(index.records()));
+        const auto generation = index.generation();
+        index.clear();
+        QVERIFY(index.isEmpty());
+        QVERIFY(index.generation() != generation);
+        QCOMPARE(index.records().capacity(), qsizetype(0));
+        index.append({makeRecord(QStringLiteral("Latest"), {}, {})});
+        QCOMPARE(snapshot.first().title, QStringLiteral("Original"));
+        QCOMPARE(index.records().first().title, QStringLiteral("Latest"));
+        QVERIFY(!snapshot.isSharedWith(index.records()));
+    }
+
     void folderTreePreservesPlainResults()
     {
         const QVector<SearchRecord> records = {
