@@ -1,8 +1,8 @@
 #pragma once
 
-// Result exclusion: glob patterns that drop matching records during the engine
-// filter phase (before relevance scoring), so excluded items are skipped early
-// and never consume the result cap.
+// Result exclusion: glob patterns that keep matching records out of displayed
+// results. GUI searches still check their query matches for the hidden count;
+// excluded records never consume the displayed result cap.
 //
 // Each rule is a glob (*, ?) plus a scope. Literal runs fold like search
 // queries, with wildcard boundaries preserved. Globs are auto-lowered to the

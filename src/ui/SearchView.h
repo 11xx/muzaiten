@@ -87,7 +87,8 @@ private slots:
     void onIndexRefreshing();
     void onIndexRefreshed(int count);
     void onIndexError(const QString &error);
-    void onResultsReady(quint64 queryId, QVector<Search::ScoredResult> results, int totalMatches);
+    void onResultsReady(quint64 queryId, QVector<Search::ScoredResult> results,
+                        int totalMatches, int hiddenMatches);
     void onSpinnerTick();
     void showContextMenu(const QPoint &pos);
     void onDoubleClicked(const QModelIndex &index);
@@ -119,6 +120,7 @@ private:
 
     QLineEdit            *m_searchBox    = nullptr;
     QLabel               *m_statusLabel  = nullptr;
+    QLabel               *m_hiddenLabel  = nullptr;
     QListView            *m_resultList   = nullptr;
     SearchResultsModel   *m_model        = nullptr;
     SearchResultDelegate *m_delegate     = nullptr;
@@ -144,6 +146,7 @@ private:
     quint64   m_queryId      = 0;
     int       m_totalIndexed = 0;
     int       m_matchCount   = 0;  // total matches for the current query (uncapped)
+    int       m_hiddenMatchCount = 0;
     int       m_rowHeight    = 0;  // 0 = delegate auto
     bool      m_queueIsPlaylistSourced = false;
 };

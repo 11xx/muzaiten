@@ -1,6 +1,9 @@
 #include <QTest>
 
+#include <utility>
+
 #include "search/Exclusion.h"
+#include "search/NarrowingCache.h"
 #include "search/SearchIndex.h"
 #include "search/SearchQuery.h"
 #include "search/SearchRecord.h"
@@ -165,6 +168,94 @@ private slots:
         const auto results = idx.match(SearchQuery::parse(QStringLiteral("blue")), false, ex, &total);
         QCOMPARE(total, 3);          // the podcast was excluded before scoring
         QCOMPARE(results.size(), 3);
+    }
+
+    void hiddenMatchesFollowTheQueryAndCountEachRecordOnce()
+    {
+        SearchIndex idx;
+        idx.build({
+            rec(QStringLiteral("Blue One"), QStringLiteral("/music/blue.flac")),
+            rec(QStringLiteral("Blue Two"), QStringLiteral("/hidden/blue.flac")),
+            rec(QStringLiteral("Blue Three"), QStringLiteral("/hidden/blue3.flac")),
+            rec(QStringLiteral("Green Four"), QStringLiteral("/hidden/green.flac")),
+        });
+        const ExclusionSet excludes = compileExcludes({
+            {QStringLiteral("*/hidden/*"), ExcludeScope::Path},
+            {QStringLiteral("*/hidden/blue*"), ExcludeScope::Path},
+        });
+        int visible = -1;
+        int hidden = -1;
+        const auto blue = idx.match(SearchQuery::parse(QStringLiteral("blue")), false,
+                                    excludes, &visible, nullptr, nullptr, {}, &hidden);
+        QCOMPARE(visible, 1);
+        QCOMPARE(hidden, 2);
+        QCOMPARE(blue.size(), 1);
+
+        const auto green = idx.match(SearchQuery::parse(QStringLiteral("green")), false,
+                                     excludes, &visible, nullptr, nullptr, {}, &hidden);
+        QCOMPARE(visible, 0);
+        QCOMPARE(hidden, 1);
+        QVERIFY(green.isEmpty());
+
+        idx.match(SearchQuery::parse(QString()), false, excludes,
+                  &visible, nullptr, nullptr, {}, &hidden);
+        QCOMPARE(visible, 0);
+        QCOMPARE(hidden, 0);
+    }
+
+    void hiddenCountIsNotLimitedByDisplayedResults()
+    {
+        QVector<SearchRecord> records;
+        records.reserve(kMaxResults + 2);
+        records.push_back(rec(QStringLiteral("Blue Visible"), QStringLiteral("/music/visible.flac")));
+        for (int i = 0; i <= kMaxResults; ++i) {
+            records.push_back(rec(QStringLiteral("Blue Hidden"),
+                                  QStringLiteral("/hidden/%1.flac").arg(i)));
+        }
+        SearchIndex idx;
+        idx.build(std::move(records));
+        const ExclusionSet excludes = compileExcludes({
+            {QStringLiteral("*/hidden/*"), ExcludeScope::Path},
+        });
+        int visible = -1;
+        int hidden = -1;
+        const auto results = idx.match(SearchQuery::parse(QStringLiteral("blue")), false,
+                                       excludes, &visible, nullptr, nullptr, {}, &hidden);
+        QCOMPARE(visible, 1);
+        QCOMPARE(hidden, kMaxResults + 1);
+        QCOMPARE(results.size(), 1);
+    }
+
+    void narrowingRetainsHiddenCandidates()
+    {
+        SearchIndex idx;
+        idx.build({
+            rec(QStringLiteral("Blue Alpha"), QStringLiteral("/music/a.flac")),
+            rec(QStringLiteral("Blue Alpha"), QStringLiteral("/hidden/a.flac")),
+            rec(QStringLiteral("Blue Beta"), QStringLiteral("/hidden/b.flac")),
+        });
+        const ExclusionSet excludes = compileExcludes({
+            {QStringLiteral("*/hidden/*"), ExcludeScope::Path},
+        });
+        NarrowingCache cache;
+        int visible = -1;
+        int hidden = -1;
+        cache.run(idx, SearchQuery::parse(QStringLiteral("blue")), false,
+                  excludes, 1, &visible, {}, &hidden);
+        QCOMPARE(visible, 1);
+        QCOMPARE(hidden, 2);
+        cache.run(idx, SearchQuery::parse(QStringLiteral("blue alpha")), false,
+                  excludes, 1, &visible, {}, &hidden);
+        QCOMPARE(visible, 1);
+        QCOMPARE(hidden, 1);
+        cache.run(idx, SearchQuery::parse(QStringLiteral("blue")), false,
+                  {}, 2, &visible, {}, &hidden);
+        QCOMPARE(visible, 3);
+        QCOMPARE(hidden, 0);
+        cache.run(idx, SearchQuery::parse(QStringLiteral("blue")), true,
+                  excludes, 3, &visible, {}, &hidden);
+        QCOMPARE(visible, 1);
+        QCOMPARE(hidden, 2);
     }
 };
 

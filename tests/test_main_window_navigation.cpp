@@ -51,6 +51,7 @@
 #include <QDialogButtonBox>
 #include <QJsonObject>
 #include <QLabel>
+#include <QLineEdit>
 #include <QLayout>
 #include <QProgressBar>
 #include <QLocalSocket>
@@ -74,6 +75,9 @@
 #include "AudioDeviceFixtures.h"
 #include "playback/DirectDeviceResolver.h"
 #include "playback/PlaybackProfileJson.h"
+
+Q_DECLARE_METATYPE(Search::ScoredResult)
+Q_DECLARE_METATYPE(QVector<Search::ScoredResult>)
 
 namespace {
 
@@ -152,6 +156,31 @@ class MainWindowNavigationTest final : public QObject {
     Q_OBJECT
 
 private slots:
+    void supersededSearchDoesNotRestoreHiddenCount()
+    {
+        SearchView view;
+        QVERIFY(QMetaObject::invokeMethod(&view, "onIndexLoaded", Qt::DirectConnection,
+                                          Q_ARG(int, 5)));
+        auto *query = view.findChild<QLineEdit *>();
+        auto *hidden = view.findChild<QLabel *>(QStringLiteral("search.hiddenMatches"));
+        QVERIFY(query != nullptr);
+        QVERIFY(hidden != nullptr);
+        query->setText(QStringLiteral("blue"));
+        QVector<Search::ScoredResult> results;
+        QVERIFY(QMetaObject::invokeMethod(&view, "onResultsReady", Qt::DirectConnection,
+                                          Q_ARG(quint64, quint64{1}),
+                                          Q_ARG(QVector<Search::ScoredResult>, results),
+                                          Q_ARG(int, 0), Q_ARG(int, 2)));
+        QVERIFY(!hidden->isHidden());
+        query->setText(QStringLiteral("green"));
+        QVERIFY(hidden->isHidden());
+        QVERIFY(QMetaObject::invokeMethod(&view, "onResultsReady", Qt::DirectConnection,
+                                          Q_ARG(quint64, quint64{1}),
+                                          Q_ARG(QVector<Search::ScoredResult>, results),
+                                          Q_ARG(int, 0), Q_ARG(int, 2)));
+        QVERIFY(hidden->isHidden());
+    }
+
     void normalSearchReopenRefreshesRetaggedRows()
     {
         AppCore core;

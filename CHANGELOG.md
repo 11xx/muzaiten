@@ -19,6 +19,9 @@
 
 ### Added
 
+- GUI search shows how many matches are hidden by exclusion patterns, including
+  when every matching track is excluded. Terminal search continues to ignore
+  GUI exclusions.
 - Shared output can go to a chosen playback output, virtual ones included,
   kept by its stable name: `Playback > Output profile…` separates the
   transport from the output. While it is missing, playback waits at its

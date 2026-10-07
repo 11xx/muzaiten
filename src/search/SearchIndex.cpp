@@ -155,10 +155,12 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
                                           const ExclusionSet &excludes,
                                           int *totalMatches, QVector<int> *matchingIndices,
                                           const QVector<int> *candidateIndices,
-                                          const std::function<bool()> &cancelled) const
+                                          const std::function<bool()> &cancelled,
+                                          int *hiddenMatches) const
 {
     Q_ASSERT(!matchingIndices || matchingIndices != candidateIndices);
     if (totalMatches) *totalMatches = 0;
+    if (hiddenMatches) *hiddenMatches = 0;
     if (matchingIndices) matchingIndices->clear();
     if (cancelled && cancelled()) return {};
     if (query.isEmpty() || m_records.isEmpty()) return {};
@@ -212,6 +214,7 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
         std::vector<RankKey> heap;
         QVector<int> indices;
         int count = 0;
+        int hidden = 0;
     };
 
     const auto scanSlice = [&](int lo, int hi, Slice &out) {
@@ -241,13 +244,13 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
             Q_ASSERT(i >= 0 && i < m_records.size());
             const SearchRecord &rec = m_records[i];
 
-            // Exclusions are an early reject, before any relevance scoring, so
-            // they only reduce work and never consume the result cap.
+            // Exclusions stay out of ranking, but query matches among them are
+            // counted for the GUI status when requested.
             bool excluded = false;
             for (const ExcludeMatcher &ex : excludes) {
                 if (ex.matches(rec)) { excluded = true; break; }
             }
-            if (excluded) continue;
+            if (excluded && !hiddenMatches && !matchingIndices) continue;
 
             const NormMasks &masks = m_masks[static_cast<std::size_t>(i)];
             const auto lookup = [&](qsizetype t, bool score) {
@@ -284,6 +287,13 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
             const int bound = matchSearchRecordBound(rec, masks, query, termMasks,
                                                      fuzzyMode, &exact, &pathLookup);
             if (bound == INT_MIN) continue;
+            if (excluded) {
+                if (!exact && scoreSearchRecord(rec, masks, query, termMasks,
+                                                fuzzyMode, &pathLookup) == INT_MIN) continue;
+                ++out.hidden;
+                if (matchingIndices) out.indices.append(i);
+                continue;
+            }
             ++out.count;
             bool matched = true;
             if (exact) {
@@ -330,12 +340,15 @@ QVector<ScoredResult> SearchIndex::match(const SearchQuery &query, bool fuzzyMod
     // there by kMaxResults others is outranked globally too.
     std::vector<RankKey> ranked;
     int total = 0;
+    int hidden = 0;
     for (const Slice &slice : slices) {
         total += slice.count;
+        hidden += slice.hidden;
         ranked.insert(ranked.end(), slice.heap.begin(), slice.heap.end());
         if (matchingIndices) *matchingIndices += slice.indices;
     }
     if (totalMatches) *totalMatches = total;
+    if (hiddenMatches) *hiddenMatches = hidden;
 
     const int retained = std::min(static_cast<int>(ranked.size()), kMaxResults);
     std::partial_sort(ranked.begin(), ranked.begin() + retained, ranked.end(), std::greater<>());

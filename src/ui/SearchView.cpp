@@ -45,6 +45,18 @@ Q_DECLARE_METATYPE(Search::ScoredResult)
 
 namespace {
 
+void setSecondaryTextColor(QLabel *label, const QPalette &source)
+{
+    const QColor text = source.color(QPalette::WindowText);
+    const QColor background = source.color(QPalette::Window);
+    QPalette muted = label->palette();
+    muted.setColor(QPalette::WindowText,
+                   QColor((2 * text.red() + background.red()) / 3,
+                          (2 * text.green() + background.green()) / 3,
+                          (2 * text.blue() + background.blue()) / 3));
+    label->setPalette(muted);
+}
+
 QString joinedTrackPaths(const QVector<Track> &tracks)
 {
     QStringList paths;
@@ -115,6 +127,11 @@ void SearchView::setupUi(int idleReleaseMs)
     m_statusLabel = new QLabel(topBar);
     m_statusLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     topLayout->addWidget(m_statusLabel);
+    m_hiddenLabel = new QLabel(topBar);
+    m_hiddenLabel->setObjectName(QStringLiteral("search.hiddenMatches"));
+    setSecondaryTextColor(m_hiddenLabel, palette());
+    m_hiddenLabel->hide();
+    topLayout->addWidget(m_hiddenLabel);
 
     layout->addWidget(topBar);
 
@@ -217,6 +234,7 @@ void SearchView::changeEvent(QEvent *event)
     if (event->type() == QEvent::PaletteChange
      || event->type() == QEvent::ApplicationPaletteChange
      || event->type() == QEvent::StyleChange) {
+        if (m_hiddenLabel) setSecondaryTextColor(m_hiddenLabel, palette());
         m_resultList->viewport()->update();
     }
 }
@@ -380,6 +398,7 @@ void SearchView::invalidateIndex(const QString &dbPath, bool forceRefresh)
     m_indexLoaded = false;
     m_indexStreaming = true;
     m_totalIndexed = 0;
+    m_hiddenMatchCount = 0;
     m_spinnerTimer->start();
     updateStatusLabel();
     QMetaObject::invokeMethod(m_worker, forceRefresh ? "rebuildIndex" : "buildIndex", Qt::QueuedConnection);
@@ -470,11 +489,15 @@ void SearchView::releaseIdleResources()
     m_streamRerunTimer->stop();
     m_cacheMsgTimer->stop();
     m_totalIndexed = 0;
+    m_hiddenMatchCount = 0;
     m_model->clear();
 }
 
 void SearchView::onTextChanged()
 {
+    ++m_queryId;
+    m_hiddenMatchCount = 0;
+    m_hiddenLabel->hide();
     m_debounce->start(); // restart the debounce
 }
 
@@ -488,6 +511,8 @@ void SearchView::submitQuery()
     if (!m_worker || !m_indexLoaded) return;
     const QString text = m_searchBox->text().trimmed();
     ++m_queryId;
+    m_hiddenMatchCount = 0;
+    m_hiddenLabel->hide();
     m_worker->submitQuery(m_queryId, text, m_fuzzyMode);
     if (text.isEmpty()) {
         m_matchCount = 0;
@@ -508,6 +533,7 @@ void SearchView::onIndexGrew(int count)
     const bool firstBatch = !m_indexLoaded;
     m_indexLoaded = true;
     m_totalIndexed = count;
+    m_hiddenMatchCount = 0;
     updateStatusLabel();
     if (firstBatch) {
         submitQuery(); // first results immediately; later batches are coalesced
@@ -523,6 +549,7 @@ void SearchView::onIndexLoaded(int count)
     m_indexLoaded = true;
     m_indexStreaming = false;
     m_totalIndexed = count;
+    m_hiddenMatchCount = 0;
     m_streamRerunTimer->stop();
     if (!m_indexRefreshing) {
         m_spinnerTimer->stop();
@@ -550,6 +577,7 @@ void SearchView::onIndexRefreshed(int count)
     // for a few seconds, and re-run the query so just-added tracks show up.
     m_indexRefreshing = false;
     m_totalIndexed = count;
+    m_hiddenMatchCount = 0;
     if (!m_indexStreaming) {
         m_spinnerTimer->stop();
     }
@@ -571,14 +599,18 @@ void SearchView::onIndexError(const QString &error)
     m_indexRefreshing = false;
     m_spinnerTimer->stop();
     m_streamRerunTimer->stop();
+    m_hiddenMatchCount = 0;
+    m_hiddenLabel->hide();
     m_statusLabel->setText(QStringLiteral("Index error: %1").arg(error));
 }
 
-void SearchView::onResultsReady(quint64 queryId, QVector<Search::ScoredResult> results, int totalMatches)
+void SearchView::onResultsReady(quint64 queryId, QVector<Search::ScoredResult> results,
+                                int totalMatches, int hiddenMatches)
 {
     if (queryId != m_queryId) return; // stale result from a superseded query
 
     m_matchCount = totalMatches;
+    m_hiddenMatchCount = hiddenMatches;
     // Front-end ranking: re-order the matched set by the user's criteria before
     // handing it to the model. The engine's relevance order is the input.
     m_ranker.sort(results);
@@ -599,6 +631,12 @@ void SearchView::onResultsReady(quint64 queryId, QVector<Search::ScoredResult> r
 
 void SearchView::updateStatusLabel()
 {
+    const bool showHidden = m_indexLoaded && m_hiddenMatchCount > 0
+        && !m_searchBox->text().trimmed().isEmpty();
+    m_hiddenLabel->setVisible(showHidden);
+    if (showHidden) {
+        m_hiddenLabel->setText(QStringLiteral("· %1 hidden by exclusions").arg(m_hiddenMatchCount));
+    }
     // Animated spinner glyph, shown while the index streams in (cold start) or a
     // background cache-refresh runs — never per keystroke (queries are instant).
     static const QString kSpinnerFrames = QString::fromUtf8("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏");

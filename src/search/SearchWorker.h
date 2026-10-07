@@ -66,7 +66,8 @@ signals:
     void indexRefreshing();           // a quiet background cache-refresh build has begun
     void indexRefreshed(int trackCount); // background refresh done; live index swapped to the fresh data
     void indexError(const QString &error);
-    void resultsReady(quint64 queryId, QVector<Search::ScoredResult> results, int totalMatches);
+    void resultsReady(quint64 queryId, QVector<Search::ScoredResult> results,
+                      int totalMatches, int hiddenMatches);
 
 private:
     // Whether the in-flight stream feeds the live index (cold start, streams in

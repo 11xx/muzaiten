@@ -278,11 +278,16 @@ ordered and what is filtered out:
   it is.)
 - **Exclude patterns** — glob patterns (`*`, `?`) that drop results
   entirely, each scoped to the file path or to any field. Excluded tracks
-  are skipped before ranking, so excluding large folders can make search
-  faster. Examples: `*/Podcasts/*` (Path), `*.m4b` (Path), `*live*` (Any
-  field).
+  stay out of ranking and the result list. Examples: `*/Podcasts/*` (Path),
+  `*.m4b` (Path), `*live*` (Any field).
 
 Ranking and exclusion changes apply live and persist across restarts.
+For a nonempty GUI query, a muted count beside the result count shows how many
+matching tracks the exclusion patterns hide. It counts each track once, even
+when several patterns match, and remains visible when no results remain. It
+does not include tracks omitted by the display limit. Terminal searches,
+including the fzf picker, ignore the GUI's saved exclusion patterns and search
+the full indexed library.
 
 ## Search from the terminal
 

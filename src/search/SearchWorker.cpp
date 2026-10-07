@@ -194,19 +194,20 @@ void SearchWorker::submitQuery(quint64 queryId, const QString &queryString, bool
 void SearchWorker::runQuery(quint64 queryId, const QString &queryString, bool fuzzyMode)
 {
     if (m_index.isEmpty()) {
-        emit resultsReady(queryId, {}, 0);
+        emit resultsReady(queryId, {}, 0, 0);
         return;
     }
 
     const SearchQuery q = SearchQuery::parse(queryString);
     int totalMatches = 0;
+    int hiddenMatches = 0;
     QVector<ScoredResult> results = m_narrowingCache.run(
         m_index, q, fuzzyMode, m_excludes, m_exclusionVersion, &totalMatches,
-        [this, queryId] { return m_latestQueryId.load() != queryId; });
+        [this, queryId] { return m_latestQueryId.load() != queryId; }, &hiddenMatches);
 
     // Only emit if this is still the most recent query
     if (m_latestQueryId.load() == queryId) {
-        emit resultsReady(queryId, std::move(results), totalMatches);
+        emit resultsReady(queryId, std::move(results), totalMatches, hiddenMatches);
     }
 }
 
