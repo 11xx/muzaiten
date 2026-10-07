@@ -1674,7 +1674,7 @@ private slots:
             PlaybackProfile profile;
             profile.sharedEndpoint = QStringLiteral("desk_dac");
             profile.releaseSinkOnPause = false;
-            core.m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(profile));
+            QVERIFY(core.saveActivePlaybackProfile(profile));
 
             emit core.m_playback->sharedEndpointChosenExternally(QStringLiteral("virtual_mix"),
                                                                   QStringLiteral("Virtual mix"));
@@ -1702,7 +1702,7 @@ private slots:
         }
         AppCore restarted;
         QCOMPARE(restarted.m_playback->outputStatus().preferredEndpoint, QStringLiteral("desk_dac"));
-        restarted.m_database->setSetting(QStringLiteral("playback.profile"), playbackProfileToJson(PlaybackProfile{}));
+        QVERIFY(restarted.saveActivePlaybackProfile(PlaybackProfile{}));
     }
 
     void outputChangeWhileWaitingResumesHeldTrack_data()
