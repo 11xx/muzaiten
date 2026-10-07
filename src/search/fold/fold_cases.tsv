@@ -151,7 +151,7 @@ Motörhead	motorhead	motoerhead
 ວຽງຈັນ	ວຽງຈັນ	viangchan	wiangjan
 ຫຼວງພະບາງ	ຫຼວງພະບາງ	luangphabang
 ສະບາຍດີ	ສະບາຍດີ	sabaidi	sabaidee
-# Thai marks retain their written identity while their Latin readings differ.
+# Thai marks keep their written identity even where their Latin readings agree.
 ป๊อด	ป๊อด	pot	pod
 ป็อด	ป็อด	pot	pod
 ป็อป	ป็อป	pop
