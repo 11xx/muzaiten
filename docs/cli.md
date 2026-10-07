@@ -185,6 +185,41 @@ feature rows stay durable.
 `--json` emits one terminal object and cannot be combined with
 `--progress=jsonl`.
 
+## Local scalar feature packs
+
+```sh
+muzaiten-features pack export scalars.ndjson [--features PATH] [--dry-run] [--replace] [--json]
+muzaiten-features pack import scalars.ndjson [--features PATH] [--dry-run] [--replace] [--json]
+```
+
+`--features` selects the feature store; otherwise the application's resolved
+data directory supplies `features.sqlite`. Both operations require an
+existing schema-5 store and use the native feature-writer lock. Run
+`muzaiten-features refresh --stage identity --no-semantic` before importing
+to establish current local audio hashes. Export reads existing current rows
+without analyzing audio, invoking a provider or using the network.
+
+`--dry-run` previews the fully validated operation without writing feature
+rows or a pack file. `--replace` permits overwriting an existing export
+file, or replacing existing recipient group rows on import, including stale
+rows. Without it, export refuses an existing destination and import counts
+existing rows as skipped. Import requires exact representative decoded-audio
+hashes and the running binary's scalar extractor/version. Other incoming
+records are counted as mismatched, and local unmatched files/groups are
+reported separately. Fingerprints and MusicBrainz IDs cannot authorize
+adoption. Adopted current rows are skipped by the next analysis; a DSP
+upgrade invalidates them normally.
+
+Plain and JSON output disclose that taste/history is absent but content
+hashes identify recordings. The strict v1 payload contains no paths,
+filenames, timestamps, ratings or embeddings. Files exceed neither 64 MiB,
+100,000 records nor 16 KiB per line. Export uses atomic file replacement;
+import validates the entire file before store access and writes matching
+rows in one transaction. Exit codes are 0 success/no-op, 2 invalid input,
+4 operational failure and 5 writer lock busy. See
+[features-schema.md](features-schema.md#local-feature-pack-format) for
+the exact keys, NULL handling, report fields and rejection rules.
+
 ## Related binaries
 
 - `muzaiten-features` — native audio analysis plus optional semantic-provider

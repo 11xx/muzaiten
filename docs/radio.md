@@ -226,6 +226,44 @@ double-tempo estimates as equivalent, so an 85 BPM context matches a 170 BPM
 candidate. Upgrading marks v1 scalar rows stale until the normal resumable
 feature phase refreshes them; stale rows never enter scoring.
 
+### Local scalar feature packs
+
+`muzaiten-features pack` exchanges scalar analysis through a local
+`muzaiten-features-pack` v1 NDJSON file. Export uses existing current analysis;
+it never analyzes audio or generates embeddings. There are no accounts,
+uploads or network transport.
+
+```sh
+muzaiten-features pack export scalars.ndjson --dry-run
+muzaiten-features pack export scalars.ndjson
+muzaiten-features refresh --stage identity --no-semantic
+muzaiten-features pack import scalars.ndjson --dry-run
+muzaiten-features pack import scalars.ndjson
+```
+
+Run identity refresh on the recipient before previewing a pack. Adoption
+requires the exact canonical decoded-audio SHA-256 of the recipient group's
+representative, plus the running binary's extractor and DSP version. Matching
+MusicBrainz IDs or similar Chromaprint fingerprints never qualify a record.
+Lossy re-encoding normally changes that hash, even with identical tags.
+Different metadata and genres do not affect the adoption key.
+
+Import preserves existing group rows, including stale ones, unless
+`--replace` explicitly permits replacement. Export's `--replace` permits
+overwriting an existing pack file. `--dry-run` previews either operation
+without writing the pack or feature rows; `--json` reports counts for scripts.
+Adopted current rows are skipped by the next scalar-analysis phase. Other
+groups still need local analysis, and version upgrades make adopted rows stale
+under the same freshness rules as locally analyzed rows.
+
+The pack contains scalar features and extractor versions. Taste, ratings and
+listening history are absent, but its content hashes identify recordings and
+can reveal library membership. Paths, filenames, timestamps, file sizes,
+internal group IDs and embeddings are excluded. Fingerprints and MusicBrainz
+IDs are also excluded from v1; those identifiers must not be treated as private.
+See [features-schema.md](features-schema.md#local-feature-pack-format) for the
+strict format, limits and report fields.
+
 **CLAP embeddings** (audio similarity + free-text search) are opt-in and
 provided by the separately installed `muzaiten-features-clap` package. Native
 analysis never needs Python. Install the provider yourself—the GUI never runs

@@ -3,6 +3,7 @@
 #include "fs/MediaProbe.h"
 #include "indexer/DecodeGate.h"
 #include "indexer/Dsp.h"
+#include "indexer/FeaturesPack.h"
 #include "indexer/StagingBuffer.h"
 
 #include <QByteArray>
@@ -3166,13 +3167,15 @@ int runNeighbors(const ProviderOptions &options)
 void printUsage()
 {
     std::fputs(
-        "Usage: muzaiten-features <refresh|status|doctor|model download|query|neighbors> [options]\n"
+        "Usage: muzaiten-features <refresh|status|doctor|pack|model download|query|neighbors> [options]\n"
         "\n"
         "refresh [--library PATH] [--features PATH] [--state PATH] [--semantic|--no-semantic] [--provider PATH]\n"
         "        [--limit N] [--jobs N] [--staging-bytes N] [--semantic-decode-workers N] [--power background|balanced|turbo]\n"
         "        [--json|--progress=jsonl] [--verbose]\n"
         "status [--features PATH] [--state PATH] [--provider PATH] [--json]\n"
         "doctor [--features PATH] [--state PATH] [--provider PATH] [--json]\n"
+        "pack export|import FILE [--features PATH] [--dry-run] [--replace] [--json]\n"
+        "  Local scalar features only. Taste/history absent; content hashes identify recordings.\n"
         "model download [--components full|audio] [--state PATH] [--provider PATH] [--json|--progress=jsonl]\n"
         "query TEXT [--state PATH] [--provider PATH] [--device auto|cuda|cpu] [--json]\n"
         "neighbors --force [--features PATH] [--state PATH] [--provider PATH] [--json|--progress=jsonl]\n",
@@ -3362,6 +3365,10 @@ int main(int argc, char **argv)
         if (command == QLatin1String("refresh")) {
             return runRefresh(parseRefresh(arguments));
         }
+        if (command == QLatin1String("pack")) {
+            FeaturesPack::run(arguments);
+            return 0;
+        }
         if (command == QLatin1String("status")) {
             return runStatus(parseStatus(arguments));
         }
@@ -3385,6 +3392,9 @@ int main(int argc, char **argv)
             return 0;
         }
         failWithCode(2, QStringLiteral("unknown command \"%1\"").arg(command));
+    } catch (const FeaturesPack::Error &error) {
+        std::fprintf(stderr, "muzaiten-features: %s\n", error.what());
+        return error.code();
     } catch (const CommandError &error) {
         std::fprintf(stderr, "muzaiten-features: %s\n", error.what());
         return error.code();

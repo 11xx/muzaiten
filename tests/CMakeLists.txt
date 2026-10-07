@@ -529,6 +529,9 @@ target_compile_features(test_playlist_import PRIVATE cxx_std_26)
 add_test(NAME test_playlist_import COMMAND test_playlist_import)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME test_features_pack
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_features_pack.py $<TARGET_FILE:muzaiten-features>)
+set_tests_properties(test_features_pack PROPERTIES TIMEOUT 180)
 add_test(NAME test_version
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_version.py
 )
