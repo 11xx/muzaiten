@@ -290,15 +290,34 @@ class FeaturesPackTest(unittest.TestCase):
         self.assertEqual(self.store.read_bytes(), self.baseline)
         pack(self.b, "import", self.export)
         with database(self.store) as db:
+            adopted = db.execute("SELECT energy FROM features").fetchone()[0]
             db.execute("UPDATE features SET version='muzaiten-dsp-v1', energy=0.123")
+        stale = json.loads(pack(self.b, "import", self.export).stdout)
+        self.assertEqual((stale["adopted"], stale["existing"]), (1, 0))
+        with database(self.store) as db:
+            self.assertEqual(db.execute("SELECT version, energy FROM features").fetchone(), ("muzaiten-dsp-v2", adopted))
+            db.execute("UPDATE features SET energy=0.123")
         before = digest(self.store)
         skipped = json.loads(pack(self.b, "import", self.export).stdout)
-        self.assertEqual(skipped["existing"], 1)
+        self.assertEqual((skipped["adopted"], skipped["existing"]), (0, 1))
         self.assertEqual(digest(self.store), before)
         replaced = json.loads(pack(self.b, "import", self.export, "--replace").stdout)
         self.assertEqual(replaced["adopted"], 1)
         with database(self.store) as db:
-            self.assertEqual(db.execute("SELECT version FROM features").fetchone()[0], "muzaiten-dsp-v2")
+            self.assertEqual(db.execute("SELECT version, energy FROM features").fetchone(), ("muzaiten-dsp-v2", adopted))
+
+    def test_import_fills_stale_rows_without_decoding(self):
+        # After a DSP upgrade, identity refresh skips unchanged files, so both
+        # their group rows and their per-file rows stay stale.
+        refresh(self.b, "features")
+        with database(self.store) as db:
+            db.execute("UPDATE features SET version='muzaiten-dsp-v1'")
+            db.execute("UPDATE file_features SET version='muzaiten-dsp-v1'")
+        report = json.loads(pack(self.b, "import", self.export).stdout)
+        self.assertEqual((report["adopted"], report["existing"]), (1, 0))
+        following = refresh(self.b)
+        self.assertEqual(following["scanned"], 0)
+        self.assertEqual(following["feature_groups_processed"], 2)
 
     def test_export_uses_the_representatives_own_analysis(self):
         # A fingerprint-matched sibling at a lower path becomes the representative

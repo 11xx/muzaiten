@@ -17,12 +17,13 @@
 ### Added
 
 - Local scalar feature-pack export/import through `muzaiten-features pack`,
-  with strict versioned NDJSON, dry-run counts, explicit replacement and
-  atomic writes. Each record carries a group representative's own analysis
-  under that file's decoded-audio hash; export skips and counts local rows
-  that fail validation. Adoption requires exact representative decoded-audio
-  hashes and compatible extractor versions; rejected packs leave the feature
-  store unchanged. Packs omit taste/history, paths, ratings and timestamps, but
+  with strict versioned NDJSON, dry-run counts and atomic writes. Each record
+  carries a group representative's own analysis under that file's
+  decoded-audio hash; export skips and counts local rows that fail
+  validation. Adoption requires exact representative decoded-audio hashes and
+  compatible extractor versions. Import fills missing and stale rows, which
+  saves decoding after a DSP-version upgrade, and replaces current rows only
+  with `--replace`; rejected packs leave the feature store unchanged. Packs omit taste/history, paths, ratings and timestamps, but
   identify recordings by content hash. Embeddings are excluded.
 - Local radio tuning-profile export/import in `Radio > Customization…` and
   `muzaitenctl radio-weights`, preserving scoring weights and session decay

@@ -140,9 +140,10 @@ incorrect counts, files over 64 MiB, more than 100,000 records and lines over
 16 KiB are rejected without changing the feature store. `--dry-run` previews
 the same adoption decisions without writing rows or export files. Import
 holds the native writer lock and commits all adopted rows in one transaction;
-operational write failures roll back that transaction. Existing feature
-rows, including stale ones, are preserved unless `--replace` is explicit.
-Imported rows obey normal DSP-version freshness and never activate
+operational write failures roll back that transaction. Current feature rows
+are preserved unless `--replace` is explicit. Stale rows from another DSP
+version never enter scoring and the next refresh recomputes them, so import
+replaces them without it. Imported rows obey normal DSP-version freshness and never activate
 embeddings or modify listening state.
 
 Export uses atomic writes, requires `--replace` for an existing file and

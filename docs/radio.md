@@ -247,15 +247,29 @@ requires the exact canonical decoded-audio SHA-256 of the recipient group's
 representative, plus the running binary's extractor and DSP version. Matching
 MusicBrainz IDs or similar Chromaprint fingerprints never qualify a record.
 Lossy re-encoding normally changes that hash, even with identical tags.
-Different metadata and genres do not affect the adoption key.
+Different metadata and genres do not affect the adoption key. The hash covers
+ffmpeg's decoded and resampled output rather than the file bytes, so it also
+depends on the decoder: installations whose ffmpeg builds decode or resample a
+file differently compute different hashes for it and match nothing. Such a
+miss is safe; the recipient analyzes those files itself.
 
-Import preserves existing group rows, including stale ones, unless
-`--replace` explicitly permits replacement. Export's `--replace` permits
+Import preserves current group rows unless `--replace` explicitly permits
+replacement. Stale rows from another DSP version never enter scoring, so
+import replaces them without it. Export's `--replace` permits
 overwriting an existing pack file. `--dry-run` previews either operation
 without writing the pack or feature rows; `--json` reports counts for scripts.
 Adopted current rows are skipped by the next scalar-analysis phase. Other
 groups still need local analysis, and version upgrades make adopted rows stale
 under the same freshness rules as locally analyzed rows.
+
+A pack saves analysis work only where the recipient's group rows are stale,
+typically after an upgrade that changes the DSP version. Identity refresh
+skips unchanged files, so their per-file rows stay stale too, and the next
+feature phase would decode each such group's representative again; an adopted
+current row lets that phase skip the group. On a fresh installation, identity
+refresh already decodes and analyzes every file, and the feature phase fills
+group rows from that analysis without decoding, so a pack adds nothing there.
+The exporting installation needs a completed refresh at the same DSP version.
 
 The pack contains scalar features and extractor versions. Taste, ratings and
 listening history are absent, but its content hashes identify recordings and
