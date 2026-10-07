@@ -416,6 +416,99 @@ private slots:
         }
     }
 
+    void crossScriptSearchFixtureMatrix()
+    {
+        struct Fixture {
+            const char *name;
+            const char *title;
+            const char *titleSort;
+            const char *query;
+            bool matches;
+        };
+        const Fixture fixtures[] = {
+            {"thai-native", "ป๊อด ModernDog", "", "ป๊อด", true},
+            {"thai-native-partial", "ป๊อด ModernDog", "", "ป๊อ", true},
+            {"thai-pod", "ป๊อด ModernDog", "", "pod", true},
+            {"thai-pot", "ป๊อด ModernDog", "", "pot", true},
+            {"thai-artist-name", "ป๊อด ModernDog", "", "moderndog", true},
+            {"thai-mark-known-gap", "ป๊อด ModernDog", "", "ป็อด", false},
+            {"thai-different-mark-native", "ป็อด", "", "ป็อด", true},
+            {"lao-native-partial", "ວຽງຈັນ", "", "ວຽງ", true},
+            {"lao-standard", "ວຽງຈັນ", "", "viangchan", true},
+            {"lao-french", "ວຽງຈັນ", "", "wiangjan", true},
+            {"chinese-simplified-native", "音乐", "", "音乐", true},
+            {"chinese-traditional-query", "音乐", "", "音樂", true},
+            {"chinese-pinyin", "音樂", "", "yinyue", true},
+            {"chinese-native-partial", "重庆", "", "重", true},
+            {"chinese-polyphone-first", "长发", "", "changfa", true},
+            {"chinese-polyphone-second", "长发", "", "zhangfa", true},
+            {"japanese-kana", "さんしん", "", "sanshin", true},
+            {"japanese-katakana", "サンシン", "", "sanshin", true},
+            {"japanese-kanji-word", "三線", "", "sanshin", true},
+            {"japanese-kanji-native-partial", "三線", "", "線", true},
+            {"japanese-single-kanji-native", "線", "", "線", true},
+            {"japanese-single-kanji-known-gap", "線", "", "sen", false},
+            {"japanese-sort-tag", "三線の花", "Sanshin No Hana", "sanshin", true},
+            {"metadata-sort-alias-only", "Sort metadata", "三線の花", "sanshin", true},
+            {"korean-native-partial", "악단광칠", "", "악단", true},
+            {"korean-standard", "악단광칠", "", "akdan", true},
+            {"korean-conventional-name", "이지은", "", "lee jieun", true},
+            {"indic-native-partial", "कमला", "", "कम", true},
+            {"indic-common-reading", "कमला", "", "kamla", true},
+            {"indic-full-vowel-reading", "कमला", "", "kamala", true},
+            {"arabic-consonants", "سلام", "", "slam", true},
+            {"arabic-common-reading", "سلام", "", "salam", true},
+            {"hebrew-consonants", "שלום", "", "shlom", true},
+            {"hebrew-common-reading", "שלום", "", "shalom", true},
+            {"ukrainian-native", "Їхав Івась на коні", "", "Івась", true},
+            {"ukrainian-primary-reading", "Їхав Івась на коні", "", "yikhav", true},
+            {"ukrainian-alternate-reading", "Їхав Івась на коні", "", "jihav", true},
+            {"mixed-script-native", "한국어Müller", "", "한국어", true},
+            {"mixed-script-reading", "한국어Müller", "", "hangugeomueller", true},
+            {"canonical-latin", "Café", "", "café", true},
+            {"compatibility-kana", "ｶﾞ", "", "が", true},
+            {"compatibility-kana-reading", "ｶﾞ", "", "ga", true},
+            {"fullwidth-latin", "ＡＢＣ", "", "abc", true},
+            {"mro-native", "𖩀𖩁𖩂", "", "𖩁", true},
+            {"mro-unread", "𖩀𖩁𖩂", "", "ta", false},
+        };
+
+        // FoldThai.cpp preserves Thai vowel and tone marks in the native fold.
+        // The U+0E47/U+0E4A spelling difference therefore remains searchable as written.
+        // FoldJapanese.cpp reads the seeded 三線 word; its seed table has no single 線 reading.
+        // foldgen.py has no Mro transliteration rule, so unhandled letters keep their surface.
+        for (const Fixture &fixture : fixtures) {
+            SearchRecord record = makeRecord(QString::fromUtf8(fixture.title), QStringLiteral("Artist"),
+                                             QStringLiteral("Album"));
+            record.titleSort = QString::fromUtf8(fixture.titleSort);
+            foldRecordNorms(record);
+
+            SearchIndex index;
+            index.build({record});
+            const auto results = index.match(SearchQuery::parse(QString::fromUtf8(fixture.query)), false);
+            QVERIFY2(results.size() == (fixture.matches ? 1 : 0), fixture.name);
+            if (fixture.matches) QCOMPARE(results.first().rec.title, QString::fromUtf8(fixture.title));
+        }
+    }
+
+    void crossScriptReadingCollisionsKeepFieldRank()
+    {
+        SearchRecord simplifiedTitle = makeRecord(QString::fromUtf8("音乐"), QStringLiteral("Artist"),
+                                                  QStringLiteral("Album"));
+        SearchRecord traditionalArtist = makeRecord(QStringLiteral("Track"), QString::fromUtf8("音樂"),
+                                                    QStringLiteral("Album"));
+        foldRecordNorms(simplifiedTitle);
+        foldRecordNorms(traditionalArtist);
+
+        SearchIndex index;
+        index.build({simplifiedTitle, traditionalArtist});
+        const auto results = index.match(SearchQuery::parse(QStringLiteral("yinyue")), false);
+        QCOMPARE(results.size(), 2);
+        QCOMPARE(results[0].rec.title, QString::fromUtf8("音乐"));
+        QCOMPARE(results[1].rec.title, QStringLiteral("Track"));
+        QVERIFY(results[0].score > results[1].score);
+    }
+
     void queriesInTheirOwnScriptFindTextContainingThem()
     {
         // A query typed in a script folds to its primary form, which must
