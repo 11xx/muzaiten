@@ -14,6 +14,7 @@ import socket
 import sqlite3
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 import wave
@@ -21,15 +22,26 @@ import wave
 
 PARSER = argparse.ArgumentParser()
 PARSER.add_argument("binary", type=Path)
+PARSER.add_argument("--scratch", type=Path, help="parent directory for scratch data (default: TMPDIR)")
 PARSER.add_argument("--evidence", type=Path)
 ARGS, UNITTEST_ARGS = PARSER.parse_known_args()
 BINARY = ARGS.binary.resolve()
 SOURCE = Path(__file__).resolve().parents[1]
-SCRATCH = SOURCE / "agent-state/tests/features-pack"
-SCRATCH.mkdir(parents=True, exist_ok=True)
+SCRATCH = ARGS.scratch.resolve() if ARGS.scratch else None
 EVIDENCE = ARGS.evidence.resolve() if ARGS.evidence else None
 if EVIDENCE:
     EVIDENCE.mkdir(parents=True, exist_ok=True)
+# CTest reports this exit status as a skip.
+SKIP = 77
+
+
+def missing_tools():
+    missing = [tool for tool in ("ffmpeg", "ffprobe") if shutil.which(tool) is None]
+    if not missing:
+        encoders = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True)
+        if "libmp3lame" not in encoders.stdout:
+            missing.append("the ffmpeg libmp3lame encoder")
+    return missing
 
 
 def digest(path):
@@ -47,8 +59,10 @@ def database(path):
 
 
 def run(command, root, expected=0):
+    runtime = root / "runtime"
+    runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
     env = {k: v for k, v in os.environ.items() if not k.startswith("MUZAITEN_")}
-    env.update(MUZAITEN_STATE_ROOT=str(root), QT_QPA_PLATFORM="offscreen")
+    env.update(MUZAITEN_STATE_ROOT=str(root), QT_QPA_PLATFORM="offscreen", XDG_RUNTIME_DIR=str(runtime))
     result = subprocess.run(list(map(str, command)), env=env, capture_output=True, text=True, timeout=90)
     if EVIDENCE:
         with (EVIDENCE / "commands.jsonl").open("a") as log:
@@ -103,6 +117,8 @@ def pack(root, operation, path, *options, expected=0):
 class FeaturesPackTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if SCRATCH:
+            SCRATCH.mkdir(parents=True, exist_ok=True)
         cls.tmp = None if EVIDENCE else tempfile.TemporaryDirectory(prefix="exchange-", dir=SCRATCH)
         cls.work = Path(tempfile.mkdtemp(prefix="synthetic-", dir=EVIDENCE)) if EVIDENCE else Path(cls.tmp.name)
         cls.a, cls.b, cls.c = [cls.work / name for name in ("A", "B", "C")]
@@ -390,4 +406,7 @@ class FeaturesPackTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    if missing := missing_tools():
+        print("Skipping: requires " + ", ".join(missing) + ".", file=sys.stderr)
+        sys.exit(SKIP)
     unittest.main(argv=[__file__, *UNITTEST_ARGS])
