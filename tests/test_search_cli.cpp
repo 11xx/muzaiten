@@ -17,6 +17,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLockFile>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QSet>
@@ -776,6 +777,16 @@ private slots:
         QCOMPARE(run(sender, {QStringLiteral("export"), exported, QStringLiteral("--profile"), profile.name}), 0);
         QCOMPARE(run(recipient, {QStringLiteral("import"), exported}), 0);
         const QByteArray before = bytes(storage);
+        const QString liveLockPath = recipient + QStringLiteral("/state/muzaiten.lock");
+        QVERIFY(QDir().mkpath(QFileInfo(liveLockPath).absolutePath()));
+        QLockFile runningApp(liveLockPath);
+        QVERIFY(runningApp.tryLock(0));
+        QCOMPARE(run(recipient, {QStringLiteral("import"), exported, QStringLiteral("--replace")}), 1);
+        QVERIFY(stderrOutput.contains("Close the running muzaiten app"));
+        QCOMPARE(bytes(storage), before);
+        QCOMPARE(run(recipient, {QStringLiteral("import"), exported, QStringLiteral("--dry-run")}), 0);
+        QCOMPARE(bytes(storage), before);
+        runningApp.unlock();
         QCOMPARE(run(recipient, {QStringLiteral("import"), exported}), 1);
         QCOMPARE(bytes(storage), before);
         QCOMPARE(run(recipient, {QStringLiteral("import"), exported, QStringLiteral("--dry-run")}), 0);
@@ -789,7 +800,24 @@ private slots:
         QCOMPARE(run(recipient, {QStringLiteral("export"), roundTrip, QStringLiteral("--profile"), profile.name,
                                  QStringLiteral("--replace")}), 0);
         const QByteArray after = bytes(storage);
-        for (const QByteArray &invalid : {QByteArray("{"), QByteArray(RadioProfileExchange::MaximumBytes + 1, ' ')}) {
+        const QJsonObject validObject = QJsonDocument::fromJson(bytes(exported)).object();
+        QJsonObject wrongVersion = validObject;
+        wrongVersion.insert(QStringLiteral("version"), 2);
+        QJsonObject unknownKey = validObject;
+        unknownKey.insert(QStringLiteral("history"), QJsonArray{});
+        QJsonObject negativeWeight = validObject;
+        QJsonObject weights = negativeWeight.value(QStringLiteral("weights")).toObject();
+        weights.insert(QStringLiteral("genreWeight"), -1.0);
+        negativeWeight.insert(QStringLiteral("weights"), weights);
+        QJsonObject invisibleName = validObject;
+        invisibleName.insert(QStringLiteral("name"), QStringLiteral("Evening") + QChar(0x200B));
+        const QVector<QByteArray> invalidFiles{
+            QByteArray("{"), QByteArray(RadioProfileExchange::MaximumBytes + 1, ' '),
+            bytes(exported).left(bytes(exported).size() / 2),
+            QJsonDocument(wrongVersion).toJson(), QJsonDocument(unknownKey).toJson(),
+            QJsonDocument(negativeWeight).toJson(), QJsonDocument(invisibleName).toJson(),
+            QByteArray("{\"format\":\"muzaiten-radio-profile\",\"version\":NaN}")};
+        for (const QByteArray &invalid : invalidFiles) {
             const QString badPath = isolated.filePath(QStringLiteral("rejected.json"));
             QFile file(badPath);
             QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));

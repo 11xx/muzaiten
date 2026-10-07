@@ -224,6 +224,10 @@ void RadioProfileTest::exchangeRejects_data()
     QTest::newRow("trimmed-name") << root(QStringLiteral("name"), QStringLiteral(" name "));
     QTest::newRow("long-name") << root(QStringLiteral("name"), QString(201, QLatin1Char('a')));
     QTest::newRow("control-name") << root(QStringLiteral("name"), QStringLiteral("name\nline"));
+    QTest::newRow("invisible-name")
+        << root(QStringLiteral("name"), QStringLiteral("Default") + QChar(0x200B));
+    QTest::newRow("bidi-name")
+        << root(QStringLiteral("name"), QStringLiteral("Default") + QChar(0x202E));
     QTest::newRow("unknown-origin") << root(QStringLiteral("origin"), QStringLiteral("unknown"));
     QTest::newRow("null-weights") << root(QStringLiteral("weights"), QJsonValue(QJsonValue::Null));
     for (const QString &section : {QStringLiteral("weights"), QStringLiteral("sessionDecay")}) {

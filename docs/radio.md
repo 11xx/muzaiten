@@ -137,7 +137,10 @@ name, origin, all scoring weights and session-decay values before saving. A
 matching name requires checking **Replace existing profile**. Import keeps the
 active selection; replacing the active profile applies its tuning to newly
 generated picks. Replacement starts a fresh undo history for that profile.
-CLI import affects the next application launch.
+CLI import requires the app to be closed; it refuses a running instance so a
+later in-memory GUI save cannot overwrite the imported profile. A successful
+CLI import affects the next application launch. Dry-run and export remain
+available while the app runs.
 
 ```sh
 muzaitenctl radio-weights export evening.json --profile Evening
@@ -162,7 +165,8 @@ a final newline. Export, import, then export preserves the bytes. Unknown
 formats, versions or keys, duplicate or missing keys, malformed JSON,
 non-finite or out-of-range numbers, and files over 64 KiB are rejected before
 any profile changes. Profile names must be 1–200 UTF-16 code units without
-surrounding whitespace, control characters or unpaired surrogates. Writes
+surrounding whitespace, control characters, invisible format characters or
+unpaired surrogates. Writes
 replace destinations atomically. See [data-safety.md](data-safety.md) for the
 complete payload and privacy boundary.
 

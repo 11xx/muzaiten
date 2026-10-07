@@ -63,7 +63,9 @@ the contents they exchange. With `--json`, they return `ok`, `action`,
 full exchange payload. `requires_replace` reports a name collision on import;
 it is false on export. Existing radio-weight verbs retain their output shapes.
 Files exceeding 64 KiB or failing strict format validation are refused without
-changing the recipient store. No network or running app is needed.
+changing the recipient store. No network connection is needed. Close a running
+app before CLI import; import refuses while the app is open. Export and dry-run
+can read saved profiles while it runs.
 
 ## Search and audio analysis
 

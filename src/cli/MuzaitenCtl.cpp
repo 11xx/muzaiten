@@ -34,6 +34,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLockFile>
 #include <QLocalSocket>
 #include <QProcess>
 #include <QStandardPaths>
@@ -1038,6 +1039,15 @@ int runRadioProfileExchange(const QString &verb, QStringList arguments, bool jso
     QString error;
     if (!exporting && !RadioProfileExchange::read(files.first(), &profile, &error)) {
         return fail(error);
+    }
+    QLockFile instanceLock(IpcSocket::lockPath());
+    if (!exporting && !dryRun) {
+        if (!QDir().mkpath(AppPaths::stateDir())) {
+            return fail(QStringLiteral("Could not prepare the muzaiten state directory"));
+        }
+        if (!instanceLock.tryLock(0)) {
+            return fail(QStringLiteral("Close the running muzaiten app before importing a radio profile"));
+        }
     }
     RadioProfileStore profiles;
     if (!loadRadioProfilesForExchange(&profiles)) {

@@ -161,7 +161,8 @@ bool parse(const QByteArray &bytes, RadioProfile *profile, QString *error)
         const QChar ch = parsed.name.at(i);
         if (ch.isHighSurrogate() && i + 1 < parsed.name.size() && parsed.name.at(i + 1).isLowSurrogate()) {
             ++i;
-        } else if (ch.category() == QChar::Other_Control || ch.isSurrogate()) {
+        } else if (ch.category() == QChar::Other_Control
+                   || ch.category() == QChar::Other_Format || ch.isSurrogate()) {
             return reject(error, QStringLiteral("Profile name contains an invalid character."));
         }
     }
