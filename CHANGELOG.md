@@ -2,30 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Thai `็อ` before a final consonant folds to short `o` in Latin search
-  readings, including `ป็อป` (`pop`) and `ล็อก` (`lok`). Native Thai marks
-  remain distinct.
-
-### Changed
-
-- DSD playback planning survives closing and reopening the window. A track
-  requiring device-takeover approval is skipped while the window is closed.
-  An output choice stays active for the process if saving it fails, with the
-  error shown in the window.
-- Typing a General Standard simplified form such as 𬣙 or 𫐄 finds text
-  written with its traditional form (訏, 軏), and the reverse.
-
-### Fixed
-
-- Startup IPC commands retain their acknowledged queue changes, including
-  enqueue-and-play requests received while the window opens. Queue state is
-  restored before IPC and desktop media controls accept commands. Closing to
-  the tray keeps queue saves active, and reopening preserves the live queue,
-  its source, cursor, shuffle and radio state. Raises during window creation
-  share the same window.
-
 ### Developer tooling
 
 - Han generation and checks accept Python Unicode versions independently of
@@ -155,6 +131,9 @@
 
 ### Fixed
 
+- Thai `็อ` before a final consonant folds to short `o` in Latin search
+  readings, including `ป็อป` (`pop`) and `ล็อก` (`lok`). Native Thai marks
+  remain distinct.
 - A saved DSD track requiring device takeover retains its queue position,
   paused state and saved playback position until the first window offers the
   takeover prompt. It does not skip to and play the next track at startup.
