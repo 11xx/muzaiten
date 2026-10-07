@@ -21,6 +21,8 @@
   in versioned JSON. Imports offer a preview and explicit replacement;
   learned and uncertain-origin exports require consent. Profile writes are
   atomic, and rejected exchange files leave the recipient store unchanged.
+  CLI import refuses a running app so its later profile save cannot discard
+  an imported profile.
 - GUI search shows how many matches are hidden by exclusion patterns, including
   when every matching track is excluded. Terminal search continues to ignore
   GUI exclusions.

@@ -94,6 +94,7 @@ Every weight is required and uses the scorer's validated numeric range. The
 file excludes paths, track/artist/album identifiers, library contents,
 listening history, timestamps, undo snapshots and telemetry rows. Review the
 custom name before sharing, since it can contain information you typed.
+Imported names reject invisible format characters and unpaired surrogates.
 Learned tuning itself can reveal listening taste even without the underlying
 records. Each export of a learned or unknown-origin profile requires explicit
 consent: `--allow-learned` on the CLI, or confirmation in the dialog. An
@@ -102,7 +103,9 @@ renames; it is not inferred to be manual from a name.
 
 Import previews the complete validated payload in the dialog; CLI
 `--dry-run` reports it without writing stores. Replacement of a matching
-profile requires a separate checkbox or `--replace`. Unknown keys and
+profile requires a separate checkbox or `--replace`. CLI import refuses while
+a running app owns the state lock, since its later in-memory save could replace
+the imported profile. Unknown keys and
 versions, duplicate or missing keys, malformed or truncated JSON, invalid
 UTF-8, non-finite or out-of-range values, and inputs over 64 KiB are rejected
 without changing the store. Replacement starts a fresh undo history for the
