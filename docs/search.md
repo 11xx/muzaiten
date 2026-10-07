@@ -196,13 +196,19 @@ SQLite triggers advance that revision for searchable track metadata, rating
 overlays, MPD rows and library-root visibility; rollback also rolls back the
 revision. Playback settings and scan bookkeeping do not invalidate the cache.
 An unchanged warm load reads this small revision record rather than scanning
-all tracks for counts or timestamps. Cache format 2 and library schema 19 carry
+all tracks for counts or timestamps. Cache format 3 and library schema 19 carry
 the identity/revision contract; older caches are rebuilt automatically.
 
-Cache builders read local and MPD records under one database snapshot. Canceled
-or failed builds do not publish a partial cache. A GUI build whose source changed
-while it was working schedules another refresh. The status label's tooltip
-reports its cache decision and source revision.
+Cache builders read local and MPD records under one database snapshot. GUI
+queries can use a completed index while its cache is being serialized and
+compressed on a separate thread. Each search worker persists one immutable
+record snapshot at a time and coalesces pending writes to the latest completed
+build. It checks the build generation and source signature again before
+atomically publishing the complete cache. Canceled or failed builds do not
+publish a partial cache, and a source change during building or persistence
+schedules another refresh. Closing search cancels persistence; the next open
+rebuilds if there is no valid saved cache. The status label's tooltip reports
+its cache decision and source revision.
 
 ## Developer benchmark
 

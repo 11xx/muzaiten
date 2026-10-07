@@ -11,10 +11,12 @@
 #include <QFile>
 #include <QHash>
 #include <QSaveFile>
+#include <QTemporaryFile>
 
 #include <zstd.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <limits>
 
 namespace Search::IndexCache {
@@ -196,10 +198,11 @@ QString mismatchReason(const CacheSignature &cached, const CacheSignature &curre
     return QStringLiteral("hit");
 }
 
-bool write(const QString &path, const CacheSignature &signature,
-           const QVector<SearchRecord> &records, const ChunkLimits &limits)
+static bool writeCache(const QString &path, const CacheSignature &signature,
+                       const QVector<SearchRecord> &records, const ChunkLimits &limits,
+                       const std::function<bool()> &cancelled)
 {
-    if (!signature.valid() || signature.formatVersion != kFormatVersion
+    if ((cancelled && cancelled()) || !signature.valid() || signature.formatVersion != kFormatVersion
         || limits.records == 0 || limits.records > kMaxChunkRecords
         || limits.maxBytes == 0 || limits.maxBytes > kMaxChunkBytes
         || limits.targetBytes > limits.maxBytes
@@ -219,6 +222,7 @@ bool write(const QString &path, const CacheSignature &signature,
     QByteArray raw;
     quint32 count = 0;
     const auto flush = [&] {
+        if (cancelled && cancelled()) return false;
         if (count == 0) return true;
         const QByteArray compressed = zstdCompress(raw);
         if (compressed.isEmpty()) return false;
@@ -233,6 +237,10 @@ bool write(const QString &path, const CacheSignature &signature,
     };
     QByteArray serialized;
     for (const SearchRecord &record : records) {
+        if (cancelled && cancelled()) {
+            file.cancelWriting();
+            return false;
+        }
         serialized.clear();
         {
             QDataStream one(&serialized, QIODevice::WriteOnly);
@@ -269,6 +277,48 @@ bool write(const QString &path, const CacheSignature &signature,
         return false;
     }
     return file.commit();
+}
+
+bool write(const QString &path, const CacheSignature &signature,
+           const QVector<SearchRecord> &records, const ChunkLimits &limits)
+{
+    return writeCache(path, signature, records, limits, {});
+}
+
+PreparedWrite::PreparedWrite(QString destination, QString staged)
+    : m_destination(std::move(destination)), m_staged(std::move(staged))
+{
+}
+
+PreparedWrite::~PreparedWrite()
+{
+    if (!m_staged.isEmpty()) QFile::remove(m_staged);
+}
+
+bool PreparedWrite::publish()
+{
+    if (m_staged.isEmpty()) return false;
+    // Both paths share a directory; rename replaces the cache atomically.
+    if (std::rename(QFile::encodeName(m_staged).constData(),
+                    QFile::encodeName(m_destination).constData()) != 0) return false;
+    m_staged.clear();
+    return true;
+}
+
+std::unique_ptr<PreparedWrite> prepare(
+    const QString &path, const CacheSignature &signature,
+    const QVector<SearchRecord> &records, const std::function<bool()> &cancelled,
+    const ChunkLimits &limits)
+{
+    QTemporaryFile staged(path + QStringLiteral(".XXXXXX"));
+    if (!staged.open()) return {};
+    const QString stagedPath = staged.fileName();
+    staged.close();
+    if (!writeCache(stagedPath, signature, records, limits, cancelled)
+        || (cancelled && cancelled())) return {};
+    auto prepared = std::unique_ptr<PreparedWrite>(new PreparedWrite(path, stagedPath));
+    staged.setAutoRemove(false);
+    return prepared;
 }
 
 bool forEachRecord(const QString &path, CacheSignature *outSignature,

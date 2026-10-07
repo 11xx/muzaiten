@@ -123,6 +123,9 @@
 
 ### Changed
 
+- GUI search keeps answering queries while a completed index is saved to the
+  cache. Superseded or canceled writes are discarded, and source changes during
+  persistence trigger a refresh before a complete current cache is published.
 - Streaming search-index builds grow record and mask storage amortized across
   batches, avoiding repeated copies of the existing index.
 - DSD playback planning survives closing and reopening the window. A track

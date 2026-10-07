@@ -1,6 +1,7 @@
 #include "search/IndexCache.h"
 
 #include <QDataStream>
+#include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -98,6 +99,47 @@ private:
     }
 
 private slots:
+    void stagedWritePublishesOnlyWhenAccepted()
+    {
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        const QString path = temp.filePath(QStringLiteral("index.cache"));
+        QVERIFY(IndexCache::write(path, signature(), {record(0)}));
+        const auto original = bytes(path);
+        {
+            auto discarded = IndexCache::prepare(path, signature(), {record(1)});
+            QVERIFY(discarded);
+            QCOMPARE(bytes(path), original);
+        }
+        QCOMPARE(bytes(path), original);
+        QCOMPARE(QDir(temp.path()).entryList(QDir::Files).size(), 1);
+        auto accepted = IndexCache::prepare(path, signature(), {record(2)}, {}, {1});
+        QVERIFY(accepted);
+        QCOMPARE(bytes(path), original);
+        QVERIFY(accepted->publish());
+        QVERIFY(!accepted->publish());
+        const auto loaded = IndexCache::read(path);
+        QVERIFY(loaded.ok);
+        QCOMPARE(loaded.records.size(), 1);
+        equal(loaded.records.first(), record(2));
+        QCOMPARE(QDir(temp.path()).entryList(QDir::Files).size(), 1);
+    }
+
+    void canceledPreparationPreservesPublishedCache()
+    {
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        const QString path = temp.filePath(QStringLiteral("index.cache"));
+        QVERIFY(IndexCache::write(path, signature(), {record(0)}));
+        const auto original = bytes(path);
+        int checks = 0;
+        auto canceled = IndexCache::prepare(path, signature(), {record(1), record(2)},
+                                           [&checks] { return ++checks >= 3; }, {1});
+        QVERIFY(!canceled);
+        QCOMPARE(bytes(path), original);
+        QCOMPARE(QDir(temp.path()).entryList(QDir::Files).size(), 1);
+    }
+
     void roundTrip_data()
     {
         QTest::addColumn<int>("count");
