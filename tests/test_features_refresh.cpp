@@ -1640,7 +1640,7 @@ void checkCancellationJsonl(const QByteArray &bytes, int completed)
 
 void IndexerScanTest::featurePhaseCancelPreservesWrittenRows()
 {
-    QVERIFY(!QStandardPaths::findExecutable(QStringLiteral("ffmpeg")).isEmpty());
+    requireTool(QStringLiteral("ffmpeg"));
     QVERIFY(QFileInfo::exists(muzaitenIndexPath()));
     QTemporaryDir dir(cancellationFixtureTemplate());
     QVERIFY(dir.isValid());
@@ -1696,7 +1696,7 @@ void IndexerScanTest::lateNativeCompletionCancelReportsCanceled_data()
 void IndexerScanTest::lateNativeCompletionCancelReportsCanceled()
 {
     QFETCH(QString, output);
-    QVERIFY(!QStandardPaths::findExecutable(QStringLiteral("ffmpeg")).isEmpty());
+    requireTool(QStringLiteral("ffmpeg"));
     QVERIFY(QFileInfo::exists(muzaitenIndexPath()));
     QTemporaryDir dir(cancellationFixtureTemplate());
     QVERIFY(dir.isValid());
