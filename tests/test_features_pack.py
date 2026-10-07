@@ -33,6 +33,7 @@ if EVIDENCE:
     EVIDENCE.mkdir(parents=True, exist_ok=True)
 # CTest reports this exit status as a skip.
 SKIP = 77
+MAXIMUM_BYTES = 64 * 1024 * 1024
 SCALAR_KEYS = ["tempo_bpm", "loudness_lufs", "loudness_std_db", "spectral_centroid_mean_hz",
                "spectral_centroid_std_hz", "spectral_flatness_mean", "zero_crossing_rate",
                "onset_rate_hz", "energy"]
@@ -43,13 +44,36 @@ def missing_tools():
     missing = [tool for tool in ("ffmpeg", "ffprobe") if shutil.which(tool) is None]
     if not missing:
         encoders = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True)
-        if "libmp3lame" not in encoders.stdout:
+        if EVIDENCE:
+            (EVIDENCE / "encoder-probe.json").write_text(json.dumps({
+                "command": ["ffmpeg", "-hide_banner", "-encoders"], "exit": encoders.returncode,
+                "stdout": encoders.stdout, "stderr": encoders.stderr}, indent=2) + "\n")
+        if encoders.returncode != 0 or not any(
+                len(fields := line.split()) > 1 and len(fields[0]) == 6
+                and fields[0].startswith("A") and fields[1] == "libmp3lame"
+                for line in encoders.stdout.splitlines()):
             missing.append("the ffmpeg libmp3lame encoder")
     return missing
 
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def retain(paths):
+    if not EVIDENCE:
+        return {}
+    artifacts = EVIDENCE / "artifacts"
+    artifacts.mkdir(exist_ok=True)
+    hashes = {}
+    for path in paths:
+        if path.is_file():
+            value = digest(path)
+            destination = artifacts / value
+            if not destination.exists():
+                shutil.copyfile(path, destination)
+            hashes[str(path)] = value
+    return hashes
 
 
 @contextmanager
@@ -67,12 +91,16 @@ def run(command, root, expected=0):
     runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
     env = {k: v for k, v in os.environ.items() if not k.startswith("MUZAITEN_")}
     env.update(MUZAITEN_STATE_ROOT=str(root), QT_QPA_PLATFORM="offscreen", XDG_RUNTIME_DIR=str(runtime))
+    inputs = [root / "data/library.sqlite", root / "data/features.sqlite"]
+    inputs += [Path(str(arg)) for arg in command[1:]]
+    before = retain(inputs)
     result = subprocess.run(list(map(str, command)), env=env, capture_output=True, text=True, timeout=90)
     if EVIDENCE:
         with (EVIDENCE / "commands.jsonl").open("a") as log:
             log.write(json.dumps({"command": list(map(str, command)), "state_root": str(root),
                                   "exit": result.returncode, "stdout": result.stdout,
-                                  "stderr": result.stderr}) + "\n")
+                                  "stderr": result.stderr, "artifacts_before": before,
+                                  "artifacts_after": retain(inputs)}) + "\n")
     if result.returncode != expected:
         raise AssertionError(f"{command}: exit {result.returncode}, expected {expected}\n{result.stderr}")
     return result
@@ -253,7 +281,7 @@ class FeaturesPackTest(unittest.TestCase):
             "unknown-version": lambda lines: lines[0].update(version=2),
             "string-version": lambda lines: lines[0].update(version="1"),
             "unknown-header-key": lambda lines: lines[0].update(timestamp=1),
-            "too-many-records": lambda lines: lines[0].update(records=100001),
+            "too-many-records": lambda lines: lines[0].update(records=MAXIMUM_BYTES),
             "wrong-count": lambda lines: lines[0].update(records=2),
             "unknown-record-key": lambda lines: lines[1].update(path="audio.wav"),
             "embedding-section": lambda lines: lines[1].update(embedding={}),
@@ -272,7 +300,7 @@ class FeaturesPackTest(unittest.TestCase):
                 self.assert_rejected(self.write_document(lines, name + ".ndjson"))
         oversized = self.work / "oversize.ndjson"
         with oversized.open("wb") as file:
-            file.truncate(64 * 1024 * 1024 + 1)
+            file.truncate(MAXIMUM_BYTES + 1)
         self.assert_rejected(oversized)
         oversized.unlink()
 
@@ -352,6 +380,88 @@ class FeaturesPackTest(unittest.TestCase):
         self.assertEqual([record["decode_hash"] for record in records], [sibling_hash])
         self.assertNotIn(original_hash.encode(), exported.read_bytes())
         self.assertEqual(tuple(records[0]["scalars"][key] for key in SCALAR_KEYS), fresh)
+        adopted = json.loads(pack(self.b, "import", exported).stdout)
+        self.assertEqual((adopted["adopted"], adopted["mismatched"]), (1, 0))
+        with database(self.store) as db:
+            imported = db.execute(f"SELECT {SCALARS} FROM features feat JOIN files f ON "
+                                  "f.content_group_id=feat.content_group_id WHERE f.decode_hash=?",
+                                  (sibling_hash,)).fetchone()
+            self.assertEqual(imported, fresh)
+            self.assertEqual(db.execute("SELECT * FROM file_features ORDER BY path").fetchall(), self.baseline_file_features)
+        if EVIDENCE:
+            (EVIDENCE / "lower-sorting-sibling.json").write_text(json.dumps({
+                "original_hash": original_hash, "sibling_hash": sibling_hash,
+                "group_scalars": group_row, "fresh_C_scalars": fresh,
+                "export": report, "import": adopted, "imported_scalars": imported}, indent=2) + "\n")
+
+    def test_export_after_in_place_reencoding(self):
+        a, b, c = [self.work / "in-place" / name for name in ("A", "B", "C")]
+        for root in (a, b, c):
+            (root / "audio").mkdir(parents=True)
+        representative = a / "audio/recording.flac"
+        shutil.copyfile(self.a / "audio/original.flac", representative)
+        shutil.copyfile(self.b / "audio/reencoded.mp3", a / "audio/zz-sibling.mp3")
+        create_library(a, [(representative.name, ""), ("zz-sibling.mp3", "")], "Electronic")
+        refresh(a)
+        source_store = a / "data/features.sqlite"
+        with database(source_store) as db:
+            self.assertEqual(db.execute("SELECT COUNT(DISTINCT content_group_id) FROM files").fetchone()[0], 1)
+            old_hash, group_id = db.execute("SELECT decode_hash, content_group_id FROM files WHERE path=?",
+                                           (str(representative),)).fetchone()
+            old_scalars = db.execute(f"SELECT {SCALARS} FROM features").fetchone()
+        replacement = a / "audio/replacement.flac"
+        run(["ffmpeg", "-v", "error", "-i", representative, "-af", "volume=0.5", replacement], a)
+        replacement.replace(representative)
+        stat = representative.stat()
+        with database(a / "data/library.sqlite") as db:
+            db.execute("UPDATE tracks SET file_mtime=?, file_size=? WHERE path=?",
+                       (int(stat.st_mtime), stat.st_size, str(representative)))
+        refresh(a)
+        with database(source_store) as db:
+            self.assertEqual(db.execute("SELECT COUNT(DISTINCT content_group_id) FROM files").fetchone()[0], 1)
+            new_hash, new_group_id = db.execute("SELECT decode_hash, content_group_id FROM files WHERE path=?",
+                                               (str(representative),)).fetchone()
+            group_scalars = db.execute(f"SELECT {SCALARS} FROM features").fetchone()
+            own_scalars = db.execute(f"SELECT {SCALARS} FROM file_features").fetchone()
+        self.assertEqual(new_group_id, group_id)
+        self.assertNotEqual(new_hash, old_hash)
+        self.assertEqual(group_scalars, old_scalars)
+        self.assertNotEqual(own_scalars, old_scalars)
+        for root in (b, c):
+            shutil.copyfile(representative, root / "audio/recipient.flac")
+            create_library(root, [("recipient.flac", "")], "Folk")
+        refresh(b, "identity")
+        refresh(c)
+        exported = self.work / "in-place.ndjson"
+        report = json.loads(pack(a, "export", exported).stdout)
+        self.assertEqual((report["exported"], report["skipped"]), (1, 0))
+        record = json.loads(exported.read_bytes().splitlines()[1])
+        self.assertEqual(record["decode_hash"], new_hash)
+        self.assertEqual(tuple(record["scalars"][key] for key in SCALAR_KEYS), own_scalars)
+        adopted = json.loads(pack(b, "import", exported).stdout)
+        self.assertEqual((adopted["adopted"], adopted["mismatched"]), (1, 0))
+        with database(b / "data/features.sqlite") as db, database(c / "data/features.sqlite") as oracle:
+            self.assertEqual(db.execute("SELECT decode_hash FROM files").fetchone()[0], new_hash)
+            self.assertEqual(oracle.execute("SELECT decode_hash FROM files").fetchone()[0], new_hash)
+            imported = db.execute(f"SELECT {SCALARS} FROM features").fetchone()
+            fresh = oracle.execute(f"SELECT {SCALARS} FROM features").fetchone()
+            self.assertEqual(imported, fresh)
+            self.assertEqual(imported, own_scalars)
+        rejected = self.work / "in-place-rejected.ndjson"
+        record["scalars"]["energy"] = 2
+        rejected.write_text(json.dumps({"format": "muzaiten-features-pack", "version": 1, "records": 1})
+                            + "\n" + json.dumps(record) + "\n")
+        before = digest(b / "data/features.sqlite")
+        pack(b, "import", rejected, "--replace", expected=2)
+        after = digest(b / "data/features.sqlite")
+        self.assertEqual(after, before)
+        if EVIDENCE:
+            (EVIDENCE / "in-place-reencoding.json").write_text(json.dumps({
+                "old_hash": old_hash, "new_hash": new_hash, "group_id": group_id,
+                "old_scalars": old_scalars, "retained_group_scalars": group_scalars,
+                "per_file_scalars": own_scalars, "fresh_C_scalars": fresh,
+                "export": report, "import": adopted, "imported_scalars": imported,
+                "rejected_before": before, "rejected_after": after}, indent=2) + "\n")
 
     def test_export_skips_and_counts_unusable_local_rows(self):
         store = self.work / "unusable.sqlite"
@@ -376,10 +486,76 @@ class FeaturesPackTest(unittest.TestCase):
             db.execute("DELETE FROM file_features")
             self.assertEqual(db.execute("SELECT COUNT(*) FROM features").fetchone()[0], 3)
         self.assertEqual(export(), (0, 3, 0))
+        shutil.copyfile(self.a / "data/features.sqlite", store)
+        with database(store) as db:
+            db.execute("UPDATE files SET decode_hash='invalid' WHERE path LIKE '%original.flac'")
+            db.execute("UPDATE file_features SET energy='invalid' WHERE path LIKE '%shared.wav'")
+        self.assertEqual(export(), (1, 2, 2))
+        plain = run([BINARY, "pack", "export", destination, "--replace", "--features", store], self.a)
+        self.assertIn("skipped=2", plain.stdout)
+        self.assertIn("invalid=2", plain.stdout)
         # Export needs only per-file analysis, which identity refresh writes.
         identity_only = json.loads(pack(self.b, "export", destination, "--replace").stdout)
         self.assertEqual((identity_only["exported"], identity_only["skipped"]), (3, 0))
         self.assertEqual(self.store.read_bytes(), self.baseline)
+
+    def test_byte_cap_is_the_binding_limit(self):
+        shortest = {"decode_hash": "{hash}", "extractor": "a", "version": "a",
+                    "scalars": dict.fromkeys(SCALAR_KEYS, 0)}
+        prefix, suffix = json.dumps(shortest, separators=(",", ":")).encode().split(b"{hash}")
+        line_bytes = len(prefix) + 64 + len(suffix) + 1
+
+        def header(records):
+            return json.dumps({"format": "muzaiten-features-pack", "version": 1, "records": records},
+                              separators=(",", ":")).encode() + b"\n"
+
+        count = (MAXIMUM_BYTES - len(header(MAXIMUM_BYTES))) // line_bytes
+        path = self.work / "at-byte-cap.ndjson"
+        try:
+            with path.open("wb") as file:
+                padding = MAXIMUM_BYTES - len(header(count)) - count * line_bytes
+                file.write(header(count)[:-1] + b" " * padding + b"\n")
+                for index in range(count):
+                    file.write(prefix + b"%064x" % index + suffix + b"\n")
+            self.assertEqual(path.stat().st_size, MAXIMUM_BYTES)
+            self.assertGreater(count, 100000)
+            report = json.loads(pack(self.b, "import", path, "--dry-run").stdout)
+            self.assertEqual((report["records"], report["incompatible"]), (count, count))
+            self.assertEqual(self.store.read_bytes(), self.baseline)
+            with path.open("ab") as file:
+                file.write(b"\n")
+            self.assert_rejected(path)
+        finally:
+            path.unlink(missing_ok=True)
+        # A library whose pack would exceed the byte cap exports nothing.
+        store = self.work / "past-byte-cap.sqlite"
+        shutil.copyfile(self.a / "data/features.sqlite", store)
+        with database(store) as db:
+            db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 100001) "
+                       "INSERT INTO files(path, mtime, size, decode_hash, content_group_id, analyzed_at, status) "
+                       "SELECT '/synthetic/' || i, 0, 0, printf('%064x', i), 1000000 + i, 0, 'ok' FROM n")
+            db.execute(f"INSERT INTO file_features(path, {SCALARS}, extractor, version) SELECT path, "
+                       + ", ".join(["0"] * len(SCALAR_KEYS))
+                       + ", 'muzaiten-dsp', 'muzaiten-dsp-v2' FROM files WHERE path LIKE '/synthetic/%'")
+        destination = self.work / "past-byte-cap.ndjson"
+        exported = json.loads(pack(self.a, "export", destination, "--features", store).stdout)
+        self.assertEqual(exported["exported"], 100004)
+        self.assertLess(destination.stat().st_size, MAXIMUM_BYTES)
+        before = digest(destination)
+        with database(store) as db:
+            db.execute("WITH RECURSIVE n(i) AS (SELECT 100002 UNION ALL SELECT i + 1 FROM n WHERE i < 200000) "
+                       "INSERT INTO files(path, mtime, size, decode_hash, content_group_id, analyzed_at, status) "
+                       "SELECT '/synthetic/' || i, 0, 0, printf('%064x', i), 1000000 + i, 0, 'ok' FROM n")
+            db.execute(f"INSERT OR REPLACE INTO file_features(path, {SCALARS}, extractor, version) SELECT path, "
+                       + ", ".join(["0.123456789012345"] * len(SCALAR_KEYS))
+                       + ", 'muzaiten-dsp', 'muzaiten-dsp-v2' FROM files WHERE path LIKE '/synthetic/%'")
+        failed = pack(self.a, "export", destination, "--replace", "--features", store, expected=2)
+        self.assertIn("size limits", failed.stderr)
+        self.assertEqual(digest(destination), before)
+        absent = self.work / "oversize-export.ndjson"
+        pack(self.a, "export", absent, "--dry-run", "--features", store, expected=2)
+        self.assertFalse(absent.exists())
+        store.unlink()
 
     def test_null_scalar_result_remains_fresh(self):
         lines = json.loads(json.dumps(self.lines))
@@ -407,7 +583,11 @@ class FeaturesPackTest(unittest.TestCase):
         self.assertEqual(destination.read_bytes(), b"retain me")
         pack(self.a, "export", destination, "--replace")
         self.assertEqual(destination.read_bytes(), self.document)
-        pack(self.a, "export", self.work / "absent/out.ndjson", expected=4)
+        failed = run([BINARY, "pack", "export", self.work / "absent/out.ndjson"], self.a, expected=4)
+        self.assertIn("anyone with the same audio can tell you have it", failed.stdout)
+        plain = run([BINARY, "pack", "export", destination, "--replace"], self.a)
+        self.assertEqual(plain.stdout.splitlines()[0], preview["contents"])
+        self.assertEqual(plain.stdout.count(preview["contents"]), 1)
         store = self.a / "data/features.sqlite"
         before = digest(store)
         for suffix in ("", ".lock", "-wal", "-shm", "-journal"):
@@ -425,7 +605,9 @@ class FeaturesPackTest(unittest.TestCase):
         allowed = {"decode_hash", "extractor", "version", "scalars"}
         for record in self.lines[1:]:
             self.assertEqual(set(record), allowed)
-        self.assertIn("content hashes identify recordings", preview["contents"])
+        self.assertIn("every exported recording in this library", preview["contents"])
+        self.assertIn("anyone with the same audio can tell you have it", preview["contents"])
+        self.assertNotIn("—", plain.stdout + failed.stdout)
         if EVIDENCE:
             (EVIDENCE / "leak-scan.json").write_text(json.dumps({"pack_sha256": digest(self.export),
                 "forbidden_tokens": forbidden, "matches": [], "record_keys": sorted(allowed)}, indent=2) + "\n")
