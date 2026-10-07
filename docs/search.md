@@ -44,8 +44,9 @@ ones. Remaining syllables use common given-name spellings when listed and
 Revised Romanization otherwise.
 
 Thai native marks remain distinct even when their readings are related: `ป็อด`
-folds to `poot`/`pood` and does not match native `ป๊อด`, whose readings
-include `pot`/`pod`. Japanese kanji readings come from a seed list: `三線`
+and `ป๊อด` both have `pot`/`pod` Latin readings, while a native `ป็อด` query
+does not match native `ป๊อด`. The `็อ` spelling before a final consonant
+reads short `o`, as in `ล็อก` (`lok`). Japanese kanji readings come from a seed list: `三線`
 has `sanshin`, while standalone `線` has no Japanese `sen` reading.
 
 Traditional and simplified Chinese characters match each other. Half-width
