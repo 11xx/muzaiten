@@ -10,7 +10,8 @@ public:
     QVector<ScoredResult> run(const SearchIndex &index, const SearchQuery &query,
                               bool fuzzyMode, const ExclusionSet &excludes,
                               quint64 exclusionVersion, int *totalMatches,
-                              const std::function<bool()> &cancelled = {});
+                              const std::function<bool()> &cancelled = {},
+                              int *hiddenMatches = nullptr);
 
 private:
     SearchQuery m_query;

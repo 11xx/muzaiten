@@ -68,9 +68,10 @@ public:
 
     // Run a query and return the top-scoring results (capped at kMaxResults).
     // Empty query → empty result. When totalMatches is non-null it receives the
-    // full (uncapped) number of matching records. `excludes`, when non-empty,
-    // drop matching records during the filter phase (before scoring).
-    // matchingIndices receives every match in ascending index order.
+    // full (uncapped) number of visible matching records. hiddenMatches receives
+    // the number of query matches suppressed by `excludes`, counting each record
+    // once. matchingIndices receives every query match, visible or hidden, in
+    // ascending index order so narrowing can still count hidden matches.
     // candidateIndices must be ascending, unique, and valid for this index;
     // it must not be the same vector as matchingIndices. Cancellation returns
     // empty results and leaves the output count and indices empty.
@@ -79,7 +80,8 @@ public:
                                  int *totalMatches = nullptr,
                                  QVector<int> *matchingIndices = nullptr,
                                  const QVector<int> *candidateIndices = nullptr,
-                                 const std::function<bool()> &cancelled = {}) const;
+                                 const std::function<bool()> &cancelled = {},
+                                 int *hiddenMatches = nullptr) const;
 
     quint64 generation() const { return m_generation; }
 
