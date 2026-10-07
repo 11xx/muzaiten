@@ -229,7 +229,10 @@ target_compile_features(bench_queue_state PRIVATE cxx_std_26)
 add_executable(test_features_refresh
     test_features_refresh.cpp
 )
-add_executable(features_cancel_fixture features_cancel_fixture.cpp)
+add_executable(features_cancel_fixture
+    features_cancel_fixture.cpp
+    ../src/indexer/FeaturesPack.cpp
+)
 target_include_directories(features_cancel_fixture PRIVATE ../src)
 target_link_libraries(features_cancel_fixture PRIVATE
     muzaiten_core muzaiten_dsp muzaiten_features Qt6::Core Qt6::Sql PkgConfig::Chromaprint
