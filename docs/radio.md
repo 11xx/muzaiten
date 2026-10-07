@@ -189,6 +189,67 @@ The file contains no listening records or recording identifiers. Its custom
 name is included verbatim, so choose one you are comfortable sharing. Exchange
 uses local files only and makes no network requests.
 
+## Aggregate taste seeds
+
+`Radio > Taste profiles…` exports aggregate library taste and imports local
+files as named seeds. **Preview library export…** generates an exact JSON
+preview only after that action; **Export these contents…** deliberately opts
+in to writing those bytes. Decade shares are optional and unchecked by
+default. **Preview import…** validates and shows the aggregate contents;
+choose a local seed name and press **Import seed** to save. Replacement needs
+an explicit checkbox. Import does not start radio.
+
+Select an imported seed and press **Start radio**, or use:
+
+```sh
+muzaitenctl radio-taste export taste.json --opt-in --dry-run
+muzaitenctl radio-taste export taste.json --opt-in
+muzaitenctl radio-taste import taste.json --name "Evening library" --dry-run
+muzaitenctl radio-taste import taste.json --name "Evening library"
+muzaitenctl start-taste-radio "Evening library"
+muzaitenctl stop-radio
+muzaitenctl radio-taste remove "Evening library"
+```
+
+Every CLI export, including its preview, requires `--opt-in`; consent is
+never saved. The preview and export print only the exact file bytes to stdout,
+with disclosure/status on stderr. Exports read the local library and current
+DSP scalars without changing either store. They summarize scanned, nonmissing
+local tracks, canonicalizing genre aliases and omitting ignored/placeholder
+genres. Duplicate song identities and duplicate content groups count once. Genres and decades with fewer than five distinct
+tracks are omitted; each feature distribution needs five distinct samples.
+Shares normalize over retained buckets; multi-genre tracks support each of
+their distinct genres. Tempo and energy report interpolated q25/q50/q75
+quartiles, never individual rows or sample counts.
+
+The selected seed contributes a fixed term from **0 to 3 score points** through
+`RadioSession` and `TrackScorer`. Genre contributes twice the largest matching
+canonical share, from 0 to 2. Tempo and energy each use
+`max(0, 1 - abs(value - q50) / max(q75 - q25, floor))`, with floors of 20 BPM
+and 0.1 energy. Their mean contributes from 0 to 1; missing candidate features
+contribute zero. This term augments ordinary context scoring even when richer
+audio features are available. Decade shares are informational and do not
+change scoring. Pick reasons name the local seed, including picks with no
+matching aggregates. The pool uses the same playable/enabled-root filters,
+Never play on radio exclusions, artist/album throttles and duplicate prevention
+as other radio modes, with the existing 5,000-candidate fallback cap.
+
+**Stop radio** deactivates the seed. **Remove seed** in the dialog also stops
+radio when that seed is active. Offline CLI removal prevents future selection;
+a running or saved session owns its aggregate snapshot until stopped, so
+removal/replacement does not invalidate it. Track, artist and seedless sessions
+remain compatible. Names stay in `radio-taste-seeds.json` in the configuration
+directory and in local session state; they are absent from exchange files.
+
+The strict `muzaiten-taste-profile` v1 file is limited to 64 KiB. Unknown keys,
+versions, duplicate keys, invalid shares, unordered/out-of-range/nonfinite
+quartiles, invalid UTF-8 and incomplete inputs are rejected before import
+changes. Existing export files and same-name seeds require `--replace`.
+Writes are atomic. The app supplies no transport, accounts, URLs or automatic
+export. Aggregates still reveal library taste; suppression is not anonymity,
+and a distribution shift in a synthetic fixture does not establish a universal
+listening preference. See [data-safety.md](data-safety.md#aggregate-taste-profile-files).
+
 ## Genre curation
 
 Scanned genre tags are matched through a folded, alias-canonicalized

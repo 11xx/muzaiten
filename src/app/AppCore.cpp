@@ -2044,6 +2044,28 @@ void AppCore::maybeRestoreRadioSession()
         restored = std::make_unique<RadioSession>(std::move(pool), buildRadioAffinities(resolvedSongKeys),
                                                   buildRadioGenreIdf(genreAliases, ignoredRadioGenres), exploration, nowSecs,
                                                   nullptr, scoringWeights, std::move(embeddings), sessionDecay);
+    } else if (kind == QLatin1String("taste")) {
+        TasteProfile taste;
+        QString error;
+        const QJsonObject saved = root.value(QStringLiteral("tasteSeed")).toObject();
+        const QString name = saved.value(QStringLiteral("name")).toString();
+        if (!TasteProfiles::validName(name)
+            || !TasteProfiles::parse(QJsonDocument(saved.value(QStringLiteral("profile")).toObject()).toJson(),
+                                     &taste, &error)) {
+            clearRadioSessionState();
+            return;
+        }
+        QVector<TrackScorer::Candidate> pool =
+            buildRadioFallbackPool(5000, genreAliases, ignoredRadioGenres, resolvedSongKeys);
+        if (pool.isEmpty()) {
+            clearRadioSessionState();
+            return;
+        }
+        QHash<qint64, QVector<float>> embeddings = radioEmbeddingsForSession(pool);
+        restored = std::make_unique<RadioSession>(std::move(pool), buildRadioAffinities(resolvedSongKeys),
+            buildRadioGenreIdf(genreAliases, ignoredRadioGenres), exploration, nowSecs, nullptr,
+            scoringWeights, std::move(embeddings), sessionDecay);
+        restored->setTasteProfile(name, std::move(taste));
     } else if (const std::optional<RadioMix::Mode> mixMode = RadioMix::modeFromString(kind)) {
         QVector<TrackScorer::Candidate> pool =
             buildRadioFallbackPool(5000, genreAliases, ignoredRadioGenres, resolvedSongKeys);
@@ -2484,10 +2506,33 @@ bool AppCore::startArtistRadio(const QString &artistName)
     return true;
 }
 
+QString AppCore::activeTasteSeedName() const
+{
+    return m_radioSession == nullptr ? QString{} : m_radioSession->tasteProfileName();
+}
+
+bool AppCore::startTasteRadio(const QString &name)
+{
+    QMap<QString, TasteProfile> profiles;
+    QString error;
+    if (!TasteProfiles::load(&profiles, &error) || !profiles.contains(name)) {
+        return false;
+    }
+    return startPoolRadio(QStringLiteral("taste"), &profiles[name], name);
+}
+
 bool AppCore::startMix(const QString &mode)
 {
+    if (!RadioMix::modeFromString(mode)) {
+        return false;
+    }
+    return startPoolRadio(mode);
+}
+
+bool AppCore::startPoolRadio(const QString &mode, const TasteProfile *taste, const QString &name)
+{
     const std::optional<RadioMix::Mode> mixMode = RadioMix::modeFromString(mode);
-    if (!mixMode || m_database == nullptr || m_player == nullptr) {
+    if ((!mixMode && taste == nullptr) || m_database == nullptr || m_player == nullptr) {
         return false;
     }
     const QHash<QString, QString> genreAliases = m_database->genreAliases();
@@ -2497,7 +2542,9 @@ bool AppCore::startMix(const QString &mode)
         buildRadioFallbackPool(5000, genreAliases, ignoredRadioGenres, resolvedSongKeys);
     QHash<QString, TrackScorer::Affinity> affinities = buildRadioAffinities(resolvedSongKeys);
     const qint64 nowSecs = QDateTime::currentSecsSinceEpoch();
-    pool = RadioMix::filterCandidates(*mixMode, pool, affinities, nowSecs);
+    if (mixMode) {
+        pool = RadioMix::filterCandidates(*mixMode, pool, affinities, nowSecs);
+    }
     if (pool.isEmpty()) {
         return false;
     }
@@ -2516,6 +2563,19 @@ bool AppCore::startMix(const QString &mode)
                                                    buildRadioGenreIdf(genreAliases, ignoredRadioGenres),
                                                    exploration, nowSecs, nullptr, sessionWeights,
                                                    std::move(embeddings), sessionDecay);
+    if (taste != nullptr) {
+        TasteProfile canonical = *taste;
+        canonical.genres.clear();
+        for (auto it = taste->genres.begin(); it != taste->genres.end(); ++it) {
+            canonical.genres[GenreTags::canonical(it.key(), genreAliases)] += it.value();
+        }
+        QByteArray bytes;
+        QString error;
+        if (!TasteProfiles::encode(canonical, &bytes, &error)) {
+            return false;
+        }
+        session->setTasteProfile(name, std::move(canonical));
+    }
     const QSet<QString> neverRadioPaths = m_database != nullptr
         ? m_database->flaggedPaths(Database::TrackFlag::NeverRadio)
         : QSet<QString>{};
@@ -3247,6 +3307,14 @@ QJsonObject AppCore::handleIpcCommand(const QString &command, const QJsonObject 
             return error(QStringLiteral("scrobble-backfill needs \"service\": \"listenbrainz\", \"lastfm\", \"status\", or \"cancel\""));
         }
         return QJsonObject{{QStringLiteral("backfill"), result}, {QStringLiteral("service"), service}};
+    }
+    if (command == QLatin1String("start-taste-radio")) {
+        const QString name = args.value(QStringLiteral("name")).toString();
+        if (!TasteProfiles::validName(name)) {
+            return error(QStringLiteral("start-taste-radio needs a local seed name."));
+        }
+        return QJsonObject{{QStringLiteral("radio"), startTasteRadio(name)
+            ? QStringLiteral("started") : QStringLiteral("unavailable-taste-seed")}};
     }
     if (command == QLatin1String("start-radio")) {
         const QString path = QFileInfo(args.value(QStringLiteral("path")).toString()).absoluteFilePath();

@@ -102,6 +102,8 @@ public:
     // seed built from the artist's genre/era aggregate and opens with a
     // representative track by that artist.
     bool startArtistRadio(const QString &artistName);
+    bool startTasteRadio(const QString &name);
+    QString activeTasteSeedName() const;
     // Start a seedless, radio-backed library mix. Returns false without state
     // change when the mode is unknown or filtering cannot produce playable
     // candidates.
@@ -256,6 +258,7 @@ private:
     Track resolveRadioPick(const QString &path, const QSet<QString> &blockedPaths) const;
     void installRadioProvider(bool markPicksAsRadio);
     void recordRadioPicks(const QVector<Track> &picks);
+    bool startPoolRadio(const QString &kind, const TasteProfile *taste = nullptr, const QString &name = {});
     void saveRadioSessionState();
     void clearRadioSessionState();
     void maybeRestoreRadioSession();

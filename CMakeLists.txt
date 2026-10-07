@@ -125,6 +125,8 @@ set(MUZAITEN_SOURCES
     src/reco/RadioSession.cpp
     src/reco/ReasonText.cpp
     src/reco/GenreCuration.cpp
+    src/reco/TasteProfile.cpp
+    src/reco/TasteProfileData.cpp
     src/reco/TrackScorer.cpp
     src/reco/WeightLearner.cpp
     src/reco/WeightLearnerData.cpp
@@ -191,6 +193,7 @@ set(MUZAITEN_SOURCES
     src/ui/FileExplorerKeybindings.cpp
     src/ui/IdleReleaseController.cpp
     src/ui/KeybindingsDialog.cpp
+    src/ui/TasteProfileDialog.cpp
     src/ui/GenreCurationDialog.cpp
     src/ui/LinkRootsDialog.cpp
     src/ui/ListeningHistoryPanel.cpp
@@ -299,6 +302,7 @@ set(MUZAITEN_HEADERS
     src/reco/ArtistRadio.h
     src/reco/GenreCuration.h
     src/reco/RadioMix.h
+    src/reco/TasteProfile.h
     src/reco/TrackScorer.h
     src/reco/WeightLearner.h
     src/reco/WeightLearnerData.h
@@ -360,6 +364,7 @@ set(MUZAITEN_HEADERS
     src/ui/FileExplorerKeybindings.h
     src/ui/IdleReleaseController.h
     src/ui/KeybindingsDialog.h
+    src/ui/TasteProfileDialog.h
     src/ui/GenreCurationDialog.h
     src/ui/LinkRootsDialog.h
     src/ui/ListeningHistoryPanel.h
@@ -469,6 +474,8 @@ set(MUZAITEN_RECO_SOURCES
     src/reco/RadioProfileExchange.cpp
     src/reco/RadioSession.cpp
     src/reco/ReasonText.cpp
+    src/reco/TasteProfile.cpp
+    src/reco/TasteProfileData.cpp
     src/reco/TrackScorer.cpp
     src/reco/WeightLearner.cpp
     src/reco/WeightLearnerData.cpp
@@ -608,6 +615,7 @@ set(MUZAITEN_UI_SCROBBLE_SOURCES
 
 set(MUZAITEN_UI_DIALOG_SOURCES
     src/ui/AudioAnalysisDialogs.cpp
+    src/ui/TasteProfileDialog.cpp
     src/ui/GenreCurationDialog.cpp
     src/ui/KeybindingsDialog.cpp
     src/ui/LinkRootsDialog.cpp
@@ -762,7 +770,7 @@ target_link_libraries(muzaiten_features PUBLIC muzaiten_core Qt6::Core Qt6::Sql)
 
 add_library(muzaiten_reco STATIC ${MUZAITEN_RECO_SOURCES})
 muzaiten_configure_library(muzaiten_reco)
-target_link_libraries(muzaiten_reco PUBLIC muzaiten_core Qt6::Core PRIVATE muzaiten_db Qt6::Sql)
+target_link_libraries(muzaiten_reco PUBLIC muzaiten_core Qt6::Core PRIVATE muzaiten_db muzaiten_features Qt6::Sql)
 
 add_library(muzaiten_scrobble STATIC ${MUZAITEN_SCROBBLE_SOURCES})
 muzaiten_configure_library(muzaiten_scrobble)
@@ -889,6 +897,7 @@ target_link_libraries(muzaiten_ui_dialogs PUBLIC
         muzaiten_features
         muzaiten_playback
         muzaiten_playlist
+        muzaiten_reco
 )
 
 add_library(muzaiten_ui_app STATIC ${MUZAITEN_UI_APP_SOURCES})

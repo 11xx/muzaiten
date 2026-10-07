@@ -19,6 +19,7 @@
 #include "reco/RadioProfile.h"
 #include "reco/RadioProfileExchange.h"
 #include "reco/TrackScorer.h"
+#include "reco/TasteProfile.h"
 #include "reco/WeightLearner.h"
 #include "reco/WeightLearnerData.h"
 #include "search/SearchIndex.h"
@@ -99,6 +100,11 @@ void printUsage()
         "                          export name, origin, weights and session decay to a local JSON file\n"
         "  radio-weights import <file> [--dry-run] [--replace]\n"
         "                          preview or import a local tuning profile without selecting it\n"
+        "  radio-taste export <file> --opt-in [--dry-run] [--decades] [--replace]\n"
+        "  radio-taste import <file> --name <seed> [--dry-run] [--replace]\n"
+        "  radio-taste list | remove <seed>\n"
+        "                          exchange aggregate taste files locally; no saved consent\n"
+        "  start-taste-radio <seed> start radio using an imported taste seed\n"
         "  radio-learn [--dry-run] [--min-samples N]\n"
         "                          suggest a learned radio-weight profile from local telemetry\n"
         "  genre-alias set <alias> <canonical> | remove <alias> | list\n"
@@ -1001,6 +1007,104 @@ int runRadioLearn(QStringList arguments, bool json)
     } else {
         printRadioLearnPlain(learned, activeWeights, activeJson, load, profileName, dryRun);
     }
+    return 0;
+}
+
+int runRadioTaste(QStringList arguments)
+{
+    if (arguments.isEmpty()) {
+        return fail(QStringLiteral("radio-taste needs export, import, list or remove."));
+    }
+    const QString verb = arguments.takeFirst();
+    QString error;
+    if (verb == QLatin1String("list") || verb == QLatin1String("remove")) {
+        if (verb == QLatin1String("remove")) {
+            if (arguments.size() != 1 || !TasteProfiles::remove(arguments.first(), &error)) {
+                return fail(error.isEmpty() ? QStringLiteral("radio-taste remove needs one seed name.") : error);
+            }
+            return 0;
+        }
+        if (!arguments.isEmpty()) {
+            return fail(QStringLiteral("radio-taste list takes no arguments."));
+        }
+        QMap<QString, TasteProfile> profiles;
+        if (!TasteProfiles::load(&profiles, &error)) {
+            return fail(error);
+        }
+        QTextStream out(stdout);
+        for (auto it = profiles.begin(); it != profiles.end(); ++it) {
+            out << it.key() << '\n';
+        }
+        return 0;
+    }
+    const bool exporting = verb == QLatin1String("export");
+    if (!exporting && verb != QLatin1String("import")) {
+        return fail(QStringLiteral("Unknown radio-taste verb."));
+    }
+    bool optIn = false;
+    bool dryRun = false;
+    bool replace = false;
+    bool decades = false;
+    QString name;
+    QStringList files;
+    for (int i = 0; i < arguments.size(); ++i) {
+        const QString word = arguments.at(i);
+        if (word == QLatin1String("--dry-run")) {
+            dryRun = true;
+        } else if (word == QLatin1String("--replace")) {
+            replace = true;
+        } else if (exporting && word == QLatin1String("--opt-in")) {
+            optIn = true;
+        } else if (exporting && word == QLatin1String("--decades")) {
+            decades = true;
+        } else if (!exporting && word == QLatin1String("--name") && i + 1 < arguments.size()) {
+            name = arguments.at(++i);
+            if (name.startsWith(QLatin1String("--"))) {
+                return fail(QStringLiteral("radio-taste import --name needs a seed name."));
+            }
+        } else if (word.startsWith(QLatin1String("--"))) {
+            return fail(QStringLiteral("Unknown radio-taste option: %1.").arg(word));
+        } else {
+            files.append(word);
+        }
+    }
+    if (files.size() != 1 || files.first().isEmpty() || (!exporting && !TasteProfiles::validName(name))) {
+        return fail(QStringLiteral("radio-taste needs one local file; import also needs --name <seed>."));
+    }
+    TasteProfile profile;
+    if (exporting) {
+        if (!optIn) {
+            return fail(QStringLiteral("Taste export requires explicit opt-in on every invocation: --opt-in."));
+        }
+        const QDir data(AppPaths::dataDir());
+        if (!TasteProfiles::fromLibrary(data.filePath(QStringLiteral("library.sqlite")),
+                                       data.filePath(QStringLiteral("features.sqlite")), optIn,
+                                       decades, &profile, &error)) {
+            return fail(error);
+        }
+    } else if (!TasteProfiles::read(files.first(), &profile, &error)) {
+        return fail(error);
+    }
+    QByteArray preview;
+    if (!TasteProfiles::encode(profile, &preview, &error)) {
+        return fail(error);
+    }
+    QTextStream out(stdout);
+    out.setEncoding(QStringConverter::Utf8);
+    out << QString::fromUtf8(preview);
+    out.flush();
+    QTextStream diagnostics(stderr);
+    diagnostics << TasteProfiles::contentsDescription() << '\n';
+    diagnostics.flush();
+    if (exporting) {
+        if (!dryRun && !TasteProfiles::write(files.first(), preview, replace, &error)) {
+            return fail(error);
+        }
+    } else if (!TasteProfiles::importProfile(name, profile, replace, dryRun, &error)) {
+        return fail(error);
+    }
+    diagnostics << (dryRun ? "Preview only; no file or seed saved.\n"
+                          : exporting ? "Taste file saved locally.\n" : "Taste seed imported; selection is unchanged.\n");
     return 0;
 }
 
@@ -2125,6 +2229,9 @@ int main(int argc, char **argv)
     if (command == QLatin1String("radio-genre")) {
         return runRadioGenre(arguments, json);
     }
+    if (command == QLatin1String("radio-taste")) {
+        return runRadioTaste(arguments);
+    }
     if (command == QLatin1String("radio-weights")) {
         return runRadioWeights(arguments, json);
     }
@@ -2205,6 +2312,11 @@ int main(int argc, char **argv)
         } else {
             args.insert(QStringLiteral("service"), service);
         }
+    } else if (command == QLatin1String("start-taste-radio")) {
+        if (arguments.size() != 1 || !TasteProfiles::validName(arguments.first())) {
+            return fail(QStringLiteral("start-taste-radio needs one local taste seed name."));
+        }
+        args.insert(QStringLiteral("name"), arguments.first());
     } else if (command == QLatin1String("start-radio")) {
         if (arguments.isEmpty()) {
             return fail(QStringLiteral("start-radio needs a library track path"));
@@ -2348,7 +2460,7 @@ int main(int argc, char **argv)
         return 0;
     }
     if (command == QLatin1String("start-radio") || command == QLatin1String("start-artist-radio")
-        || command == QLatin1String("stop-radio")) {
+        || command == QLatin1String("stop-radio") || command == QLatin1String("start-taste-radio")) {
         std::printf("radio: %s\n", qPrintable(response.value(QStringLiteral("radio")).toString()));
         return 0;
     }

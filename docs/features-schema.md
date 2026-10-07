@@ -360,6 +360,48 @@ but hashes identify recordings; the pack is not anonymous library data.
 Embedding exchange requires an enforceable exact model, checkpoint SHA-256,
 feature revision and dimension match, together with verified source terms.
 
+## Aggregate taste-profile format
+
+`muzaiten-taste-profile` version 1 is a local JSON aggregate, separate from
+feature packs and `features.sqlite`. Its required keys are `format`, `version`,
+`genres` and `features`; `decades` is optional. No other keys are accepted.
+
+```json
+{
+  "format": "muzaiten-taste-profile",
+  "version": 1,
+  "genres": {"jazz": 0.8, "rock": 0.2},
+  "features": {
+    "tempo_bpm": {"q25": 96, "q50": 104, "q75": 116},
+    "energy": {"q25": 0.3, "q50": 0.4, "q75": 0.6}
+  },
+  "decades": {"1980": 0.8, "2000": 0.2}
+}
+```
+
+Genre keys are folded canonical labels of at most 100 characters, containing
+letters, numbers, spaces, hyphens or ampersands. Each share is finite and in
+(0, 1]; nonempty share maps sum to 1 within 0.000001 and hold at most 256
+buckets. Decade keys are multiples of ten from 1000 to 2990. Feature keys are
+only `tempo_bpm` and `energy`, each optional, with exactly ordered numeric
+`q25`, `q50`, `q75`. Tempo values lie in (0, 1000] BPM and energy in [0, 1].
+At least one genre or feature distribution is required for a usable seed.
+Input is complete UTF-8 JSON of at most 64 KiB; duplicate keys are rejected.
+
+Export computes linear interpolated quartiles from existing fresh DSP values
+served by `FeatureStore`. It drops each genre/decade bucket supported by fewer
+than five distinct songs and each feature with fewer than five distinct
+samples, counting duplicate song identities and content groups once. It renormalizes
+retained shares without writing support counts or discarded labels. Import
+validates aggregate values but cannot attest source support without the private
+source records. Embeddings, content hashes, extractor identifiers, library
+identifiers, paths and per-record data are absent. Feature-pack import remains
+the exclusive analyzer write path; taste import never changes feature rows.
+
+See [radio.md](radio.md#aggregate-taste-seeds) for the bounded scoring term and
+[data-safety.md](data-safety.md#aggregate-taste-profile-files) for consent and
+local seed storage.
+
 ## Embedding Rows
 
 `muzaiten-features-clap` supplies CLAP embeddings and cosine neighbors through

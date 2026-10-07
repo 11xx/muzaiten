@@ -170,6 +170,7 @@ signals:
     void radioBatchSizeSettingsRequested();
     void radioRefillThresholdSettingsRequested();
     void radioCustomizationRequested();
+    void tasteProfilesRequested();
     void genreCurationRequested();
     void analysisStatusRequested();
     void semanticAnalysisEnabledChanged(bool enabled);

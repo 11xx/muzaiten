@@ -1,5 +1,7 @@
 #pragma once
 
+#include "reco/TasteProfile.h"
+
 #include <QByteArray>
 #include <QHash>
 #include <QList>
@@ -79,6 +81,8 @@ struct SeedContext {
     // radio pick, including picks later skipped by the listener.
     int sessionTrackNumber = 1;
     RadioSessionDecay sessionDecay;
+    const TasteProfile *tasteProfile = nullptr;
+    QString tasteProfileName;
 
     // A rolling DSP or CLAP context. The candidate's embedding is checked
     // against embeddingsByGroup when scoring.

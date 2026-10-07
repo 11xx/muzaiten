@@ -4,6 +4,7 @@
 #include "core/GenreTags.h"
 
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QRandomGenerator>
 
@@ -900,6 +901,8 @@ QVector<Track> RadioSession::nextTracks(int count, const QSet<QString> &excludeP
             context.exploration0To100 = m_exploration;
             context.sessionTrackNumber = m_generatedPickCount + 1;
             context.sessionDecay = m_sessionDecay;
+            context.tasteProfile = m_tasteProfileName.isEmpty() ? nullptr : &m_tasteProfile;
+            context.tasteProfileName = m_tasteProfileName;
 
             const QSet<QString> throttled = context.recentArtistsFolded;
             QSet<QString> excludedSongKeys;
@@ -994,6 +997,8 @@ QVector<Track> RadioSession::nextTracks(int count, const QSet<QString> &excludeP
                 ? movingContext(assignedAnchor)
                 : permanentMultiContext(assignedAnchor, batchArtists);
             context.recentArtistsFolded = throttled;
+            context.tasteProfile = m_tasteProfileName.isEmpty() ? nullptr : &m_tasteProfile;
+            context.tasteProfileName = m_tasteProfileName;
 
             QList<std::pair<TrackScorer::Scored, const TrackScorer::Candidate *>> scored;
             scored.reserve(m_pool.size());
@@ -1122,6 +1127,28 @@ bool RadioSession::retainPendingPaths(const QStringList &orderedPaths)
     m_pendingPaths = std::move(retained);
     ++m_mutationGeneration;
     return true;
+}
+
+void RadioSession::setTasteProfile(const QString &name, TasteProfile profile)
+{
+    m_tasteProfileName = name;
+    m_tasteProfile = std::move(profile);
+    ++m_mutationGeneration;
+}
+
+QString RadioSession::tasteProfileName() const
+{
+    return m_tasteProfileName;
+}
+
+QByteArray RadioSession::tasteProfileBytes() const
+{
+    QByteArray bytes;
+    QString error;
+    if (!m_tasteProfileName.isEmpty()) {
+        TasteProfiles::encode(m_tasteProfile, &bytes, &error);
+    }
+    return bytes;
 }
 
 void RadioSession::setExploration(int exploration0To100)
@@ -1340,11 +1367,25 @@ QJsonObject RadioSession::constraintState() const
     if (m_usesOwnedRng) {
         state.insert(QStringLiteral("rngState"), QString::number(m_ownedRngState, 16));
     }
+    if (!m_tasteProfileName.isEmpty()) {
+        state.insert(QStringLiteral("tasteSeed"), QJsonObject{
+            {QStringLiteral("name"), m_tasteProfileName},
+            {QStringLiteral("profile"), QJsonDocument::fromJson(tasteProfileBytes()).object()}});
+    }
     return state;
 }
 
 void RadioSession::restoreConstraintState(const QJsonObject &state)
 {
+    const QJsonObject taste = state.value(QStringLiteral("tasteSeed")).toObject();
+    const QString name = taste.value(QStringLiteral("name")).toString();
+    TasteProfile profile;
+    QString error;
+    if (TasteProfiles::validName(name)
+        && TasteProfiles::parse(QJsonDocument(taste.value(QStringLiteral("profile")).toObject()).toJson(),
+                                &profile, &error)) {
+        setTasteProfile(name, std::move(profile));
+    }
     if (state.contains(QStringLiteral("usedSongKeys"))) {
         m_usedSongKeys = stringSetFromJson(state.value(QStringLiteral("usedSongKeys")));
     }
