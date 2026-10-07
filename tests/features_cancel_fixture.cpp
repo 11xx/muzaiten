@@ -14,6 +14,8 @@ namespace {
 
 void featuresTestCheckpoint(const char *point, int completed)
 {
+    // Both checkpoints run on the sole live thread; a process stop signal
+    // cannot be handled by another thread while this one waits.
     const QByteArray checkpoint = QByteArray(point) + ':' + QByteArray::number(completed);
     if (qgetenv("MUZAITEN_TEST_CHECKPOINT") != checkpoint) {
         return;
