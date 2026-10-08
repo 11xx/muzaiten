@@ -278,6 +278,7 @@ set(MUZAITEN_HEADERS
     src/db/SettingsStore.h
     src/db/Schema.h
     src/features/FeatureStore.h
+    src/features/FeatureStoreLock.h
     src/features/QualityRank.h
     src/features/SongIdentity.h
     src/fs/LinkRoot.h
@@ -457,6 +458,7 @@ set(MUZAITEN_SQL_SOURCES src/db/SqlUtil.cpp)
 
 set(MUZAITEN_FEATURES_SOURCES
     src/features/FeatureStore.cpp
+    src/features/FeatureStoreLock.cpp
     src/features/ProviderClient.cpp
     src/features/QualityRank.cpp
     src/features/QueryEmbedding.cpp

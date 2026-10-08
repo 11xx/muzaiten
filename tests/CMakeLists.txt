@@ -151,6 +151,14 @@ target_compile_features(test_feature_store PRIVATE cxx_std_26)
 add_test(NAME test_feature_store COMMAND test_feature_store)
 set_tests_properties(test_feature_store PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_feature_store_lock
+    test_feature_store_lock.cpp
+)
+target_include_directories(test_feature_store_lock PRIVATE ../src)
+target_link_libraries(test_feature_store_lock PRIVATE muzaiten_features Qt6::Core Qt6::Test)
+target_compile_features(test_feature_store_lock PRIVATE cxx_std_26)
+add_test(NAME test_feature_store_lock COMMAND test_feature_store_lock)
+
 add_executable(test_curation_dialog_data
     test_curation_dialog_data.cpp
 )

@@ -1,6 +1,7 @@
 #include "indexer/FeaturesPack.h"
 
 #include "app/AppPaths.h"
+#include "features/FeatureStoreLock.h"
 #include "indexer/DspVersion.h"
 
 #include <QDir>
@@ -431,7 +432,7 @@ QJsonObject run(QStringList arguments)
     if (!store.isFile()) {
         fail(4, QStringLiteral("Feature store is absent; run refresh first."));
     }
-    const QString storePath = store.canonicalFilePath();
+    const QString storePath = FeatureStoreLock::identity(featuresPath);
     const QFileInfo pack(path);
     const QString packPath = QDir(pack.dir().canonicalPath()).filePath(pack.fileName());
     for (const QString &suffix : {QString(), QStringLiteral(".lock"), QStringLiteral("-wal"),
@@ -441,7 +442,8 @@ QJsonObject run(QStringList arguments)
             fail(2, QStringLiteral("Export destination must not be the feature store or its sidecars."));
         }
     }
-    QLockFile lock(featuresPath + QStringLiteral(".lock"));
+    // Taken on the canonical identity, so every spelling of the store shares one writer lock.
+    QLockFile lock(FeatureStoreLock::lockPath(featuresPath));
     if (!lock.tryLock(0)) {
         fail(5, QStringLiteral("Feature store is busy."));
     }

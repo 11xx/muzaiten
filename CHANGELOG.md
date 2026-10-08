@@ -197,6 +197,14 @@
 
 ### Fixed
 
+- Feature-store writers (`refresh`, `neighbors`, `pack export` and `pack import`)
+  share one writer lock per store, keyed by the store's canonical path. A
+  symlink to the store file used to take its own lock, so an export or import
+  through that symlink could write while a refresh held the store. Refresh and
+  neighbors also create a missing store directory before taking the lock, so a
+  store in an absent directory is created instead of failing as busy. Hard
+  links still do not share a lock.
+
 - Canceling semantic provider setup or model-download preflight, reaching its
   timeout, or closing the window terminates the helper's provider process group
   on Unix systems. Cleanup remains asynchronous and preserves status output.
