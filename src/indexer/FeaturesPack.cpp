@@ -2,6 +2,7 @@
 
 #include "app/AppPaths.h"
 #include "features/FeatureStoreLock.h"
+#include "fs/FilePublish.h"
 #include "indexer/DspVersion.h"
 
 #include <QDir>
@@ -10,7 +11,6 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLockFile>
-#include <QSaveFile>
 #include <QSet>
 #include <QSqlDatabase>
 #include <QSqlError>
@@ -332,9 +332,11 @@ void writePack(const QString &path, const QList<QJsonObject> &records, bool repl
         bytes += line;
     }
     if (!dryRun) {
-        QSaveFile file(path);
-        file.setDirectWriteFallback(false);
-        if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
+        const FilePublish::Outcome outcome = FilePublish::publish(path, bytes, replace);
+        if (outcome == FilePublish::Outcome::Exists) {
+            fail(2, QStringLiteral("Export needs a regular file destination and --replace to overwrite it."));
+        }
+        if (outcome == FilePublish::Outcome::Failed) {
             fail(4, QStringLiteral("Could not atomically write feature pack."));
         }
     }

@@ -197,8 +197,9 @@ bool lacksHardLinks(int code)
     }
 }
 
-// Creating the destination exclusively still never replaces a file; a failed
-// write removes the partial file this call created.
+// Creating the destination exclusively never replaces an existing entry. A
+// failure after creation leaves the entry in place: by then another process may
+// own the name, and unlinking it could remove that process's file.
 bool createExclusive(const QString &path, const QByteArray &bytes, QString *error)
 {
     QFile file(path);
@@ -209,9 +210,7 @@ bool createExclusive(const QString &path, const QByteArray &bytes, QString *erro
             : reject(error, QStringLiteral("Could not write taste profile: %1.").arg(file.errorString()));
     }
     if (file.write(bytes) != bytes.size() || !file.flush() || ::fsync(file.handle()) != 0) {
-        const QString reason = file.errorString();
-        file.remove();
-        return reject(error, QStringLiteral("Could not write taste profile: %1.").arg(reason));
+        return reject(error, QStringLiteral("Could not write taste profile: %1.").arg(file.errorString()));
     }
     return true;
 }

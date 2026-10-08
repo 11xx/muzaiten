@@ -113,6 +113,19 @@ named profile. Profile and export writes are atomic; a failed
 import write also keeps the in-memory profile list intact. Exchange provides
 no accounts, uploads or network transport.
 
+Without `--replace`, an export publishes its file only if nothing occupies the
+name at that moment. The complete file is hard-linked into place, so a file or
+symlink that appears during the export is refused with the same error as an
+existing file, and its bytes are left unchanged. The dialog asks before
+replacing an existing file, and the CLI requires `--replace`; replacement is
+atomic and keeps the existing file's permissions. Filesystems without hard
+links, such as FAT and exFAT drives and many network mounts, create the file
+exclusively instead. The file is visible while it is being written. If a write
+or sync fails, the export reports failure. The file it created can remain,
+possibly incomplete or unsynced. The export never removes whatever occupies the
+name at that point, so a file another process placed there survives. A later
+export without `--replace` refuses that file.
+
 ### Local scalar feature-pack files
 
 `muzaiten-features pack export|import FILE` exchanges local
@@ -149,9 +162,13 @@ version never enter scoring and the next refresh recomputes them, so import
 replaces them without it. Imported rows obey normal DSP-version freshness and never activate
 embeddings or modify listening state.
 
-Export uses atomic writes, requires `--replace` for an existing file and
-refuses symlink destinations or the feature database and its sidecars.
-Failed export writes retain an existing destination. Local rows that fail the
+Export publishes a new file with the same no-overwrite guarantee as radio
+profile exports: a destination that appears during export is refused with
+exit 2 and left unchanged. Without `--replace`, an existing file is refused;
+with it, the file is replaced atomically. Symlink destinations and the feature
+database and its sidecars are refused. Filesystems without hard links use
+exclusive creation, as described above. Failed export writes retain an
+existing destination. Local rows that fail the
 same validation are skipped and counted as invalid, never written to a pack. See
 [features-schema.md](features-schema.md#local-feature-pack-format) for
 exact payload keys and report counts.
@@ -193,9 +210,12 @@ automatically generated or exported. Every CLI export/preview requires
 action and writes only after **Export these contents…**; that exact preview is
 the written file. A new export file is published atomically by hard-linking a
 completed sibling file. On filesystems without hard links, such as FAT and
-exFAT drives and many network mounts, it is created exclusively instead and
-removed if writing fails. Neither path overwrites a file that appears after
-the preview. Nothing is uploaded or transmitted by the exchange UI.
+exFAT drives and many network mounts, it is created exclusively instead. If
+writing fails, the export reports failure and may leave its incomplete or
+unsynced file behind. It never removes whatever occupies the name at that point.
+A later export without `--replace` refuses that file. Neither path overwrites a
+file that appears after the preview. Nothing is uploaded or transmitted by the
+exchange UI.
 
 Import validates and previews before writes. Unknown keys or versions,
 duplicate keys, invalid UTF-8, incomplete JSON, nonfinite/out-of-range values,
