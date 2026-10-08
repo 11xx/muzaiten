@@ -50,8 +50,10 @@ QString identity(const QString &storePath)
             return {};
         }
         // An absolute target restarts from the root. A relative one continues from
-        // the link's directory, which is already resolved.
-        const QString target = info.symLinkTarget();
+        // the link's directory, which is already resolved. The raw target keeps `..`
+        // unresolved: symLinkTarget() would collapse it lexically before a symlink
+        // earlier in the target is expanded.
+        const QString target = info.readSymLink();
         if (target.startsWith(u'/')) {
             resolved = QStringLiteral("/");
         }

@@ -45,6 +45,7 @@ private slots:
     void prepareDirectoryCreatesAbsentParentsThroughAliases();
     void danglingParentDirectoryCreatesStoreThroughItsTarget();
     void chainedAndRelativeDanglingDirectoriesResolve();
+    void dotDotInSymlinkTargetFollowsKernelAfterAliasExpansion();
     void unresolvableSymlinkCycleYieldsNoCoordinate();
     void liveOwnerExcludesEverySpellingOfTheStore();
 };
@@ -182,6 +183,37 @@ void FeatureStoreLockTest::chainedAndRelativeDanglingDirectoriesResolve()
     QCOMPARE(FeatureStoreLock::identity(base + QStringLiteral("/second-alias/../other/features.sqlite")),
              base + QStringLiteral("/real/other/features.sqlite"));
     QVERIFY(!QFileInfo::exists(base + QStringLiteral("/real/fresh")));
+}
+
+void FeatureStoreLockTest::dotDotInSymlinkTargetFollowsKernelAfterAliasExpansion()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString base = canonicalRoot(dir);
+    QVERIFY(QDir().mkpath(base + QStringLiteral("/real/deep/x/y")));
+    QVERIFY(QDir().mkpath(base + QStringLiteral("/real/plain/y")));
+    QVERIFY(touch(base + QStringLiteral("/real/deep/x/features.sqlite")));
+    QVERIFY(makeSymlink(QStringLiteral("deep/x/y"), base + QStringLiteral("/real/alias")));
+    // The kernel expands `alias` before it applies `..`, so the target is real/deep/x/features.sqlite.
+    QVERIFY(makeSymlink(QStringLiteral("alias/../features.sqlite"),
+                        base + QStringLiteral("/real/through-alias.sqlite")));
+    // Controls: `..` that follows only real directories, in a relative and an absolute target.
+    QVERIFY(makeSymlink(QStringLiteral("plain/y/../../deep/x/features.sqlite"),
+                        base + QStringLiteral("/real/relative-control.sqlite")));
+    QVERIFY(makeSymlink(base + QStringLiteral("/real/plain/y/../../deep/x/features.sqlite"),
+                        base + QStringLiteral("/absolute-control.sqlite")));
+
+    const QString expected = base + QStringLiteral("/real/deep/x/features.sqlite");
+    const QStringList spellings{base + QStringLiteral("/real/through-alias.sqlite"),
+                                base + QStringLiteral("/real/relative-control.sqlite"),
+                                base + QStringLiteral("/absolute-control.sqlite")};
+    for (const QString &spelling : spellings) {
+        const QString kernel = QFileInfo(spelling).canonicalFilePath();
+        QCOMPARE(kernel, expected);
+        QCOMPARE(FeatureStoreLock::identity(spelling), kernel);
+    }
+    QCOMPARE(FeatureStoreLock::lockPath(base + QStringLiteral("/real/through-alias.sqlite")),
+             expected + QStringLiteral(".lock"));
 }
 
 void FeatureStoreLockTest::unresolvableSymlinkCycleYieldsNoCoordinate()
