@@ -2013,11 +2013,14 @@ void GStreamerPlaybackBackend::handleTargetTransitionTimeout()
     }
     // A restore still owed its seek cannot be dropped here: its preroll may
     // complete later, and the stream would then play from zero without a report.
-    if (m_nativePositionRestore || m_pendingSeekMs >= 0) {
+    if (m_nativePositionRestore || m_pendingSeekMs > 0) {
         failPositionRestore(QStringLiteral("Could not restore playback position"));
         return;
     }
 
+    // A zero-position preroll holds no position to restore. Abandon it, so the
+    // late preroll cannot request playback behind the observed state.
+    m_pendingSeekMs = -1;
     GstState current = GST_STATE_NULL;
     GstState pending = GST_STATE_VOID_PENDING;
     gst_element_get_state(m_playbin, &current, &pending, 0);
@@ -2069,8 +2072,9 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
             break;
         }
         // An unrecovered error must not leave a restore armed: its mute would
-        // outlive the failed preroll.
-        if (m_nativePositionRestore || m_pendingSeekMs >= 0) {
+        // outlive the failed preroll. A zero-position preroll is no restore, so
+        // its error is reported as an ordinary pipeline error.
+        if (m_nativePositionRestore || m_pendingSeekMs > 0) {
             failPositionRestore(text);
             break;
         }
