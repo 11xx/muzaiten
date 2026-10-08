@@ -16,6 +16,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import wave
 
@@ -38,6 +39,24 @@ SCALAR_KEYS = ["tempo_bpm", "loudness_lufs", "loudness_std_db", "spectral_centro
                "spectral_centroid_std_hz", "spectral_flatness_mean", "zero_crossing_rate",
                "onset_rate_hz", "energy"]
 SCALARS = ", ".join(SCALAR_KEYS)
+# Protocol stub: answers the capabilities handshake, then holds `neighbors` (and so the writer lock)
+# until the gate file is removed.
+PROVIDER_STUB = r"""#!/bin/sh
+request=$(cat)
+id=$(printf '%s' "$request" | sed -n 's/.*"request_id":"\([^"]*\)".*/\1/p')
+op=$(printf '%s' "$request" | sed -n 's/.*"operation":"\([^"]*\)".*/\1/p')
+case "$op" in
+capabilities)
+    printf '{"protocol_version":1,"request_id":"%s","event":"result","result":{"capability":"clap","protocol_versions":[1]}}\n' "$id" ;;
+neighbors)
+    : > "$PROBE_READY"
+    while [ -e "$PROBE_GATE" ]; do sleep 0.05; done
+    printf '{"protocol_version":1,"request_id":"%s","event":"result","result":{"state":"released"}}\n' "$id" ;;
+*)
+    printf '{"protocol_version":1,"request_id":"%s","event":"error","code":"unsupported","message":"stub"}\n' "$id"
+    exit 2 ;;
+esac
+"""
 
 
 def missing_tools():
@@ -618,13 +637,49 @@ class FeaturesPackTest(unittest.TestCase):
             db.execute("UPDATE meta SET value='6' WHERE key='schema_version'")
         self.assert_rejected(self.export)
         self.store.write_bytes(self.baseline)
-        lock = Path(str(self.store) + ".lock")
+        lock = Path(os.path.realpath(self.store) + ".lock")
         process_name = Path("/proc/self/exe").resolve().name
         lock.write_text(f"{os.getpid()}\n{process_name}\n{socket.gethostname()}\n")
         try:
             self.assert_rejected(self.export, expected=5)
         finally:
             lock.unlink()
+
+    def test_live_writer_excludes_file_alias_spellings(self):
+        alias = self.work / "alias" / "features.sqlite"
+        alias.parent.mkdir(exist_ok=True)
+        alias.symlink_to(self.store)
+        stub = self.work / "provider-stub.sh"
+        stub.write_text(PROVIDER_STUB)
+        stub.chmod(0o755)
+        ready, gate = self.work / "owner.ready", self.work / "owner.gate"
+        ready.unlink(missing_ok=True)
+        gate.write_text("hold\n")
+        runtime = self.b / "runtime"
+        runtime.mkdir(mode=0o700, exist_ok=True)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("MUZAITEN_")}
+        env.update(MUZAITEN_STATE_ROOT=str(self.b), QT_QPA_PLATFORM="offscreen",
+                   XDG_RUNTIME_DIR=str(runtime), PROBE_READY=str(ready), PROBE_GATE=str(gate))
+        owner = subprocess.Popen([str(BINARY), "neighbors", "--force", "--features", str(self.store),
+                                  "--state", str(self.b / "state.sqlite"), "--provider", str(stub), "--json"],
+                                 env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            deadline = time.monotonic() + 30
+            while not ready.exists():
+                if owner.poll() is not None or time.monotonic() > deadline:
+                    raise AssertionError("the live owner did not take the writer lock")
+                time.sleep(0.02)
+            before = digest(self.store)
+            pack(self.b, "export", self.work / "canonical-contended.ndjson", expected=5)
+            pack(self.b, "export", self.work / "alias-contended.ndjson", "--features", alias, expected=5)
+            pack(self.b, "import", self.export, "--features", alias, expected=5)
+            self.assertEqual(digest(self.store), before)
+            self.assertFalse((self.work / "alias-contended.ndjson").exists())
+        finally:
+            gate.unlink(missing_ok=True)
+            _, errors = owner.communicate(timeout=30)
+        self.assertEqual(owner.returncode, 0, errors)
+        pack(self.b, "export", self.work / "alias-released.ndjson", "--features", alias)
 
     def test_representative_hash_is_the_only_adoption_key(self):
         with database(self.store) as db:
