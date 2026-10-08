@@ -1,3 +1,5 @@
+#include "ExportPublicationFixture.h"
+#include "fs/FilePublish.h"
 #include "reco/RadioProfile.h"
 #include "reco/RadioProfileExchange.h"
 
@@ -12,6 +14,8 @@
 #include <QtTest>
 
 #include <limits>
+
+using namespace ExportPublicationFixture;
 
 class RadioProfileTest final : public QObject {
     Q_OBJECT
@@ -34,6 +38,12 @@ private slots:
     void importPreviewAndReplace();
     void failedImportKeepsMemoryAndStorage();
     void atomicExportAndConsent();
+    void exportPublishesCompleteFile();
+    void exportRefusesExistingSymlink();
+    void exportRefusesDestinationAppearingBeforePublication();
+    void exportRefusesSymlinkAppearingBeforePublication();
+    void exportRefusesDestinationWithoutHardLinks();
+    void exportReplaceIsExplicitAfterDestinationAppeared();
 
 private:
     QTemporaryDir m_temp;
@@ -419,6 +429,98 @@ void RadioProfileTest::atomicExportAndConsent()
     RadioProfile read;
     QVERIFY(RadioProfileExchange::read(path, &read, &error));
     QCOMPARE(read.origin, RadioProfile::Origin::Learned);
+}
+
+void RadioProfileTest::exportPublishesCompleteFile()
+{
+    const QString directory = m_temp.filePath(QStringLiteral("publish"));
+    QDir().mkpath(directory);
+    const QString path = QDir(directory).filePath(QStringLiteral("export.json"));
+    const RadioProfile profile = RadioProfileStore::defaultProfile();
+    QString error;
+    QByteArray expected;
+    QVERIFY(RadioProfileExchange::encode(profile, false, &expected, &error));
+    QVERIFY(RadioProfileExchange::write(path, profile, false, false, &error));
+    QCOMPARE(contents(path), expected);
+    QCOMPARE(permissionBits(path), referencePermissionBits(m_temp.filePath(QStringLiteral("reference"))));
+    QCOMPARE(entries(directory), QStringList{QStringLiteral("export.json")});
+}
+
+void RadioProfileTest::exportRefusesExistingSymlink()
+{
+    const QString directory = m_temp.filePath(QStringLiteral("symlink"));
+    QDir().mkpath(directory);
+    const QString path = QDir(directory).filePath(QStringLiteral("export.json"));
+    const QString target = QDir(directory).filePath(QStringLiteral("target.json"));
+    writeFile(target, foreignContent);
+    makeSymlink(target, path);
+    QString error;
+    QVERIFY(!RadioProfileExchange::write(path, RadioProfileStore::defaultProfile(), false, false, &error));
+    QCOMPARE(error, QStringLiteral("Export file already exists. Explicit replace is required."));
+    QVERIFY(QFileInfo(path).isSymLink());
+    QCOMPARE(contents(target), foreignContent);
+}
+
+void RadioProfileTest::exportRefusesDestinationAppearingBeforePublication()
+{
+    const QString directory = m_temp.filePath(QStringLiteral("late-file"));
+    QDir().mkpath(directory);
+    const QString path = QDir(directory).filePath(QStringLiteral("export.json"));
+    SeamReset reset;
+    FilePublish::setBeforePublishHookForTesting([path] { writeFile(path, foreignContent); });
+    QString error;
+    QVERIFY(!RadioProfileExchange::write(path, RadioProfileStore::defaultProfile(), false, false, &error));
+    QCOMPARE(error, QStringLiteral("Export file already exists. Explicit replace is required."));
+    QCOMPARE(contents(path), foreignContent);
+    QCOMPARE(entries(directory), QStringList{QStringLiteral("export.json")});
+}
+
+void RadioProfileTest::exportRefusesSymlinkAppearingBeforePublication()
+{
+    const QString directory = m_temp.filePath(QStringLiteral("late-symlink"));
+    QDir().mkpath(directory);
+    const QString path = QDir(directory).filePath(QStringLiteral("export.json"));
+    const QString target = QDir(directory).filePath(QStringLiteral("target.json"));
+    writeFile(target, foreignContent);
+    SeamReset reset;
+    FilePublish::setBeforePublishHookForTesting([path, target] { makeSymlink(target, path); });
+    QString error;
+    QVERIFY(!RadioProfileExchange::write(path, RadioProfileStore::defaultProfile(), false, false, &error));
+    QCOMPARE(error, QStringLiteral("Export file already exists. Explicit replace is required."));
+    QVERIFY(QFileInfo(path).isSymLink());
+    QCOMPARE(contents(target), foreignContent);
+    QCOMPARE(entries(directory), (QStringList{QStringLiteral("export.json"), QStringLiteral("target.json")}));
+}
+
+void RadioProfileTest::exportRefusesDestinationWithoutHardLinks()
+{
+    const QString directory = m_temp.filePath(QStringLiteral("late-fallback"));
+    QDir().mkpath(directory);
+    const QString path = QDir(directory).filePath(QStringLiteral("export.json"));
+    SeamReset reset;
+    FilePublish::setLinkFunctionForTesting(linkWithoutHardLinks);
+    FilePublish::setBeforePublishHookForTesting([path] { writeFile(path, foreignContent); });
+    QString error;
+    QVERIFY(!RadioProfileExchange::write(path, RadioProfileStore::defaultProfile(), false, false, &error));
+    QCOMPARE(error, QStringLiteral("Export file already exists. Explicit replace is required."));
+    QCOMPARE(contents(path), foreignContent);
+    QCOMPARE(entries(directory), QStringList{QStringLiteral("export.json")});
+}
+
+void RadioProfileTest::exportReplaceIsExplicitAfterDestinationAppeared()
+{
+    const QString directory = m_temp.filePath(QStringLiteral("late-replace"));
+    QDir().mkpath(directory);
+    const QString path = QDir(directory).filePath(QStringLiteral("export.json"));
+    const RadioProfile profile = RadioProfileStore::defaultProfile();
+    QString error;
+    QByteArray expected;
+    QVERIFY(RadioProfileExchange::encode(profile, false, &expected, &error));
+    SeamReset reset;
+    FilePublish::setBeforePublishHookForTesting([path] { writeFile(path, foreignContent); });
+    QVERIFY(RadioProfileExchange::write(path, profile, false, true, &error));
+    QCOMPARE(contents(path), expected);
+    QCOMPARE(entries(directory), QStringList{QStringLiteral("export.json")});
 }
 
 QTEST_MAIN(RadioProfileTest)

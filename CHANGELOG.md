@@ -197,6 +197,14 @@
 
 ### Fixed
 
+- Radio profile and feature-pack exports without `--replace` refuse a file that
+  appears between the existence check and publication, instead of overwriting
+  it. The export fails with its existing "already exists" error (pack exit 2,
+  radio profile exit 1) and leaves the file byte-identical. Exports publish a
+  completed file by hard link; filesystems without hard links create it
+  exclusively, which keeps the refusal but makes a partially written file
+  briefly visible.
+
 - Canceling semantic provider setup or model-download preflight, reaching its
   timeout, or closing the window terminates the helper's provider process group
   on Unix systems. Cleanup remains asynchronous and preserves status output.
