@@ -166,6 +166,11 @@ or when the pipeline fails during the restore. The output stays silent, and
 Play starts the current track from its beginning. An output that returns
 afterward does not start it.
 
+A resume from the beginning holds no position to restore. If the pipeline fails
+while that start prerolls, the error is reported as a pipeline error. The
+abandoned start cannot begin playback when its preroll completes afterward, and
+playback stays stopped until Play or Resume is pressed.
+
 While a chosen output is missing, playback pauses at its position and resumes
 there when the output returns, if it was playing; pausing, seeking or picking
 another track meanwhile is respected. With **Play through the system output

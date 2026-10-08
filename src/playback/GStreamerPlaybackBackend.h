@@ -277,6 +277,10 @@ private:
     qint64 m_resumePositionMs = 0;
     // Pending seek to apply once the pipeline prerolls after a soft-pause resume.
     qint64 m_pendingSeekMs = -1;
+    // An unrecovered error abandoned a zero-position preroll. Its late bus
+    // messages must neither start playback nor publish state over the Error
+    // until a transport request begins a new target.
+    bool m_zeroPrerollAbandoned = false;
     // Native reconnects activate the buffer pool in PLAYING before seeking.
     // Keep that activation silent until the held position has prerolled.
     bool m_nativePositionRestore = false;

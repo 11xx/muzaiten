@@ -738,8 +738,10 @@ private slots:
         backend.stop();
     }
 
-    // A pipeline error during a zero-position preroll is an ordinary pipeline error.
-    // No held position exists, so the stream is not soft-paused for a resume.
+    // A pipeline error during a zero-position preroll is an ordinary pipeline error,
+    // and no held position exists, so the stream is not soft-paused for a resume. The
+    // preroll's completion arriving after that error neither requests PLAYING nor
+    // replaces the Error; only an explicit Play or Resume starts the track again.
     void zeroPositionPrerollErrorIsReportedAsItsPipelineError()
     {
         QTemporaryDir dir;
@@ -758,6 +760,11 @@ private slots:
         backend.resume();
         QCOMPARE(backend.m_pendingSeekMs, qint64{0});
 
+        // The real preroll completes, so its ASYNC_DONE waits on the playbin bus.
+        GstState current = GST_STATE_NULL;
+        gst_element_get_state(backend.m_playbin, &current, nullptr, 3 * GST_SECOND);
+        QCOMPARE(current, GST_STATE_PAUSED);
+
         // Declines the in-place recovery, so the error reaches the report.
         backend.m_lastRecoveryUri = backend.m_playingUri;
         backend.m_lastRecoveryPositionMs = backend.m_positionMs;
@@ -772,6 +779,33 @@ private slots:
         QCOMPARE(backend.state(), PlaybackBackend::State::Error);
         QVERIFY(!backend.m_softPaused);
         QVERIFY(!backend.m_nativePositionRestore);
+
+        // Draining the bus delivers the playbin ASYNC_DONE after the error. Nothing
+        // may then move the pipeline to PLAYING.
+        GstMessage *done = gst_message_new_async_done(GST_OBJECT(backend.m_playbin), GST_CLOCK_TIME_NONE);
+        gst_element_post_message(backend.m_playbin, done);
+        backend.pollBus();
+        GstState pending = GST_STATE_VOID_PENDING;
+        gst_element_get_state(backend.m_playbin, &current, &pending, 3 * GST_SECOND);
+        QVERIFY2(current != GST_STATE_PLAYING && pending != GST_STATE_PLAYING,
+                 "the abandoned zero-position preroll requested PLAYING after its error");
+
+        // A later PLAYING transition report must not replace the terminal Error.
+        GstMessage *started = gst_message_new_state_changed(GST_OBJECT(backend.m_playbin),
+                                                            GST_STATE_PAUSED,
+                                                            GST_STATE_PLAYING,
+                                                            GST_STATE_VOID_PENDING);
+        gst_element_post_message(backend.m_playbin, started);
+        backend.pollBus();
+        QCOMPARE(errors.count(), 1);
+        QCOMPARE(backend.state(), PlaybackBackend::State::Error);
+        QCOMPARE(backend.m_targetState, PlaybackBackend::State::Error);
+        QCOMPARE(backend.m_pendingSeekMs, qint64{-1});
+
+        // An explicit Play starts the track from its beginning, without another error.
+        backend.play(QUrl::fromLocalFile(tone));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
+        QCOMPARE(errors.count(), 1);
         backend.stop();
     }
 

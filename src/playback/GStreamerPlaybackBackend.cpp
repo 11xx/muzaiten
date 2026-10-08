@@ -768,6 +768,7 @@ void GStreamerPlaybackBackend::stop()
     m_waitingForDirect = false;
     m_resumeOnOutput = false;
     m_pendingSeekMs = -1;
+    m_zeroPrerollAbandoned = false;
     m_lastRecoveryUri.clear();
     m_lastRecoveryPositionMs = -1;
     clearSeekInFlight();
@@ -1990,6 +1991,7 @@ void GStreamerPlaybackBackend::pollPosition()
 
 void GStreamerPlaybackBackend::beginTargetTransition(State targetState)
 {
+    m_zeroPrerollAbandoned = false;
     m_targetState = targetState;
     m_waitingForTargetState = targetState == State::Playing || targetState == State::Paused;
     if (m_waitingForTargetState) {
@@ -2031,6 +2033,10 @@ void GStreamerPlaybackBackend::handleTargetTransitionTimeout()
 
 void GStreamerPlaybackBackend::publishObservedState(State observedState)
 {
+    // An abandoned zero-position preroll reports nothing; its Error stands.
+    if (m_zeroPrerollAbandoned) {
+        return;
+    }
     if (m_waitingForTargetState) {
         if (observedState != m_targetState) {
             return;
@@ -2073,10 +2079,14 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
         }
         // An unrecovered error must not leave a restore armed: its mute would
         // outlive the failed preroll. A zero-position preroll is no restore, so
-        // its error is reported as an ordinary pipeline error.
+        // its error is ordinary, but the preroll it armed is abandoned here.
         if (m_nativePositionRestore || m_pendingSeekMs > 0) {
             failPositionRestore(text);
             break;
+        }
+        if (m_pendingSeekMs == 0) {
+            m_pendingSeekMs = -1;
+            m_zeroPrerollAbandoned = true;
         }
         m_targetState = State::Error;
         finishTargetTransition();
