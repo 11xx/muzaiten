@@ -107,6 +107,7 @@ set(MUZAITEN_SOURCES
     src/features/QualityRank.cpp
     src/features/QueryVectorCache.cpp
     src/features/SongIdentity.cpp
+    src/fs/FilePublish.cpp
     src/fs/MediaProbe.cpp
     src/fs/PathResolver.cpp
     src/mpd/MpdConfig.cpp
@@ -281,6 +282,7 @@ set(MUZAITEN_HEADERS
     src/features/FeatureStoreLock.h
     src/features/QualityRank.h
     src/features/SongIdentity.h
+    src/fs/FilePublish.h
     src/fs/LinkRoot.h
     src/mpd/MpdConfig.h
     src/mpd/MpdClient.h
@@ -421,6 +423,7 @@ set(MUZAITEN_CORE_SOURCES
     src/core/MusicSort.cpp
     src/core/Rating.cpp
     src/core/TrackDisplay.cpp
+    src/fs/FilePublish.cpp
     src/fs/MediaProbe.cpp
     src/fs/PathResolver.cpp
 )
