@@ -332,6 +332,150 @@ private slots:
         QVERIFY(!muted);
     }
 
+    // The first restore seek is accepted and a newer retarget queues behind it.
+    // When the source refuses the retarget, the restore still owes the newest
+    // position, and the failure keeps that position as the resume point.
+    void nativeRestoreRefusedQueuedSeekPublishesOneError()
+    {
+        QTemporaryDir dir;
+        const QString tone = dir.filePath(QStringLiteral("queued.wav"));
+        QVERIFY(writeToneWav(tone, 440.0, 30'000));
+        const QString playing = QStringLiteral("state:%1")
+                                    .arg(static_cast<int>(PlaybackBackend::State::Playing));
+        const QString error = QStringLiteral("error");
+        QStringList log;
+        GStreamerPlaybackBackend backend;
+        PlaybackProfile profile;
+        profile.releaseSinkOnPause = true;
+        backend.setProfile(profile);
+        backend.play(QUrl::fromLocalFile(tone));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.position() >= 1500, 3000);
+        backend.pause();
+        backend.m_sinkFactory = QStringLiteral("pipewiresink");
+        connect(&backend, &PlaybackBackend::stateChanged, this, [&log](PlaybackBackend::State state) {
+            log << QStringLiteral("state:%1").arg(static_cast<int>(state));
+        });
+        connect(&backend, &PlaybackBackend::errorOccurred, this, [&log](const QString &) {
+            log << QStringLiteral("error");
+        });
+        QSignalSpy errors(&backend, &PlaybackBackend::errorOccurred);
+        backend.resume();
+        QVERIFY(backend.m_nativePositionRestore);
+
+        // The preroll completes, PLAYING starts the restore, and the seek it
+        // issues is accepted by the playing pipeline.
+        GstState current = GST_STATE_NULL;
+        gst_element_get_state(backend.m_playbin, &current, nullptr, 3 * GST_SECOND);
+        QCOMPARE(current, GST_STATE_PAUSED);
+        GstMessage *prerolled = gst_message_new_async_done(GST_OBJECT(backend.m_playbin),
+                                                           GST_CLOCK_TIME_NONE);
+        backend.handleMessage(prerolled);
+        gst_message_unref(prerolled);
+        gst_element_get_state(backend.m_playbin, &current, nullptr, 3 * GST_SECOND);
+        QCOMPARE(current, GST_STATE_PLAYING);
+        GstMessage *started = gst_message_new_state_changed(GST_OBJECT(backend.m_playbin),
+                                                            GST_STATE_PAUSED,
+                                                            GST_STATE_PLAYING,
+                                                            GST_STATE_VOID_PENDING);
+        backend.handleMessage(started);
+        gst_message_unref(started);
+        QVERIFY(backend.m_seekInFlight);
+        QVERIFY(backend.m_nativePositionRestore);
+
+        const qint64 latest = 6000;
+        backend.seek(latest);
+        QCOMPARE(backend.m_queuedSeekMs, latest);
+        // NULL refuses the queued seek; its completion is delivered directly.
+        gst_element_set_state(backend.m_playbin, GST_STATE_NULL);
+        GstMessage *completed = gst_message_new_async_done(GST_OBJECT(backend.m_playbin),
+                                                           GST_CLOCK_TIME_NONE);
+        backend.handleMessage(completed);
+        gst_message_unref(completed);
+
+        QCOMPARE(errors.count(), 1);
+        QCOMPARE(backend.state(), PlaybackBackend::State::Error);
+        QVERIFY(!log.mid(log.indexOf(error) + 1).contains(playing));
+        QCOMPARE(backend.m_resumePositionMs, latest);
+        QVERIFY(backend.m_softPaused);
+        QVERIFY(!backend.m_seekInFlight);
+        QVERIFY(!backend.m_nativePositionRestore);
+        GstState settled = GST_STATE_NULL;
+        gst_element_get_state(backend.m_playbin, &settled, nullptr, 2 * GST_SECOND);
+        QVERIFY(settled == GST_STATE_READY || settled == GST_STATE_NULL);
+        backend.pollBus();
+        QCOMPARE(errors.count(), 1);
+        QCOMPARE(backend.state(), PlaybackBackend::State::Error);
+        gboolean muted = TRUE;
+        g_object_get(G_OBJECT(backend.m_playbin), "mute", &muted, nullptr);
+        QVERIFY(!muted);
+
+        // The released stream keeps the newest position, so resume restores it.
+        backend.resume();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.position() > latest + 300, 3000);
+        backend.stop();
+    }
+
+    // A restore on a sink without a native seek path owes its position until the
+    // PAUSED preroll accepts the positive seek. A refused seek fails the restore,
+    // and PLAYING is never requested without the held position.
+    void nonNativeRestoreRefusedSeekPublishesOneError()
+    {
+        QTemporaryDir dir;
+        const QString tone = dir.filePath(QStringLiteral("refused-other.wav"));
+        QVERIFY(writeToneWav(tone, 440.0, 30'000));
+        const QString playing = QStringLiteral("state:%1")
+                                    .arg(static_cast<int>(PlaybackBackend::State::Playing));
+        const QString error = QStringLiteral("error");
+        QStringList log;
+        GStreamerPlaybackBackend backend;
+        PlaybackProfile profile;
+        profile.releaseSinkOnPause = true;
+        backend.setProfile(profile);
+        backend.play(QUrl::fromLocalFile(tone));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.position() >= 1500, 3000);
+        backend.pause();
+        const qint64 held = backend.m_resumePositionMs;
+        QVERIFY(held >= 1500);
+        connect(&backend, &PlaybackBackend::stateChanged, this, [&log](PlaybackBackend::State state) {
+            log << QStringLiteral("state:%1").arg(static_cast<int>(state));
+        });
+        connect(&backend, &PlaybackBackend::errorOccurred, this, [&log](const QString &) {
+            log << QStringLiteral("error");
+        });
+        QSignalSpy errors(&backend, &PlaybackBackend::errorOccurred);
+        backend.resume();
+        QVERIFY(!backend.m_nativePositionRestore);
+        QCOMPARE(backend.m_pendingSeekMs, held);
+
+        // NULL refuses the preroll's seek; its ASYNC_DONE is delivered directly.
+        gst_element_set_state(backend.m_playbin, GST_STATE_NULL);
+        GstMessage *prerolled = gst_message_new_async_done(GST_OBJECT(backend.m_playbin),
+                                                           GST_CLOCK_TIME_NONE);
+        backend.handleMessage(prerolled);
+        gst_message_unref(prerolled);
+
+        QCOMPARE(errors.count(), 1);
+        QCOMPARE(backend.state(), PlaybackBackend::State::Error);
+        QVERIFY(!log.mid(log.indexOf(error) + 1).contains(playing));
+        QCOMPARE(backend.m_resumePositionMs, held);
+        QCOMPARE(backend.m_pendingSeekMs, qint64{-1});
+        QVERIFY(backend.m_softPaused);
+        GstState settled = GST_STATE_NULL;
+        gst_element_get_state(backend.m_playbin, &settled, nullptr, 2 * GST_SECOND);
+        QVERIFY(settled == GST_STATE_READY || settled == GST_STATE_NULL);
+        backend.pollBus();
+        QCOMPARE(errors.count(), 1);
+        QCOMPARE(backend.state(), PlaybackBackend::State::Error);
+
+        backend.resume();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.position() > held + 300, 3000);
+        backend.stop();
+    }
+
     // A pipeline error during the restore whose in-place recovery is declined
     // (a repeat error at the same spot) must release the restore it interrupts.
     void nativeRestoreDecodeErrorFailsClosed()
