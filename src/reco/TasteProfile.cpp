@@ -393,8 +393,8 @@ bool parse(const QByteArray &bytes, TasteProfile *profile, QString *error)
     if (parsed.genres.isEmpty() && parsed.features.isEmpty()) {
         return reject(error, QStringLiteral("Taste seed needs a supported genre or feature distribution."));
     }
-    // Export and seed storage write the normalized object, so the bound applies to it too.
-    if (QJsonDocument(object).toJson().size() > MaximumBytes) {
+    // Export and seed storage write objectFor(parsed); the bound applies to its serialization.
+    if (QJsonDocument(objectFor(parsed)).toJson().size() > MaximumBytes) {
         return reject(error, QStringLiteral("Normalized taste profile exceeds 64 KiB."));
     }
     *profile = std::move(parsed);
