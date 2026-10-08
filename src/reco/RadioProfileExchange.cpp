@@ -1,11 +1,12 @@
 #include "reco/RadioProfileExchange.h"
 
+#include "fs/FilePublish.h"
+
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QSaveFile>
 #include <QSet>
 #include <QStringDecoder>
 
@@ -268,8 +269,11 @@ bool write(const QString &path, const RadioProfile &profile, bool allowLearned, 
     if (!replace && (target.exists() || target.isSymLink())) {
         return reject(error, QStringLiteral("Export file already exists. Explicit replace is required."));
     }
-    QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
+    const FilePublish::Outcome outcome = FilePublish::publish(path, bytes, replace);
+    if (outcome == FilePublish::Outcome::Exists) {
+        return reject(error, QStringLiteral("Export file already exists. Explicit replace is required."));
+    }
+    if (outcome == FilePublish::Outcome::Failed) {
         return reject(error, QStringLiteral("Could not atomically write radio profile file."));
     }
     return true;

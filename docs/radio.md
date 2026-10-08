@@ -152,6 +152,10 @@ muzaitenctl radio-weights import evening.json --replace
 Without `--profile`, export uses the active profile. Both import and export
 refuse an existing destination unless replacement is explicit; export's
 `--replace` replaces the file, import's replaces the named local profile.
+Without `--replace`, export refuses a file created during publication.
+Filesystems with hard links publish the complete file atomically; other
+filesystems create it exclusively while writing. See
+[data safety](data-safety.md#radio-tuning-profile-files) for the publication guarantees.
 `--dry-run` validates and previews an import, including whether replacement
 is required, without saving anything. Importing a different name adds a
 profile without selecting it. Importing the name Default also requires
@@ -254,14 +258,18 @@ directory, in local session state and in radio-pick history, where they remain
 after seed removal. They are absent from exchange files. Picks from seeded
 sessions can inform ordinary local learning through their other score components.
 
-The strict `muzaiten-taste-profile` v1 file is limited to 64 KiB. Unknown
+The strict `muzaiten-taste-profile` v1 file is limited to 64 KiB, both as
+received and once normalized to the export layout. Unknown
 keys, versions, duplicate keys, invalid shares,
 unordered/out-of-range/nonfinite quartiles, invalid UTF-8 and incomplete
 inputs are rejected before import changes. Existing export files and same-name
 seeds require `--replace`. Writes are atomic; on filesystems without hard
 links, such as FAT and exFAT drives, a new export file is instead created
-exclusively and removed if the write fails. The app supplies no transport,
-accounts, URLs or automatic export. Aggregates still reveal library taste;
+exclusively. If the write fails, the export reports failure and may leave its
+incomplete or unsynced file behind. It never removes whatever occupies the name.
+A later export without `--replace` refuses that file. The app supplies no
+transport, accounts, URLs or automatic export. Aggregates still reveal library
+taste;
 suppression and quantization do not guarantee anonymity. A seed biases picks
 toward the source library's genre and feature mix; it does not model the source
 listener's preferences. See
