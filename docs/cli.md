@@ -253,9 +253,10 @@ no taste, history, paths, filenames, timestamps, ratings or embeddings.
 Files are limited to 64 MiB and 16 KiB per line excluding the newline, with
 a 213,044-record guard that permits every valid pack within the byte cap.
 Export rejects a pack past these limits without creating or replacing a file.
-Export publishes atomically and never replaces a file that appears during
-export without `--replace`; import validates the entire file before store
-access and writes matching
+Export refuses a file that appears during export without `--replace`.
+Publication is atomic where the filesystem supports hard links; otherwise
+exclusive creation makes the file visible while it is written. Import
+validates the entire file before store access and writes matching
 rows in one transaction. Exit codes are 0 success/no-op, 2 invalid input,
 4 operational failure and 5 writer lock busy. See
 [features-schema.md](features-schema.md#local-feature-pack-format) for

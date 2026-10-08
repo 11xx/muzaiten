@@ -152,8 +152,10 @@ muzaitenctl radio-weights import evening.json --replace
 Without `--profile`, export uses the active profile. Both import and export
 refuse an existing destination unless replacement is explicit; export's
 `--replace` replaces the file, import's replaces the named local profile.
-Export publishes the file atomically, so a file created during the export is
-refused unless `--replace` is given.
+Without `--replace`, export refuses a file created during publication.
+Filesystems with hard links publish the complete file atomically; other
+filesystems create it exclusively while writing. See
+[data safety](data-safety.md#radio-tuning-profile-files) for the publication guarantees.
 `--dry-run` validates and previews an import, including whether replacement
 is required, without saving anything. Importing a different name adds a
 profile without selecting it. Importing the name Default also requires
