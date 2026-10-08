@@ -171,6 +171,25 @@ QByteArray compactExchange(const TasteProfile &profile)
                                      {QStringLiteral("features"), QJsonObject{}}}).toJson(QJsonDocument::Compact);
 }
 
+// The same profile with one ASCII letter appended to the first `count` labels in
+// sorted order. Shares are unchanged, and each lengthened label adds one byte to
+// the canonical export.
+TasteProfile lengthenedLabels(const TasteProfile &profile, int count)
+{
+    TasteProfile lengthened;
+    int index = 0;
+    for (auto it = profile.genres.begin(); it != profile.genres.end(); ++it, ++index) {
+        lengthened.genres.insert(index < count ? it.key() + QStringLiteral("z") : it.key(), it.value());
+    }
+    return lengthened;
+}
+
+// A compact spelling with an optional empty decades member, which encode() omits.
+QByteArray emptyDecadesSpelling(const QByteArray &compact)
+{
+    return QByteArray(compact).replace("\"features\":{}", "\"features\":{},\"decades\":{}");
+}
+
 // A seed store with `count` entries in the indented layout, each profile in its
 // normalized form.
 QByteArray indentedSeedStore(const TasteProfile &profile, int count)
@@ -201,6 +220,7 @@ private slots:
     void libraryScope();
     void genreLabels();
     void strictParsing();
+    void normalizedBound();
     void twoInstallations();
     void seedStoreLimits();
     void legacySeedStore();
@@ -595,6 +615,51 @@ void TasteProfileTest::strictParsing()
     }
     profile.features.insert(QStringLiteral("energy"), {0, std::numeric_limits<double>::quiet_NaN(), 1});
     QVERIFY(!TasteProfiles::encode(profile, &encoded, &error));
+}
+
+void TasteProfileTest::normalizedBound()
+{
+    // 140 labels lengthened by one letter each take the 65388-byte export to 65528 bytes.
+    const TasteProfile base = nearLimitProfile(76);
+    QByteArray encoded;
+    QString error;
+    QVERIFY2(TasteProfiles::encode(base, &encoded, &error), qPrintable(error));
+    QCOMPARE(encoded.size(), 65388);
+    const TasteProfile lengthened = lengthenedLabels(base, 140);
+    QVERIFY2(TasteProfiles::encode(lengthened, &encoded, &error), qPrintable(error));
+    QCOMPARE(encoded.size(), 65528);
+
+    // Spellings that differ only by an empty decades member parse and encode identically.
+    const QByteArray compact = compactExchange(lengthened);
+    TasteProfile plain;
+    TasteProfile spelled;
+    QVERIFY2(TasteProfiles::parse(compact, &plain, &error), qPrintable(error));
+    QVERIFY2(TasteProfiles::parse(emptyDecadesSpelling(compact), &spelled, &error), qPrintable(error));
+    QVERIFY(spelled.decades.isEmpty());
+    QCOMPARE(spelled.genres, plain.genres);
+    QByteArray fromPlain;
+    QByteArray fromSpelled;
+    QVERIFY2(TasteProfiles::encode(plain, &fromPlain, &error), qPrintable(error));
+    QVERIFY2(TasteProfiles::encode(spelled, &fromSpelled, &error), qPrintable(error));
+    QCOMPARE(fromSpelled, fromPlain);
+    QCOMPARE(fromPlain, encoded);
+
+    // The bound is inclusive: 148 lengthened labels reach exactly 65536 bytes and
+    // 149 exceed it. The compact spellings stay under the received-byte bound, so
+    // the normalized check decides the 149-label refusal.
+    const TasteProfile atBound = lengthenedLabels(base, 148);
+    QVERIFY2(TasteProfiles::encode(atBound, &encoded, &error), qPrintable(error));
+    QCOMPARE(encoded.size(), TasteProfiles::MaximumBytes);
+    QVERIFY2(TasteProfiles::parse(emptyDecadesSpelling(compactExchange(atBound)), &spelled, &error),
+             qPrintable(error));
+    const TasteProfile overBound = lengthenedLabels(base, 149);
+    QVERIFY(!TasteProfiles::encode(overBound, &encoded, &error));
+    const QByteArray overCompact = compactExchange(overBound);
+    QVERIFY(overCompact.size() < TasteProfiles::MaximumBytes);
+    for (const QByteArray &bytes : {overCompact, emptyDecadesSpelling(overCompact)}) {
+        QVERIFY(!TasteProfiles::parse(bytes, &spelled, &error));
+        QVERIFY2(error.contains(QStringLiteral("Normalized")), qPrintable(error));
+    }
 }
 
 void TasteProfileTest::twoInstallations()
