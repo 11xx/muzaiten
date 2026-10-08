@@ -264,8 +264,11 @@ unordered/out-of-range/nonfinite quartiles, invalid UTF-8 and incomplete
 inputs are rejected before import changes. Existing export files and same-name
 seeds require `--replace`. Writes are atomic; on filesystems without hard
 links, such as FAT and exFAT drives, a new export file is instead created
-exclusively and removed if the write fails. The app supplies no transport,
-accounts, URLs or automatic export. Aggregates still reveal library taste;
+exclusively. If the write fails, the export reports failure and may leave its
+incomplete or unsynced file behind. It never removes whatever occupies the name.
+A later export without `--replace` refuses that file. The app supplies no
+transport, accounts, URLs or automatic export. Aggregates still reveal library
+taste;
 suppression and quantization do not guarantee anonymity. A seed biases picks
 toward the source library's genre and feature mix; it does not model the source
 listener's preferences. See

@@ -87,6 +87,7 @@ public:
     {
         FilePublish::setBeforePublishHookForTesting(nullptr);
         FilePublish::setLinkFunctionForTesting(nullptr);
+        FilePublish::setFallbackSyncForTesting(nullptr);
     }
 };
 

@@ -8,6 +8,9 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <cerrno>
+#include <cstdio>
+
 using namespace ExportPublicationFixture;
 
 class FilePublishTest final : public QObject {
@@ -23,6 +26,8 @@ private slots:
     void replacementKeepsExistingPermissions();
     void fallbackPublishesWithoutHardLinks();
     void fallbackRefusesDestinationAppearingBeforePublication();
+    void fallbackFailureKeepsForeignReplacement();
+    void fallbackFailureLeavesOwnEntry();
     void unexpectedLinkFailureRemovesTemporary();
 
 private:
@@ -135,6 +140,46 @@ void FilePublishTest::fallbackRefusesDestinationAppearingBeforePublication()
     QVERIFY(FilePublish::publish(path, exportContent, false) == FilePublish::Outcome::Exists);
     QCOMPARE(contents(path), foreignContent);
     QCOMPARE(entries(directory), QStringList{QStringLiteral("export.json")});
+}
+
+// The destination is replaced by a completed foreign file while its final sync
+// fails. The failed publication must not unlink whatever occupies the name.
+void FilePublishTest::fallbackFailureKeepsForeignReplacement()
+{
+    const QString directory = freshDirectory(QStringLiteral("fallback-foreign-sync"));
+    const QString path = QDir(directory).filePath(QStringLiteral("export.json"));
+    const QString foreign = QDir(directory).filePath(QStringLiteral("foreign.part"));
+    writeFile(foreign, foreignContent);
+    SeamReset reset;
+    FilePublish::setLinkFunctionForTesting(linkWithoutHardLinks);
+    FilePublish::setFallbackSyncForTesting([path, foreign](int) {
+        std::rename(QFile::encodeName(foreign).constData(), QFile::encodeName(path).constData());
+        errno = EIO;
+        return -1;
+    });
+    QVERIFY(FilePublish::publish(path, exportContent, false) == FilePublish::Outcome::Failed);
+    QCOMPARE(contents(path), foreignContent);
+    QCOMPARE(entries(directory), QStringList{QStringLiteral("export.json")});
+}
+
+// The final sync fails with nothing else touching the name. The failed create
+// keeps its own entry, and a later publication without replacement refuses it.
+void FilePublishTest::fallbackFailureLeavesOwnEntry()
+{
+    const QString directory = freshDirectory(QStringLiteral("fallback-own-sync"));
+    const QString path = QDir(directory).filePath(QStringLiteral("export.json"));
+    SeamReset reset;
+    FilePublish::setLinkFunctionForTesting(linkWithoutHardLinks);
+    FilePublish::setFallbackSyncForTesting([](int) {
+        errno = EIO;
+        return -1;
+    });
+    QVERIFY(FilePublish::publish(path, exportContent, false) == FilePublish::Outcome::Failed);
+    QCOMPARE(contents(path), exportContent);
+    QCOMPARE(entries(directory), QStringList{QStringLiteral("export.json")});
+    FilePublish::setFallbackSyncForTesting(nullptr);
+    QVERIFY(FilePublish::publish(path, exportContent, false) == FilePublish::Outcome::Exists);
+    QCOMPARE(contents(path), exportContent);
 }
 
 void FilePublishTest::unexpectedLinkFailureRemovesTemporary()

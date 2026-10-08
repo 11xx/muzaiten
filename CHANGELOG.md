@@ -205,6 +205,13 @@
   exclusively, which keeps the refusal but makes a partially written file
   briefly visible.
 
+- Exports to filesystems without hard links (radio profile, feature-pack and
+  taste exports) no longer delete the destination when a write or sync fails
+  after the file was created. The export still reports failure, and the file it
+  created can remain, incomplete or unsynced. A later export without `--replace`
+  refuses that file. A file another process placed at that name during the
+  export is kept.
+
 - Canceling semantic provider setup or model-download preflight, reaching its
   timeout, or closing the window terminates the helper's provider process group
   on Unix systems. Cleanup remains asynchronous and preserves status output.

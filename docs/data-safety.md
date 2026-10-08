@@ -120,8 +120,11 @@ existing file, and its bytes are left unchanged. The dialog asks before
 replacing an existing file, and the CLI requires `--replace`; replacement is
 atomic and keeps the existing file's permissions. Filesystems without hard
 links, such as FAT and exFAT drives and many network mounts, create the file
-exclusively instead. The file is then visible while it is being written, and a
-failed write removes it.
+exclusively instead. The file is visible while it is being written. If a write
+or sync fails, the export reports failure. The file it created can remain,
+possibly incomplete or unsynced. The export never removes whatever occupies the
+name at that point, so a file another process placed there survives. A later
+export without `--replace` refuses that file.
 
 ### Local scalar feature-pack files
 
@@ -207,9 +210,12 @@ automatically generated or exported. Every CLI export/preview requires
 action and writes only after **Export these contents…**; that exact preview is
 the written file. A new export file is published atomically by hard-linking a
 completed sibling file. On filesystems without hard links, such as FAT and
-exFAT drives and many network mounts, it is created exclusively instead and
-removed if writing fails. Neither path overwrites a file that appears after
-the preview. Nothing is uploaded or transmitted by the exchange UI.
+exFAT drives and many network mounts, it is created exclusively instead. If
+writing fails, the export reports failure and may leave its incomplete or
+unsynced file behind. It never removes whatever occupies the name at that point.
+A later export without `--replace` refuses that file. Neither path overwrites a
+file that appears after the preview. Nothing is uploaded or transmitted by the
+exchange UI.
 
 Import validates and previews before writes. Unknown keys or versions,
 duplicate keys, invalid UTF-8, incomplete JSON, nonfinite/out-of-range values,
