@@ -433,6 +433,9 @@ QJsonObject run(QStringList arguments)
         fail(4, QStringLiteral("Feature store is absent; run refresh first."));
     }
     const QString storePath = FeatureStoreLock::identity(featuresPath);
+    if (storePath.isEmpty()) {
+        fail(4, QStringLiteral("Feature store path cannot be resolved."));
+    }
     const QFileInfo pack(path);
     const QString packPath = QDir(pack.dir().canonicalPath()).filePath(pack.fileName());
     for (const QString &suffix : {QString(), QStringLiteral(".lock"), QStringLiteral("-wal"),
@@ -443,7 +446,7 @@ QJsonObject run(QStringList arguments)
         }
     }
     // Taken on the canonical identity, so every spelling of the store shares one writer lock.
-    QLockFile lock(FeatureStoreLock::lockPath(featuresPath));
+    QLockFile lock(FeatureStoreLock::lockPath(storePath));
     if (!lock.tryLock(0)) {
         fail(5, QStringLiteral("Feature store is busy."));
     }
