@@ -19,7 +19,7 @@ enum class Outcome {
 // file, which is then hard-linked to path. link(2) fails with EEXIST when any
 // entry, including a symlink or a directory, already occupies path, so a
 // destination that appears after the caller's precheck is reported as Exists
-// and is left untouched. The temporary file is removed on every outcome.
+// and is left untouched. Every outcome attempts to remove the temporary file.
 // Filesystems without hard links (FAT, exFAT, many network mounts) create the
 // destination exclusively instead. That path never replaces an entry, but the
 // destination is visible while it is being written and is removed if writing
