@@ -520,6 +520,69 @@ private slots:
         backend.stop();
     }
 
+    // A pipeline error queued behind a refused restore seek belongs to a failure
+    // that was already reported. It must not reload the source; playback starts
+    // again only through an explicit resume.
+    void lateErrorAfterRestoreFailureDoesNotRecover()
+    {
+        QTemporaryDir dir;
+        const QString tone = dir.filePath(QStringLiteral("late-error.wav"));
+        QVERIFY(writeToneWav(tone, 440.0, 30'000));
+        GStreamerPlaybackBackend backend;
+        PlaybackProfile profile;
+        profile.releaseSinkOnPause = true;
+        backend.setProfile(profile);
+        backend.play(QUrl::fromLocalFile(tone));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.position() >= 1500, 3000);
+        backend.pause();
+        backend.m_sinkFactory = QStringLiteral("pipewiresink");
+        const qint64 held = backend.m_resumePositionMs;
+        QSignalSpy errors(&backend, &PlaybackBackend::errorOccurred);
+        QSignalSpy technical(&backend, &PlaybackBackend::technicalInfoChanged);
+        backend.resume();
+        QVERIFY(backend.m_nativePositionRestore);
+        gst_element_set_state(backend.m_playbin, GST_STATE_NULL);
+        GstMessage *started = gst_message_new_state_changed(GST_OBJECT(backend.m_playbin),
+                                                            GST_STATE_PAUSED,
+                                                            GST_STATE_PLAYING,
+                                                            GST_STATE_VOID_PENDING);
+        backend.handleMessage(started);
+        gst_message_unref(started);
+        QCOMPARE(errors.count(), 1);
+        QCOMPARE(backend.state(), PlaybackBackend::State::Error);
+        // No recovery is on record, so nothing else declines the late error.
+        QVERIFY(backend.m_lastRecoveryUri.isEmpty());
+
+        // The same failed preroll also left a pipeline error on the bus.
+        GError *error = g_error_new_literal(GST_CORE_ERROR, GST_CORE_ERROR_FAILED, "late failure");
+        GstMessage *late = gst_message_new_error(GST_OBJECT(backend.m_playbin), error, "probe");
+        g_error_free(error);
+        gst_element_post_message(backend.m_playbin, late);
+        backend.pollBus();
+
+        QCOMPARE(errors.count(), 1);
+        QCOMPARE(backend.state(), PlaybackBackend::State::Error);
+        QCOMPARE(backend.m_targetState, PlaybackBackend::State::Error);
+        QVERIFY(!backend.m_waitingForTargetState);
+        QVERIFY(backend.m_softPaused);
+        QCOMPARE(backend.m_resumePositionMs, held);
+        int recoveries = 0;
+        for (const auto &info : technical) {
+            recoveries += info.first().toString().startsWith(QStringLiteral("Recovered")) ? 1 : 0;
+        }
+        QCOMPARE(recoveries, 0);
+        GstState settled = GST_STATE_NULL;
+        gst_element_get_state(backend.m_playbin, &settled, nullptr, 2 * GST_SECOND);
+        QVERIFY(settled == GST_STATE_READY || settled == GST_STATE_NULL);
+
+        // Only an explicit resume starts playback again, at the held position.
+        backend.resume();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.position() > held + 300, 3000);
+        backend.stop();
+    }
+
     // What the native PipeWire transport is given, checked without needing
     // its plugin: the endpoint goes in target-object and endpoints come from
     // PipeWire's own device provider. Auto never claims a missing plugin.
