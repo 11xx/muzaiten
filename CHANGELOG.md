@@ -210,6 +210,14 @@
   the 64 KiB limit in normalized form, so a compact file too large to import is
   refused when it is read.
 
+- A held playback position that cannot be restored now stops playback with an
+  error instead of starting the track from the beginning unannounced. This
+  covers a restore still waiting for its seek when the 15-second transition
+  deadline passes, a seek the source refuses, and a pipeline error during the
+  restore. An interrupted restore no longer leaves the output muted, and a
+  refused seek no longer republishes Playing after its error. An output that
+  returns after such a failure does not restart the stopped track.
+
 - Canceling semantic provider setup or model-download preflight, reaching its
   timeout, or closing the window terminates the helper's provider process group
   on Unix systems. Cleanup remains asynchronous and preserves status output.
