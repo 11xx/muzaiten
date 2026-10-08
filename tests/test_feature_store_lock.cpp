@@ -43,6 +43,9 @@ private slots:
     void danglingSymlinkChainResolvesToTarget();
     void relativeSpellingMatchesAbsolute();
     void prepareDirectoryCreatesAbsentParentsThroughAliases();
+    void danglingParentDirectoryCreatesStoreThroughItsTarget();
+    void chainedAndRelativeDanglingDirectoriesResolve();
+    void unresolvableSymlinkCycleYieldsNoCoordinate();
     void liveOwnerExcludesEverySpellingOfTheStore();
 };
 
@@ -132,6 +135,73 @@ void FeatureStoreLockTest::prepareDirectoryCreatesAbsentParentsThroughAliases()
     // The lock file can now be created beside the store that a later write creates.
     QLockFile lock(FeatureStoreLock::lockPath(store));
     QVERIFY(lock.tryLock(0));
+}
+
+void FeatureStoreLockTest::danglingParentDirectoryCreatesStoreThroughItsTarget()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString base = canonicalRoot(dir);
+    QVERIFY(QDir().mkpath(base + QStringLiteral("/real")));
+    // The directory alias points at a directory that does not exist yet.
+    QVERIFY(makeSymlink(base + QStringLiteral("/real/fresh"), base + QStringLiteral("/dangling-alias")));
+
+    const QString typed = base + QStringLiteral("/dangling-alias/features.sqlite");
+    const QString expected = base + QStringLiteral("/real/fresh/features.sqlite");
+    QCOMPARE(FeatureStoreLock::identity(typed), expected);
+    QVERIFY(!QFileInfo::exists(base + QStringLiteral("/real/fresh")));
+
+    QVERIFY(FeatureStoreLock::prepareDirectory(typed));
+    QVERIFY(QFileInfo(base + QStringLiteral("/real/fresh")).isDir());
+
+    // The typed spelling creates the store at the identity, and the lock sits beside it.
+    QFile store(typed);
+    QVERIFY(store.open(QIODevice::WriteOnly));
+    store.close();
+    QVERIFY(QFileInfo::exists(expected));
+    QLockFile lock(FeatureStoreLock::lockPath(typed));
+    QVERIFY(lock.tryLock(0));
+    QVERIFY(QFileInfo::exists(expected + QStringLiteral(".lock")));
+}
+
+void FeatureStoreLockTest::chainedAndRelativeDanglingDirectoriesResolve()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString base = canonicalRoot(dir);
+    QVERIFY(QDir().mkpath(base + QStringLiteral("/real/other")));
+    QVERIFY(QDir().mkpath(base + QStringLiteral("/nest")));
+    QVERIFY(makeSymlink(base + QStringLiteral("/real/fresh"), base + QStringLiteral("/first-alias")));
+    QVERIFY(makeSymlink(QStringLiteral("first-alias"), base + QStringLiteral("/second-alias")));
+    QVERIFY(makeSymlink(QStringLiteral("../real/fresh"), base + QStringLiteral("/nest/relative-alias")));
+
+    const QString expected = base + QStringLiteral("/real/fresh/features.sqlite");
+    QCOMPARE(FeatureStoreLock::identity(base + QStringLiteral("/second-alias/features.sqlite")), expected);
+    QCOMPARE(FeatureStoreLock::identity(base + QStringLiteral("/nest/relative-alias/features.sqlite")), expected);
+    // `..` after a dangling directory alias continues from its target, as the kernel does once the target exists.
+    QCOMPARE(FeatureStoreLock::identity(base + QStringLiteral("/second-alias/../other/features.sqlite")),
+             base + QStringLiteral("/real/other/features.sqlite"));
+    QVERIFY(!QFileInfo::exists(base + QStringLiteral("/real/fresh")));
+}
+
+void FeatureStoreLockTest::unresolvableSymlinkCycleYieldsNoCoordinate()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString base = canonicalRoot(dir);
+    QVERIFY(makeSymlink(QStringLiteral("b-link"), base + QStringLiteral("/a-link")));
+    QVERIFY(makeSymlink(QStringLiteral("a-link"), base + QStringLiteral("/b-link")));
+    QVERIFY(makeSymlink(QStringLiteral("self-link"), base + QStringLiteral("/self-link")));
+    QVERIFY(makeSymlink(QStringLiteral("loop-dir/sub"), base + QStringLiteral("/loop-dir")));
+
+    const QStringList unresolvable{base + QStringLiteral("/a-link/features.sqlite"),
+                                   base + QStringLiteral("/self-link/features.sqlite"),
+                                   base + QStringLiteral("/loop-dir/features.sqlite")};
+    for (const QString &path : unresolvable) {
+        QVERIFY(FeatureStoreLock::identity(path).isEmpty());
+        QVERIFY(FeatureStoreLock::lockPath(path).isEmpty());
+        QVERIFY(!FeatureStoreLock::prepareDirectory(path));
+    }
 }
 
 void FeatureStoreLockTest::liveOwnerExcludesEverySpellingOfTheStore()

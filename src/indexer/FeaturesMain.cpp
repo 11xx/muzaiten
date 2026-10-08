@@ -2882,10 +2882,11 @@ int runRefresh(const RefreshOptions &options)
 
     // The lock file lives beside the store, so its directory must exist before
     // the lock is taken; the store itself is created later, under the lock.
-    if (!FeatureStoreLock::prepareDirectory(options.featuresPath)) {
-        failWithCode(4, QStringLiteral("could not create %1").arg(QFileInfo(options.featuresPath).absolutePath()));
+    const QString lockFile = FeatureStoreLock::lockPath(options.featuresPath);
+    if (lockFile.isEmpty() || !FeatureStoreLock::prepareDirectory(options.featuresPath)) {
+        failWithCode(4, QStringLiteral("could not prepare the feature store at %1").arg(options.featuresPath));
     }
-    QLockFile lock(FeatureStoreLock::lockPath(options.featuresPath));
+    QLockFile lock(lockFile);
     if (!lock.tryLock(0)) {
         failWithCode(5, QStringLiteral("feature store is busy: %1").arg(lock.error()));
     }
@@ -3091,10 +3092,11 @@ int runProviderOperation(const ProviderOptions &options,
     g_progressRequestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     std::optional<QLockFile> lock;
     if (lockStore) {
-        if (!FeatureStoreLock::prepareDirectory(options.featuresPath)) {
-            failWithCode(4, QStringLiteral("could not create %1").arg(QFileInfo(options.featuresPath).absolutePath()));
+        const QString lockFile = FeatureStoreLock::lockPath(options.featuresPath);
+        if (lockFile.isEmpty() || !FeatureStoreLock::prepareDirectory(options.featuresPath)) {
+            failWithCode(4, QStringLiteral("could not prepare the feature store at %1").arg(options.featuresPath));
         }
-        lock.emplace(FeatureStoreLock::lockPath(options.featuresPath));
+        lock.emplace(lockFile);
         if (!lock->tryLock(0)) {
             failWithCode(5, QStringLiteral("feature store is busy"));
         }
