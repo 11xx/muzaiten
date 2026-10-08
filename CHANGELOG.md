@@ -202,7 +202,8 @@
   covers a restore still waiting for its seek when the 15-second transition
   deadline passes, a seek the source refuses, and a pipeline error during the
   restore. An interrupted restore no longer leaves the output muted, and a
-  refused seek no longer republishes Playing after its error.
+  refused seek no longer republishes Playing after its error. An output that
+  returns after such a failure does not restart the stopped track.
 
 - Canceling semantic provider setup or model-download preflight, reaching its
   timeout, or closing the window terminates the helper's provider process group

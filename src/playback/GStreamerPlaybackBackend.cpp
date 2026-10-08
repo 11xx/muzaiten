@@ -898,6 +898,10 @@ void GStreamerPlaybackBackend::failPositionRestore(const QString &message)
     m_pendingSeekMs = -1;
     clearSeekInFlight();
     m_softPaused = true;
+    // An output wait armed before the failure must not resume the stream later.
+    m_waitingForOutput = false;
+    m_waitingForDirect = false;
+    m_resumeOnOutput = false;
     // READY comes before the mute is lifted: an unrestored preroll must never
     // become audible. Otherwise the release matches a soft pause.
     observeRouteBeforeClose();
@@ -1625,6 +1629,10 @@ void GStreamerPlaybackBackend::waitForPreferredEndpoint()
     if (m_waitingForOutput || m_playbin == nullptr || !hasSource()) {
         return;
     }
+    if (softPausedInError()) {
+        // A failed restore waits for an explicit play or resume, not for the output.
+        return;
+    }
     if (m_softPaused) {
         // Paused and released already; a resume will wait for the endpoint.
         m_waitingForOutput = true;
@@ -2050,7 +2058,7 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
         // A restore failure has already reported its error and left the stream
         // soft-paused in Error. A later pipeline error must neither report that
         // failure again nor reload the source; explicit play or resume does.
-        if (m_softPaused && m_state == State::Error) {
+        if (softPausedInError()) {
             break;
         }
         // Decode/parse errors (a bad frame after a seek, a transient stall) are

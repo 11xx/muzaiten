@@ -583,6 +583,122 @@ private slots:
         backend.stop();
     }
 
+    // The preferred output leaves while a held restore is armed, and the restore then
+    // fails. The failure ends the output wait, so the output's return changes nothing.
+    void endpointReturnDoesNotResumeAfterRestoreFailure_data()
+    {
+        QTest::addColumn<bool>("refuseSeek");
+        QTest::newRow("timeout") << false;
+        QTest::newRow("refused-seek") << true;
+    }
+
+    void endpointReturnDoesNotResumeAfterRestoreFailure()
+    {
+        QFETCH(bool, refuseSeek);
+        QTemporaryDir dir;
+        const QString tone = dir.filePath(QStringLiteral("endpoint-failure.wav"));
+        QVERIFY(writeToneWav(tone, 440.0, 30'000));
+        const QString endpoint = QStringLiteral("muzaiten-test-sink");
+        GStreamerPlaybackBackend backend;
+        PlaybackProfile profile;
+        profile.releaseSinkOnPause = true;
+        backend.setProfile(profile);
+        backend.play(QUrl::fromLocalFile(tone));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.position() >= 1500, 3000);
+        backend.pause();
+        const qint64 held = backend.m_resumePositionMs;
+        // A preferred shared endpoint without fallback. The endpoint monitor never
+        // runs here, so the endpoint counts as present until it is removed below.
+        backend.m_sinkFactory = QStringLiteral("pipewiresink");
+        backend.m_profile.mode = QStringLiteral("shared");
+        backend.m_profile.sharedEndpoint = endpoint;
+        backend.m_profile.sharedEndpointFallback = false;
+        QSignalSpy errors(&backend, &PlaybackBackend::errorOccurred);
+        backend.resume();
+        QVERIFY(backend.m_nativePositionRestore);
+
+        // The release waits behind the armed restore, which keeps the wait and the resume intent.
+        backend.handleEndpointRemoved(endpoint);
+        QVERIFY(backend.m_waitingForOutput);
+        QVERIFY(backend.m_resumeOnOutput);
+
+        if (refuseSeek) {
+            gst_element_set_state(backend.m_playbin, GST_STATE_NULL);
+            GstMessage *started = gst_message_new_state_changed(GST_OBJECT(backend.m_playbin),
+                                                                GST_STATE_PAUSED,
+                                                                GST_STATE_PLAYING,
+                                                                GST_STATE_VOID_PENDING);
+            backend.handleMessage(started);
+            gst_message_unref(started);
+        } else {
+            backend.handleTargetTransitionTimeout();
+        }
+        QCOMPARE(errors.count(), 1);
+        QCOMPARE(backend.state(), PlaybackBackend::State::Error);
+        QCOMPARE(backend.m_resumePositionMs, held);
+        QVERIFY(!backend.m_waitingForOutput);
+        QVERIFY(!backend.m_resumeOnOutput);
+
+        int stateEvents = 0;
+        connect(&backend, &PlaybackBackend::stateChanged, this, [&stateEvents](PlaybackBackend::State) {
+            ++stateEvents;
+        });
+        backend.handleEndpointAdded(endpoint);
+        QTest::qWait(200);
+        QCOMPARE(stateEvents, 0);
+        QCOMPARE(errors.count(), 1);
+        QCOMPARE(backend.state(), PlaybackBackend::State::Error);
+        QVERIFY(backend.m_softPaused);
+        QCOMPARE(backend.m_targetState, PlaybackBackend::State::Error);
+        QVERIFY(!backend.m_waitingForTargetState);
+        GstState settled = GST_STATE_NULL;
+        gst_element_get_state(backend.m_playbin, &settled, nullptr, 2 * GST_SECOND);
+        QVERIFY(settled == GST_STATE_READY || settled == GST_STATE_NULL);
+
+        // Only an explicit resume starts playback again, at the held position.
+        backend.resume();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.position() > held + 300, 3000);
+        backend.stop();
+    }
+
+    // Control: the output leaves while a restore is armed, the restore completes with
+    // the output still missing, and the output's return resumes the held stream.
+    void endpointReturnStillResumesAfterArmedRestoreCompletes()
+    {
+        QTemporaryDir dir;
+        const QString tone = dir.filePath(QStringLiteral("endpoint-resume.wav"));
+        QVERIFY(writeToneWav(tone, 440.0, 30'000));
+        const QString endpoint = QStringLiteral("muzaiten-test-sink");
+        GStreamerPlaybackBackend backend;
+        PlaybackProfile profile;
+        profile.releaseSinkOnPause = true;
+        backend.setProfile(profile);
+        backend.play(QUrl::fromLocalFile(tone));
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.position() >= 1500, 3000);
+        backend.pause();
+        backend.m_sinkFactory = QStringLiteral("pipewiresink");
+        backend.m_profile.mode = QStringLiteral("shared");
+        backend.m_profile.sharedEndpoint = endpoint;
+        backend.m_profile.sharedEndpointFallback = false;
+        backend.resume();
+        QVERIFY(backend.m_nativePositionRestore);
+        backend.handleEndpointRemoved(endpoint);
+
+        // The real preroll and seek complete through the poll; the deferred release then holds the stream.
+        QTRY_VERIFY_WITH_TIMEOUT(backend.m_softPaused, 5000);
+        QCOMPARE(backend.state(), PlaybackBackend::State::Buffering);
+        QVERIFY(backend.m_waitingForOutput);
+        QVERIFY(backend.m_resumeOnOutput);
+
+        backend.handleEndpointAdded(endpoint);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), PlaybackBackend::State::Playing, 3000);
+        QVERIFY(!backend.m_softPaused);
+        backend.stop();
+    }
+
     // What the native PipeWire transport is given, checked without needing
     // its plugin: the endpoint goes in target-object and endpoints come from
     // PipeWire's own device provider. Auto never claims a missing plugin.
