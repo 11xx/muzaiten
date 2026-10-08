@@ -163,7 +163,8 @@ If a held position cannot be restored, playback stops with an error instead of
 starting from the beginning silently. That happens when the stream is not ready
 for its seek within 15 seconds of resuming, when the source refuses the seek,
 or when the pipeline fails during the restore. The output stays silent, and
-Play starts the current track from its beginning.
+Play starts the current track from its beginning. An output that returns
+afterward does not start it.
 
 While a chosen output is missing, playback pauses at its position and resumes
 there when the output returns, if it was playing; pausing, seeking or picking
