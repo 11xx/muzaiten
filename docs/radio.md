@@ -254,7 +254,8 @@ directory, in local session state and in radio-pick history, where they remain
 after seed removal. They are absent from exchange files. Picks from seeded
 sessions can inform ordinary local learning through their other score components.
 
-The strict `muzaiten-taste-profile` v1 file is limited to 64 KiB. Unknown
+The strict `muzaiten-taste-profile` v1 file is limited to 64 KiB, both as
+received and once normalized to the export layout. Unknown
 keys, versions, duplicate keys, invalid shares,
 unordered/out-of-range/nonfinite quartiles, invalid UTF-8 and incomplete
 inputs are rejected before import changes. Existing export files and same-name
