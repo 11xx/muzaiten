@@ -2047,6 +2047,12 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
         if (debug != nullptr) {
             g_free(debug);
         }
+        // A restore failure has already reported its error and left the stream
+        // soft-paused in Error. A later pipeline error must neither report that
+        // failure again nor reload the source; explicit play or resume does.
+        if (m_softPaused && m_state == State::Error) {
+            break;
+        }
         // Decode/parse errors (a bad frame after a seek, a transient stall) are
         // often survivable: reload the source in place before surfacing the
         // error and freezing the transport on the user.
