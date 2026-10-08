@@ -220,8 +220,7 @@
 
 - A pipeline error while playback resumes from the beginning is reported once and
   stays the reported state. The abandoned start cannot begin playback or replace
-  that error when its preroll completes afterward; Play or Resume starts the
-  track again.
+  that error when its preroll completes afterward; Play starts the track again.
 
 - Feature-store writers (`refresh`, `neighbors`, `pack export` and `pack import`)
   share one writer lock per store, keyed by the store's canonical path. A
