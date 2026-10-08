@@ -883,6 +883,36 @@ void GStreamerPlaybackBackend::clearNativePositionRestore()
     }
 }
 
+void GStreamerPlaybackBackend::failPositionRestore(const QString &message)
+{
+    // The newest requested position is the one the stream still owes; a
+    // queued or pending seek supersedes the last one actually issued.
+    qint64 owed = m_lastSeekMs;
+    if (m_pendingSeekMs >= 0) {
+        owed = m_pendingSeekMs;
+    }
+    if (m_queuedSeekMs >= 0) {
+        owed = m_queuedSeekMs;
+    }
+    m_resumePositionMs = std::max<qint64>(0, owed);
+    m_pendingSeekMs = -1;
+    clearSeekInFlight();
+    m_softPaused = true;
+    // An output wait armed before the failure must not resume the stream later.
+    m_waitingForOutput = false;
+    m_waitingForDirect = false;
+    m_resumeOnOutput = false;
+    // READY comes before the mute is lifted: an unrestored preroll must never
+    // become audible. Otherwise the release matches a soft pause.
+    observeRouteBeforeClose();
+    gst_element_set_state(m_playbin, GST_STATE_READY);
+    clearNativePositionRestore();
+    m_targetState = State::Error;
+    finishTargetTransition();
+    updateState(State::Error);
+    emit errorOccurred(message);
+}
+
 void GStreamerPlaybackBackend::issueSeek(qint64 positionMs)
 {
     m_lastSeekMs = positionMs;
@@ -1599,6 +1629,10 @@ void GStreamerPlaybackBackend::waitForPreferredEndpoint()
     if (m_waitingForOutput || m_playbin == nullptr || !hasSource()) {
         return;
     }
+    if (softPausedInError()) {
+        // A failed restore waits for an explicit play or resume, not for the output.
+        return;
+    }
     if (m_softPaused) {
         // Paused and released already; a resume will wait for the endpoint.
         m_waitingForOutput = true;
@@ -1977,12 +2011,20 @@ void GStreamerPlaybackBackend::handleTargetTransitionTimeout()
     if (!m_waitingForTargetState || m_playbin == nullptr) {
         return;
     }
+    // A restore still owed its seek cannot be dropped here: its preroll may
+    // complete later, and the stream would then play from zero without a report.
+    if (m_nativePositionRestore || m_pendingSeekMs > 0) {
+        failPositionRestore(QStringLiteral("Could not restore playback position"));
+        return;
+    }
 
+    // A zero-position preroll holds no position to restore. Abandon it, so the
+    // late preroll cannot request playback behind the observed state.
+    m_pendingSeekMs = -1;
     GstState current = GST_STATE_NULL;
     GstState pending = GST_STATE_VOID_PENDING;
     gst_element_get_state(m_playbin, &current, &pending, 0);
     Q_UNUSED(pending)
-    m_pendingSeekMs = -1;
     finishTargetTransition();
     publishObservedState(stateFromGst(current));
 }
@@ -2016,11 +2058,24 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
         if (debug != nullptr) {
             g_free(debug);
         }
+        // A restore failure has already reported its error and left the stream
+        // soft-paused in Error. A later pipeline error must neither report that
+        // failure again nor reload the source; explicit play or resume does.
+        if (softPausedInError()) {
+            break;
+        }
         // Decode/parse errors (a bad frame after a seek, a transient stall) are
         // often survivable: reload the source in place before surfacing the
         // error and freezing the transport on the user.
         if (tryRecoverFromStreamError()) {
             emit technicalInfoChanged(QStringLiteral("Recovered from pipeline error: %1").arg(text));
+            break;
+        }
+        // An unrecovered error must not leave a restore armed: its mute would
+        // outlive the failed preroll. A zero-position preroll is no restore, so
+        // its error is reported as an ordinary pipeline error.
+        if (m_nativePositionRestore || m_pendingSeekMs > 0) {
+            failPositionRestore(text);
             break;
         }
         m_targetState = State::Error;
@@ -2056,13 +2111,18 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
                 break;
             }
             const qint64 seekTo = m_pendingSeekMs;
-            m_pendingSeekMs = -1; // clear first so the post-seek ASYNC_DONE is a no-op
             if (seekTo > 0) {
-                gst_element_seek_simple(m_playbin,
-                                        GST_FORMAT_TIME,
-                                        kSeekFlags,
-                                        static_cast<gint64>(seekTo) * GST_MSECOND);
+                const gboolean sought = gst_element_seek_simple(m_playbin,
+                                                                GST_FORMAT_TIME,
+                                                                kSeekFlags,
+                                                                static_cast<gint64>(seekTo) * GST_MSECOND);
+                if (!sought) {
+                    // The position is still pending, so the failure keeps it as the owed resume point.
+                    failPositionRestore(QStringLiteral("Could not restore playback position"));
+                    break;
+                }
             }
+            m_pendingSeekMs = -1; // cleared once accepted so the seek's own ASYNC_DONE cannot reissue it
             gst_element_set_state(m_playbin, GST_STATE_PLAYING);
         } else if (GST_MESSAGE_SRC(message) == GST_OBJECT(m_playbin)) {
             // The in-flight flushing seek completed; release the coalescing
@@ -2075,6 +2135,11 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
                     const qint64 next = m_queuedSeekMs;
                     m_queuedSeekMs = -1;
                     issueSeek(next);
+                    if (m_nativePositionRestore && !m_seekInFlight) {
+                        // A refused retarget is the newest owed position; issueSeek() recorded it as the last seek.
+                        failPositionRestore(QStringLiteral("Could not restore playback position"));
+                        break;
+                    }
                 }
             }
             if (m_nativePositionRestore && !m_seekInFlight) {
@@ -2108,11 +2173,8 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
                 const qint64 seekTo = std::exchange(m_pendingSeekMs, -1);
                 issueSeek(seekTo);
                 if (!m_seekInFlight) {
-                    gst_element_set_state(m_playbin, GST_STATE_READY);
-                    clearNativePositionRestore();
-                    finishTargetTransition();
-                    updateState(State::Error);
-                    emit errorOccurred(QStringLiteral("Could not restore playback position"));
+                    failPositionRestore(QStringLiteral("Could not restore playback position"));
+                    break;
                 }
             }
             // Publish transport intent, not GStreamer's transient hops. Source
