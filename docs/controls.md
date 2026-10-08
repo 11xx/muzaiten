@@ -159,6 +159,12 @@ requested state and position, and the position display follows an explicit
 seek immediately. Direct ALSA and native DSD pauses release their
 exclusive device regardless of the shared-output preference.
 
+If a held position cannot be restored, playback stops with an error instead of
+starting from the beginning silently. That happens when the stream is not ready
+for its seek within 15 seconds of resuming, when the source refuses the seek,
+or when the pipeline fails during the restore. The output stays silent, and
+Play starts the current track from its beginning.
+
 While a chosen output is missing, playback pauses at its position and resumes
 there when the output returns, if it was playing; pausing, seeking or picking
 another track meanwhile is respected. With **Play through the system output
