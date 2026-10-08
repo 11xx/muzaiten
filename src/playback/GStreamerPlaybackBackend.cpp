@@ -2093,13 +2093,18 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
                 break;
             }
             const qint64 seekTo = m_pendingSeekMs;
-            m_pendingSeekMs = -1; // clear first so the post-seek ASYNC_DONE is a no-op
             if (seekTo > 0) {
-                gst_element_seek_simple(m_playbin,
-                                        GST_FORMAT_TIME,
-                                        kSeekFlags,
-                                        static_cast<gint64>(seekTo) * GST_MSECOND);
+                const gboolean sought = gst_element_seek_simple(m_playbin,
+                                                                GST_FORMAT_TIME,
+                                                                kSeekFlags,
+                                                                static_cast<gint64>(seekTo) * GST_MSECOND);
+                if (!sought) {
+                    // The position is still pending, so the failure keeps it as the owed resume point.
+                    failPositionRestore(QStringLiteral("Could not restore playback position"));
+                    break;
+                }
             }
+            m_pendingSeekMs = -1; // cleared once accepted so the seek's own ASYNC_DONE cannot reissue it
             gst_element_set_state(m_playbin, GST_STATE_PLAYING);
         } else if (GST_MESSAGE_SRC(message) == GST_OBJECT(m_playbin)) {
             // The in-flight flushing seek completed; release the coalescing
@@ -2112,6 +2117,11 @@ void GStreamerPlaybackBackend::handleMessage(GstMessage *message)
                     const qint64 next = m_queuedSeekMs;
                     m_queuedSeekMs = -1;
                     issueSeek(next);
+                    if (m_nativePositionRestore && !m_seekInFlight) {
+                        // A refused retarget is the newest owed position; issueSeek() recorded it as the last seek.
+                        failPositionRestore(QStringLiteral("Could not restore playback position"));
+                        break;
+                    }
                 }
             }
             if (m_nativePositionRestore && !m_seekInFlight) {
