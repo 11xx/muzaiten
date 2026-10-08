@@ -53,7 +53,9 @@ next starts. `radio-learn` is suggestion-only: it saves a
 the name, origin, weights and session decay, using the active profile unless
 `--profile` names another. Learned or unknown-origin profiles require
 `--allow-learned` because their tuning can reveal listening taste; unknown
-origins are exported as learned. Existing export files require `--replace`.
+origins are exported as learned. Existing export files require `--replace`; a
+file or symlink that appears during the export is refused with the same error
+and left unchanged.
 
 `import --dry-run` prints the validated profile and whether a same-name local
 profile exists, without writing or migrating stores. `import` saves it without
@@ -85,7 +87,10 @@ Export writes those exact bytes unless `--dry-run`. Import previews before
 saving, without selecting a seed or changing library/features/state databases.
 A local seed name is required and kept out of the exchange file. Use dry run
 to inspect the profile before importing; a same-name seed or existing export
-file requires `--replace`. Imports are strict and bounded to 64 KiB.
+file requires `--replace`. Imports are strict and bounded to 64 KiB, both as
+received and once normalized to the export layout. The seed store holds at most
+32 seeds and 4 MiB; an import that would exceed either limit is refused and
+leaves the store unchanged.
 
 `list` prints one local seed name per line. `remove` deletes a saved seed;
 running/restorable sessions retain their snapshot until stopped. `start-taste-radio`
@@ -251,8 +256,12 @@ no taste, history, paths, filenames, timestamps, ratings or embeddings.
 Files are limited to 64 MiB and 16 KiB per line excluding the newline, with
 a 213,044-record guard that permits every valid pack within the byte cap.
 Export rejects a pack past these limits without creating or replacing a file.
-Export uses atomic file replacement;
-import validates the entire file before store access and writes matching
+Export refuses a file that appears during export without `--replace`.
+Publication is atomic where the filesystem supports hard links; otherwise
+exclusive creation makes the file visible while it is written, and a failed
+write can leave that incomplete or unsynced file behind. A later export without
+`--replace` refuses that file. Import
+validates the entire file before store access and writes matching
 rows in one transaction. Exit codes are 0 success/no-op, 2 invalid input,
 4 operational failure and 5 writer lock busy. See
 [features-schema.md](features-schema.md#local-feature-pack-format) for

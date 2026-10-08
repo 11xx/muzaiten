@@ -18,6 +18,11 @@
   block source-term checks; reviewed data disagreements cannot waive them.
   Focused fixtures cover source mismatches and CMake staging-install omissions.
 
+- Han NOTICE table scopes accept underscores in table names, so the shipped
+  Unihan scopes `unihan/han_pinyin.tsv` and `unihan/han_simplified.tsv` parse
+  and match the source inventory. Traversal, duplicate and exact-pin checks are
+  unchanged; focused fixtures parse the shipped NOTICE and mixed inventories.
+
 - Rare Han proposals assemble from checksum-pinned references with per-value
   provenance. Marked tables audit evidence ordering, reviewed ties, family
   mappings and NOTICE attribution; unmarked essential tables retain their
@@ -196,6 +201,49 @@
   like their Chinese counterparts (`楽` matches `乐` and `樂`).
 
 ### Fixed
+
+- Seed stores holding 31 or 32 near-limit taste profiles stay listable,
+  removable and writable. Earlier versions accepted those imports but then could
+  not read the store, which grew past its 2 MiB read limit. Reads and writes now
+  share one bound of 32 seeds and 4 MiB, and a write that would exceed it is
+  refused before the store changes. Exchange profiles are also checked against
+  the 64 KiB limit in normalized form, so a compact file too large to import is
+  refused when it is read.
+
+- A held playback position that cannot be restored now stops playback with an
+  error instead of starting the track from the beginning unannounced. This
+  covers a restore still waiting for its seek when the 15-second transition
+  deadline passes, a seek the source refuses, and a pipeline error during the
+  restore. An interrupted restore no longer leaves the output muted, and a
+  refused seek no longer republishes Playing after its error. An output that
+  returns after such a failure does not restart the stopped track.
+
+- A pipeline error while playback resumes from the beginning is reported once and
+  stays the reported state. The abandoned start cannot begin playback or replace
+  that error when its preroll completes afterward; Play starts the track again.
+
+- Feature-store writers (`refresh`, `neighbors`, `pack export` and `pack import`)
+  share one writer lock per store, keyed by the store's canonical path. A
+  symlink to the store file used to take its own lock, so an export or import
+  through that symlink could write while a refresh held the store. Refresh and
+  neighbors also create a missing store directory before taking the lock, so a
+  store in an absent directory is created instead of failing as busy. Hard
+  links still do not share a lock.
+
+- Radio profile and feature-pack exports without `--replace` refuse a file that
+  appears between the existence check and publication, instead of overwriting
+  it. The export fails with its existing "already exists" error (pack exit 2,
+  radio profile exit 1) and leaves the file byte-identical. Exports publish a
+  completed file by hard link; filesystems without hard links create it
+  exclusively, which keeps the refusal but makes a partially written file
+  briefly visible.
+
+- Exports to filesystems without hard links (radio profile, feature-pack and
+  taste exports) no longer delete the destination when a write or sync fails
+  after the file was created. The export still reports failure, and the file it
+  created can remain, incomplete or unsynced. A later export without `--replace`
+  refuses that file. A file another process placed at that name during the
+  export is kept.
 
 - Canceling semantic provider setup or model-download preflight, reaching its
   timeout, or closing the window terminates the helper's provider process group

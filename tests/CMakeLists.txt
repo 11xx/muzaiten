@@ -151,6 +151,14 @@ target_compile_features(test_feature_store PRIVATE cxx_std_26)
 add_test(NAME test_feature_store COMMAND test_feature_store)
 set_tests_properties(test_feature_store PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_feature_store_lock
+    test_feature_store_lock.cpp
+)
+target_include_directories(test_feature_store_lock PRIVATE ../src)
+target_link_libraries(test_feature_store_lock PRIVATE muzaiten_features Qt6::Core Qt6::Test)
+target_compile_features(test_feature_store_lock PRIVATE cxx_std_26)
+add_test(NAME test_feature_store_lock COMMAND test_feature_store_lock)
+
 add_executable(test_curation_dialog_data
     test_curation_dialog_data.cpp
 )
@@ -294,6 +302,22 @@ target_include_directories(test_radio_profile PRIVATE ../src)
 target_link_libraries(test_radio_profile PRIVATE muzaiten_reco Qt6::Core Qt6::Test)
 target_compile_features(test_radio_profile PRIVATE cxx_std_26)
 add_test(NAME test_radio_profile COMMAND test_radio_profile)
+
+add_executable(test_file_publish test_file_publish.cpp)
+target_include_directories(test_file_publish PRIVATE ../src)
+target_link_libraries(test_file_publish PRIVATE muzaiten_core Qt6::Core Qt6::Test)
+target_compile_features(test_file_publish PRIVATE cxx_std_26)
+add_test(NAME test_file_publish COMMAND test_file_publish)
+
+add_executable(test_features_pack_publish
+    test_features_pack_publish.cpp
+    ../src/indexer/FeaturesPack.cpp
+)
+target_include_directories(test_features_pack_publish PRIVATE ../src)
+target_link_libraries(test_features_pack_publish PRIVATE muzaiten_core muzaiten_features Qt6::Core Qt6::Sql Qt6::Test)
+target_compile_features(test_features_pack_publish PRIVATE cxx_std_26)
+add_test(NAME test_features_pack_publish COMMAND test_features_pack_publish)
+set_tests_properties(test_features_pack_publish PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(test_scrobble_backfill
     test_scrobble_backfill.cpp

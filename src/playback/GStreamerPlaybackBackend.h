@@ -100,6 +100,17 @@ private:
     void issueSeek(qint64 positionMs);
     void queuePositionRestore(qint64 positionMs);
     void clearNativePositionRestore();
+    // Terminal failure of a held-position restore (the transition deadline
+    // passed, the source refused the seek, or the pipeline errored). The stream
+    // is released like a soft pause at the latest requested position and any
+    // output wait is dropped. A direct resume() retries the restore there; the
+    // player's Play and Toggle in Error restart the current track from its
+    // beginning instead (PlayerCore::playAt). Publishes Error and returns; the
+    // caller must not publish the state it was handling.
+    void failPositionRestore(const QString &message);
+    // The state a terminal restore failure leaves: soft-paused in Error. Loads,
+    // resumes, stops and profile rebuilds leave it.
+    bool softPausedInError() const { return m_softPaused && m_state == State::Error; }
     // Deterministic recovery: drop the pipeline to READY and reload the audible
     // uri at |positionMs|, preserving the prepared gapless next. Used when a
     // seek lands in the undefined about-to-finish window or never completes.
@@ -266,6 +277,10 @@ private:
     qint64 m_resumePositionMs = 0;
     // Pending seek to apply once the pipeline prerolls after a soft-pause resume.
     qint64 m_pendingSeekMs = -1;
+    // An unrecovered error abandoned a zero-position preroll. Its late bus
+    // messages must neither start playback nor publish state over the Error
+    // until a transport request begins a new target.
+    bool m_zeroPrerollAbandoned = false;
     // Native reconnects activate the buffer pool in PLAYING before seeking.
     // Keep that activation silent until the held position has prerolled.
     bool m_nativePositionRestore = false;

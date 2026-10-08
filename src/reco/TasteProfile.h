@@ -21,9 +21,14 @@ struct TasteProfile {
 
 namespace TasteProfiles {
 
+// Bounds an exchange profile both as received and in its normalized form.
 inline constexpr qsizetype MaximumBytes = 64 * 1024;
 inline constexpr int MinimumSupport = 5;
 inline constexpr double MaximumScore = 3.0;
+// Reads and writes of the seed store share these bounds: every store this module
+// writes loads back, and a write that would break either bound changes nothing.
+inline constexpr int MaximumSeeds = 32;
+inline constexpr qsizetype MaximumStoreBytes = 4 * 1024 * 1024;
 
 QString contentsDescription();
 bool validName(const QString &name);
