@@ -85,7 +85,10 @@ Export writes those exact bytes unless `--dry-run`. Import previews before
 saving, without selecting a seed or changing library/features/state databases.
 A local seed name is required and kept out of the exchange file. Use dry run
 to inspect the profile before importing; a same-name seed or existing export
-file requires `--replace`. Imports are strict and bounded to 64 KiB.
+file requires `--replace`. Imports are strict and bounded to 64 KiB, both as
+received and once normalized to the export layout. The seed store holds at most
+32 seeds and 4 MiB; an import that would exceed either limit is refused and
+leaves the store unchanged.
 
 `list` prints one local seed name per line. `remove` deletes a saved seed;
 running/restorable sessions retain their snapshot until stopped. `start-taste-radio`

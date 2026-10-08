@@ -197,6 +197,14 @@
 
 ### Fixed
 
+- Seed stores holding 31 or 32 near-limit taste profiles stay listable,
+  removable and writable. Earlier versions accepted those imports but then could
+  not read the store, which grew past its 2 MiB read limit. Reads and writes now
+  share one bound of 32 seeds and 4 MiB, and a write that would exceed it is
+  refused before the store changes. Exchange profiles are also checked against
+  the 64 KiB limit in normalized form, so a compact file too large to import is
+  refused when it is read.
+
 - Canceling semantic provider setup or model-download preflight, reaching its
   timeout, or closing the window terminates the helper's provider process group
   on Unix systems. Cleanup remains asynchronous and preserves status output.
