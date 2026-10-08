@@ -41,6 +41,19 @@ class HanNoticeTests(unittest.TestCase):
         notice.check_table(self.table, records if records is not None else self.records,
                            self.notice, self.pins, self.registry)
 
+    def pins_for(self, *sources):
+        return {key: pin for name in sources for key, pin in self.registry["sources"][name]["pins"].items()}
+
+    def write_scopes(self, scopes):
+        self.notice.write_text(notice.render_notice(self.registry, scopes), encoding="utf-8")
+
+    def write_table(self, name):
+        self.table = self.root / name
+        self.table.write_text("# fixture table\n", encoding="utf-8")
+
+    def unihan_notice(self, files):
+        return notice.render_notice(self.registry, {"unihan": files, "cns": [], "opencc": []})
+
     def test_registered_pins_and_complete_notices(self):
         self.scopes = {name: ["tgh.tsv", "big5-2.tsv"] for name in self.registry["sources"]}
         self.notice.write_text(notice.render_notice(self.registry, self.scopes))
@@ -137,6 +150,71 @@ class HanNoticeTests(unittest.TestCase):
         self.assertEqual(scopes["unihan"], ["unihan/han_pinyin.tsv", "unihan/han_simplified.tsv"])
         self.assertEqual(scopes["cns"], [])
         self.assertEqual(scopes["opencc"], [])
+
+    def test_shipped_notice_scopes_match_source_inventory(self):
+        text = (notice.HAN / "NOTICE").read_text(encoding="utf-8")
+        scopes = notice.notice_scopes(text, self.registry)
+        self.assertEqual(scopes, notice.scope_inventory(self.registry))
+        self.assertEqual(scopes["unihan"], ["unihan/han_pinyin.tsv", "unihan/han_simplified.tsv"])
+
+    def test_mixed_inventory_attributes_each_table_to_listed_sources(self):
+        self.scopes = {
+            "unihan": ["unihan/han_pinyin.tsv", "unihan/han_simplified.tsv", "shared_table.tsv"],
+            "cns": ["han_pinyin.tsv", "shared_table.tsv"],
+            "opencc": [],
+        }
+        self.write_scopes(self.scopes)
+        self.write_table("han_pinyin.tsv")
+        self.pins = self.pins_for("cns")
+        self.check()
+        self.write_table("shared_table.tsv")
+        self.pins = self.pins_for("unihan", "cns")
+        self.check()
+
+    def test_mixed_inventory_rejects_unlisted_sources_and_prefixed_names(self):
+        self.scopes = {
+            "unihan": ["unihan/han_pinyin.tsv", "unihan/han_simplified.tsv", "shared_table.tsv"],
+            "cns": ["han_pinyin.tsv", "shared_table.tsv"],
+            "opencc": [],
+        }
+        self.write_scopes(self.scopes)
+        for name, sources, message in (
+            ("han_pinyin.tsv", ("unihan",), "unihan: NOTICE attribution outside table scope"),
+            ("han_pinyin.tsv", ("unihan", "cns"), "unihan: NOTICE attribution outside table scope"),
+            ("shared_table.tsv", ("unihan", "cns", "opencc"), "opencc: NOTICE attribution outside table scope"),
+        ):
+            with self.subTest(table=name, sources=sources):
+                self.write_table(name)
+                self.pins = self.pins_for(*sources)
+                with self.assertRaisesRegex(ValueError, message):
+                    self.check()
+        self.write_table("shared_table.tsv")
+        pins = self.pins_for("unihan", "cns")
+        pins["unihan"] = {**pins["unihan"], "sha256": "0" * 64}
+        self.pins = pins
+        with self.assertRaisesRegex(ValueError, "source terms unresolved"):
+            self.check()
+
+    def test_scope_name_shapes_stay_closed(self):
+        for name in ("../han_pinyin.tsv", "unihan/../han_pinyin.tsv", "unihan/./han_pinyin.tsv",
+                     "/unihan/han_pinyin.tsv", "unihan//han_pinyin.tsv", "unihan/nested/han_pinyin.tsv",
+                     "unihan\\han_pinyin.tsv", "han/pinyin.tsv", "_han_pinyin.tsv", "1han_pinyin.tsv",
+                     "han_pinyin.TSV", "han_pinyin.tsv.bak", "han_pinyin", "han.pinyin.tsv",
+                     "han..pinyin.tsv", "han pinyin.tsv", "hän_pinyin.tsv", "han_pinyin.tsv "):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(ValueError, "invalid NOTICE table scope"):
+                    notice.notice_scopes(self.unihan_notice([name]), self.registry)
+
+    def test_underscored_scopes_keep_duplicate_and_pin_rejections(self):
+        valid = ["unihan/han_pinyin.tsv", "unihan/han_simplified.tsv"]
+        text = self.unihan_notice(valid)
+        self.assertEqual(notice.notice_scopes(text, self.registry)["unihan"], valid)
+        with self.assertRaisesRegex(ValueError, "invalid NOTICE table scope"):
+            notice.notice_scopes(self.unihan_notice([valid[0], valid[0]]), self.registry)
+        pin = self.registry["sources"]["unihan"]["pins"]["unihan"]["sha256"]
+        self.assertEqual(text.count(pin), 1)
+        with self.assertRaisesRegex(ValueError, "differs from source terms"):
+            notice.notice_scopes(text.replace(pin, "0" * 64), self.registry)
 
     def test_package_metadata_matches_row_bearing_components(self):
         scopes = notice.scope_inventory(self.registry)
