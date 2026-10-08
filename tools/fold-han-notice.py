@@ -215,7 +215,7 @@ def notice_scopes(text, registry):
         if name not in registry["sources"] or name in scopes:
             raise ValueError("invalid or duplicate NOTICE reference")
         files = entry["files"]
-        if not isinstance(files, list) or any(not isinstance(f, str) or not re.fullmatch(r"(?:unihan/)?[a-z][a-z0-9-]*\.tsv", f) for f in files) or len(files) != len(set(files)):
+        if not isinstance(files, list) or any(not isinstance(f, str) or not re.fullmatch(r"(?:unihan/)?[a-z][a-z0-9_-]*\.tsv", f) for f in files) or len(files) != len(set(files)):
             raise ValueError("invalid NOTICE table scope")
         scopes[name] = sorted(files)
     exact_keys(scopes, registry["sources"], "NOTICE sources")

@@ -18,6 +18,11 @@
   block source-term checks; reviewed data disagreements cannot waive them.
   Focused fixtures cover source mismatches and CMake staging-install omissions.
 
+- Han NOTICE table scopes accept underscores in table names, so the shipped
+  Unihan scopes `unihan/han_pinyin.tsv` and `unihan/han_simplified.tsv` parse
+  and match the source inventory. Traversal, duplicate and exact-pin checks are
+  unchanged; focused fixtures parse the shipped NOTICE and mixed inventories.
+
 - Rare Han proposals assemble from checksum-pinned references with per-value
   provenance. Marked tables audit evidence ordering, reviewed ties, family
   mappings and NOTICE attribution; unmarked essential tables retain their
