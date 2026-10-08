@@ -53,7 +53,9 @@ next starts. `radio-learn` is suggestion-only: it saves a
 the name, origin, weights and session decay, using the active profile unless
 `--profile` names another. Learned or unknown-origin profiles require
 `--allow-learned` because their tuning can reveal listening taste; unknown
-origins are exported as learned. Existing export files require `--replace`.
+origins are exported as learned. Existing export files require `--replace`; a
+file or symlink that appears during the export is refused with the same error
+and left unchanged.
 
 `import --dry-run` prints the validated profile and whether a same-name local
 profile exists, without writing or migrating stores. `import` saves it without
@@ -251,8 +253,9 @@ no taste, history, paths, filenames, timestamps, ratings or embeddings.
 Files are limited to 64 MiB and 16 KiB per line excluding the newline, with
 a 213,044-record guard that permits every valid pack within the byte cap.
 Export rejects a pack past these limits without creating or replacing a file.
-Export uses atomic file replacement;
-import validates the entire file before store access and writes matching
+Export publishes atomically and never replaces a file that appears during
+export without `--replace`; import validates the entire file before store
+access and writes matching
 rows in one transaction. Exit codes are 0 success/no-op, 2 invalid input,
 4 operational failure and 5 writer lock busy. See
 [features-schema.md](features-schema.md#local-feature-pack-format) for
