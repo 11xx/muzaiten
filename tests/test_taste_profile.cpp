@@ -135,6 +135,61 @@ QString quantizationViolation(const TasteProfile &profile, const QByteArray &byt
     return precise.hasMatch() ? QStringLiteral("spelled %1").arg(precise.captured()) : QString{};
 }
 
+QString seedName(int index)
+{
+    return QStringLiteral("seed-%1").arg(index, 2, 10, QLatin1Char('0'));
+}
+
+QStringList seedNames(const QByteArray &listing)
+{
+    return QString::fromUtf8(listing).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+}
+
+// 256 buckets at share 1/256 with labels of `cjk` CJK characters (three bytes
+// each) and three letters. At cjk = 76 the normalized profile is 65388 bytes,
+// 148 bytes under the bound; at cjk = 77 it is over the bound.
+TasteProfile nearLimitProfile(int cjk)
+{
+    TasteProfile profile;
+    for (int i = 0; i < 256; ++i) {
+        const QString letters = QStringLiteral("%1%2a").arg(QChar('a' + i / 26)).arg(QChar('a' + i % 26));
+        profile.genres.insert(QString(cjk, QChar(0x7237)) + letters, 1.0 / 256.0);
+    }
+    return profile;
+}
+
+// The compact external spelling of a profile's genres, without the
+// pretty-printed indentation that encode() adds.
+QByteArray compactExchange(const TasteProfile &profile)
+{
+    QJsonObject genres;
+    for (auto it = profile.genres.begin(); it != profile.genres.end(); ++it) {
+        genres.insert(it.key(), it.value());
+    }
+    return QJsonDocument(QJsonObject{{QStringLiteral("format"), QStringLiteral("muzaiten-taste-profile")},
+                                     {QStringLiteral("version"), 1}, {QStringLiteral("genres"), genres},
+                                     {QStringLiteral("features"), QJsonObject{}}}).toJson(QJsonDocument::Compact);
+}
+
+// A seed store with `count` entries in the indented layout, each profile in its
+// normalized form.
+QByteArray indentedSeedStore(const TasteProfile &profile, int count)
+{
+    QByteArray encoded;
+    QString error;
+    if (!TasteProfiles::encode(profile, &encoded, &error)) {
+        return {};
+    }
+    const QJsonObject normalized = QJsonDocument::fromJson(encoded).object();
+    QJsonArray entries;
+    for (int i = 1; i <= count; ++i) {
+        entries.append(QJsonObject{{QStringLiteral("name"), seedName(i)},
+                                   {QStringLiteral("profile"), normalized}});
+    }
+    return QJsonDocument(QJsonObject{{QStringLiteral("format"), QStringLiteral("muzaiten-taste-seeds")},
+                                     {QStringLiteral("version"), 1}, {QStringLiteral("profiles"), entries}}).toJson();
+}
+
 } // namespace
 
 class TasteProfileTest final : public QObject {
@@ -147,6 +202,8 @@ private slots:
     void genreLabels();
     void strictParsing();
     void twoInstallations();
+    void seedStoreLimits();
+    void legacySeedStore();
     void constraintsAndSessionSnapshots();
 private:
     bool fixture(const QString &root, bool source);
@@ -684,6 +741,96 @@ void TasteProfileTest::twoInstallations()
     seeded.setTasteProfile({}, {});
     QVERIFY(seeded.tasteProfileName().isEmpty());
     m_evidence.clear();
+}
+
+void TasteProfileTest::seedStoreLimits()
+{
+    const QString evidence = qEnvironmentVariable("MUZAITEN_TASTE_EVIDENCE");
+    QTemporaryDir temporary(evidence.isEmpty() ? QDir::tempPath() + QStringLiteral("/taste-store-XXXXXX")
+                                               : evidence + QStringLiteral("/store-XXXXXX"));
+    QVERIFY(temporary.isValid());
+    temporary.setAutoRemove(evidence.isEmpty());
+    const QString root = temporary.path();
+    qputenv("MUZAITEN_STATE_ROOT", root.toUtf8());
+    const QString store = TasteProfiles::storagePath();
+    QVERIFY(QDir().mkpath(QFileInfo(store).absolutePath()));
+
+    QByteArray encoded;
+    QString error;
+    QVERIFY2(TasteProfiles::encode(nearLimitProfile(76), &encoded, &error), qPrintable(error));
+    QVERIFY(encoded.size() > 60 * 1024 && encoded.size() <= TasteProfiles::MaximumBytes);
+    const QString profilePath = root + QStringLiteral("/near-limit.json");
+    QVERIFY(writeFile(profilePath, encoded));
+
+    // Every import of a valid seed exits 0, and list, remove and further imports
+    // keep working with 31 or 32 near-limit profiles in the store.
+    for (int i = 1; i <= 31; ++i) {
+        cli(root, {"radio-taste", "import", profilePath, "--name", seedName(i)});
+    }
+    QCOMPARE(seedNames(cli(root, {"radio-taste", "list"})).size(), 31);
+    cli(root, {"radio-taste", "import", profilePath, "--name", seedName(32)});
+    const QByteArray full = readFile(store);
+    QVERIFY(full.size() <= 4 * 1024 * 1024);
+    QCOMPARE(seedNames(cli(root, {"radio-taste", "list"})).size(), 32);
+
+    // A 33rd seed is refused before the store is written.
+    const QByteArray digest = QCryptographicHash::hash(full, QCryptographicHash::Sha256);
+    cli(root, {"radio-taste", "import", profilePath, "--name", seedName(33)}, 1);
+    QCOMPARE(QCryptographicHash::hash(readFile(store), QCryptographicHash::Sha256), digest);
+    cli(root, {"radio-taste", "remove", seedName(5)});
+    QCOMPARE(seedNames(cli(root, {"radio-taste", "list"})).size(), 31);
+
+    // Exchange files refused by size, syntax or the normalized bound leave the store unchanged.
+    const QByteArray before = readFile(store);
+    QByteArray oversized = encoded;
+    oversized.append(QByteArray(TasteProfiles::MaximumBytes + 1 - encoded.size(), ' '));
+    QVERIFY(writeFile(root + QStringLiteral("/oversized.json"), oversized));
+    cli(root, {"radio-taste", "import", root + QStringLiteral("/oversized.json"), "--name", seedName(6)}, 1);
+    QVERIFY(writeFile(root + QStringLiteral("/truncated.json"), encoded.left(encoded.size() - 8)));
+    cli(root, {"radio-taste", "import", root + QStringLiteral("/truncated.json"), "--name", seedName(6)}, 1);
+    // Compact input within the bound whose normalized form exceeds it is refused
+    // by parse(), so reading and encoding agree.
+    const QByteArray dense = compactExchange(nearLimitProfile(77));
+    QVERIFY(dense.size() <= TasteProfiles::MaximumBytes);
+    TasteProfile parsed;
+    QVERIFY(!TasteProfiles::parse(dense, &parsed, &error));
+    QVERIFY(writeFile(root + QStringLiteral("/dense.json"), dense));
+    cli(root, {"radio-taste", "import", root + QStringLiteral("/dense.json"), "--name", seedName(6)}, 1);
+    QCOMPARE(readFile(store), before);
+    QCOMPARE(seedNames(cli(root, {"radio-taste", "list"})).size(), 31);
+}
+
+void TasteProfileTest::legacySeedStore()
+{
+    const QString evidence = qEnvironmentVariable("MUZAITEN_TASTE_EVIDENCE");
+    QTemporaryDir temporary(evidence.isEmpty() ? QDir::tempPath() + QStringLiteral("/taste-legacy-XXXXXX")
+                                               : evidence + QStringLiteral("/legacy-XXXXXX"));
+    QVERIFY(temporary.isValid());
+    temporary.setAutoRemove(evidence.isEmpty());
+    const QString root = temporary.path();
+    qputenv("MUZAITEN_STATE_ROOT", root.toUtf8());
+    const QString store = TasteProfiles::storagePath();
+    QVERIFY(QDir().mkpath(QFileInfo(store).absolutePath()));
+
+    // An indented store larger than 2 MiB stays listable and removable.
+    const QByteArray legacy = indentedSeedStore(nearLimitProfile(76), 31);
+    QVERIFY(legacy.size() > 2 * 1024 * 1024);
+    QVERIFY(writeFile(store, legacy));
+    QCOMPARE(seedNames(cli(root, {"radio-taste", "list"})).size(), 31);
+    cli(root, {"radio-taste", "remove", seedName(1)});
+    QCOMPARE(seedNames(cli(root, {"radio-taste", "list"})).size(), 30);
+
+    // The read bound is inclusive at 4 MiB; one byte more is refused without change.
+    QByteArray atBound = readFile(store);
+    atBound.append(QByteArray(4 * 1024 * 1024 - atBound.size(), ' '));
+    QVERIFY(writeFile(store, atBound));
+    QCOMPARE(seedNames(cli(root, {"radio-taste", "list"})).size(), 30);
+    QByteArray beyond = atBound;
+    beyond.append(' ');
+    QVERIFY(writeFile(store, beyond));
+    cli(root, {"radio-taste", "list"}, 1);
+    cli(root, {"radio-taste", "remove", seedName(2)}, 1);
+    QCOMPARE(readFile(store), beyond);
 }
 
 void TasteProfileTest::constraintsAndSessionSnapshots()
