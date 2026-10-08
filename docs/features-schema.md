@@ -331,8 +331,11 @@ Hashes cover the canonical ffmpeg decode, so installations whose ffmpeg builds
 decode or resample a file differently compute different hashes and match
 nothing for it.
 
-The native writer holds `features.sqlite.lock` for preview, export and
-import. Valid imports write group rows in one transaction. Replacing a current
+The native writer holds the store's writer lock for preview, export and
+import. The lock file is `<canonical store path>.lock`, so a symlink to the
+store file, a relative spelling and a directory alias all contend with the
+same lock. Hard links name one file through two paths and do not share it.
+Valid imports write group rows in one transaction. Replacing a current
 row requires `--replace`; missing rows and stale rows (any other version) are
 written without it. Import does not modify identity,
 per-file caches, semantic generations, neighbors or scan metadata. Readers

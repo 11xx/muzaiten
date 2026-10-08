@@ -1,4 +1,5 @@
 #include "app/AppPaths.h"
+#include "features/FeatureStoreLock.h"
 #include "features/ProviderClient.h"
 #include "fs/MediaProbe.h"
 #include "indexer/DecodeGate.h"
@@ -2879,7 +2880,12 @@ int runRefresh(const RefreshOptions &options)
     g_progressJsonl = options.progress;
     g_progressRequestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
 
-    QLockFile lock(options.featuresPath + QStringLiteral(".lock"));
+    // The lock file lives beside the store, so its directory must exist before
+    // the lock is taken; the store itself is created later, under the lock.
+    if (!FeatureStoreLock::prepareDirectory(options.featuresPath)) {
+        failWithCode(4, QStringLiteral("could not create %1").arg(QFileInfo(options.featuresPath).absolutePath()));
+    }
+    QLockFile lock(FeatureStoreLock::lockPath(options.featuresPath));
     if (!lock.tryLock(0)) {
         failWithCode(5, QStringLiteral("feature store is busy: %1").arg(lock.error()));
     }
@@ -3085,7 +3091,10 @@ int runProviderOperation(const ProviderOptions &options,
     g_progressRequestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     std::optional<QLockFile> lock;
     if (lockStore) {
-        lock.emplace(options.featuresPath + QStringLiteral(".lock"));
+        if (!FeatureStoreLock::prepareDirectory(options.featuresPath)) {
+            failWithCode(4, QStringLiteral("could not create %1").arg(QFileInfo(options.featuresPath).absolutePath()));
+        }
+        lock.emplace(FeatureStoreLock::lockPath(options.featuresPath));
         if (!lock->tryLock(0)) {
             failWithCode(5, QStringLiteral("feature store is busy"));
         }
