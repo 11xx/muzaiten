@@ -22,8 +22,9 @@ enum class Outcome {
 // and is left untouched. Every outcome attempts to remove the temporary file.
 // Filesystems without hard links (FAT, exFAT, many network mounts) create the
 // destination exclusively instead. That path never replaces an entry, but the
-// destination is visible while it is being written and is removed if writing
-// fails.
+// destination is visible while it is being written. A failed write or sync
+// reports Failed and leaves the entry in place, because the name may have been
+// taken over by another process; the destination is never unlinked.
 //
 // With replacement, the destination is swapped atomically (QSaveFile), and an
 // existing file keeps its permissions. A new file gets the same permissions
@@ -33,7 +34,9 @@ Outcome publish(const QString &path, const QByteArray &bytes, bool replace);
 // Test seams that production code never installs. The hook runs once the
 // complete content is written and before the destination is published. The
 // link function stands in for link(2) to exercise the no-hard-link fallback.
+// The sync function stands in for fsync(2) on the fallback's destination file.
 void setBeforePublishHookForTesting(std::function<void()> hook);
 void setLinkFunctionForTesting(int (*linkFunction)(const char *, const char *));
+void setFallbackSyncForTesting(std::function<int(int)> syncFunction);
 
 } // namespace FilePublish

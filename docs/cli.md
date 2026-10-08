@@ -255,7 +255,9 @@ a 213,044-record guard that permits every valid pack within the byte cap.
 Export rejects a pack past these limits without creating or replacing a file.
 Export refuses a file that appears during export without `--replace`.
 Publication is atomic where the filesystem supports hard links; otherwise
-exclusive creation makes the file visible while it is written. Import
+exclusive creation makes the file visible while it is written, and a failed
+write can leave that incomplete or unsynced file behind. A later export without
+`--replace` refuses that file. Import
 validates the entire file before store access and writes matching
 rows in one transaction. Exit codes are 0 success/no-op, 2 invalid input,
 4 operational failure and 5 writer lock busy. See

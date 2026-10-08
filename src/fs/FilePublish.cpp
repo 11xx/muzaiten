@@ -15,6 +15,7 @@ namespace {
 
 std::function<void()> beforePublishHook;
 int (*linkFunction)(const char *, const char *) = ::link;
+std::function<int(int)> fallbackSync;
 
 // 0666 before the umask. The kernel applies the umask on creation, which keeps
 // the permissions of a new file identical to those of a QSaveFile commit.
@@ -81,21 +82,26 @@ bool writeTemporary(const QString &path, const QByteArray &bytes, QString *tempo
     return false;
 }
 
-// Fallback for filesystems without hard links. An existing entry is never
-// replaced, but the destination is visible while it is being written.
+// The destination's sync goes through a seam so tests can fail it at the
+// publication boundary. Production always calls fsync(2).
+int syncDestination(int fd)
+{
+    return fallbackSync ? fallbackSync(fd) : ::fsync(fd);
+}
+
+// Fallback for filesystems without hard links. NewOnly creation never replaces
+// an existing entry, but the destination is visible while it is written. A
+// failure after creation leaves the entry in place: by then another process may
+// own the name, and unlinking it could remove that process's file.
 Outcome createExclusive(const QString &path, const QByteArray &bytes)
 {
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::NewOnly, creationPermissions())) {
         return occupied(path) ? Outcome::Exists : Outcome::Failed;
     }
-    const bool synced = file.write(bytes) == bytes.size() && file.flush() && ::fsync(file.handle()) == 0;
+    const bool synced = file.write(bytes) == bytes.size() && file.flush() && syncDestination(file.handle()) == 0;
     file.close();
-    if (!synced) {
-        QFile::remove(path);
-        return Outcome::Failed;
-    }
-    return Outcome::Published;
+    return synced ? Outcome::Published : Outcome::Failed;
 }
 
 Outcome publishExclusively(const QString &path, const QByteArray &bytes)
@@ -147,6 +153,11 @@ void setBeforePublishHookForTesting(std::function<void()> hook)
 void setLinkFunctionForTesting(int (*replacement)(const char *, const char *))
 {
     linkFunction = replacement ? replacement : ::link;
+}
+
+void setFallbackSyncForTesting(std::function<int(int)> syncFunction)
+{
+    fallbackSync = std::move(syncFunction);
 }
 
 } // namespace FilePublish
