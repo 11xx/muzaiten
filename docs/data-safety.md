@@ -199,10 +199,12 @@ the preview. Nothing is uploaded or transmitted by the exchange UI.
 
 Import validates and previews before writes. Unknown keys or versions,
 duplicate keys, invalid UTF-8, incomplete JSON, nonfinite/out-of-range values,
-invalid shares and files exceeding 64 KiB are rejected. A same-name seed
-requires explicit replacement; export file replacement also needs consent.
-Imported seeds live in `config/radio-taste-seeds.json` under a combined root
-(or the configured configuration directory), with at most 32 named seeds.
+invalid shares and files exceeding 64 KiB, as received or once normalized, are
+rejected. A same-name seed requires explicit replacement; export file replacement
+also needs consent. Imported seeds live in `config/radio-taste-seeds.json` under
+a combined root (or the configured configuration directory), with at most 32
+named seeds and 4 MiB in total. Reads and writes apply the same limits, so every
+stored seed set can be listed and removed.
 Import/removal use a local write lock and an atomic file replacement. Rejected
 imports leave that store and library/features/state databases untouched.
 

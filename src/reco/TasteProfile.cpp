@@ -287,19 +287,25 @@ QMap<QString, double> retainedShares(const QMap<QString, int> &support)
     return shares;
 }
 
+// The bounds are checked before the store file is replaced, so a refused write
+// leaves the previous store intact.
 bool saveSeeds(const QMap<QString, TasteProfile> &profiles, QString *error)
 {
+    if (profiles.size() > TasteProfiles::MaximumSeeds) {
+        return reject(error, QStringLiteral("At most %1 local taste seeds can be stored.")
+                                 .arg(TasteProfiles::MaximumSeeds));
+    }
     QJsonArray entries;
     for (auto it = profiles.begin(); it != profiles.end(); ++it) {
         entries.append(QJsonObject{{QStringLiteral("name"), it.key()},
                                    {QStringLiteral("profile"), objectFor(it.value())}});
     }
-    if (profiles.size() > 32) {
-        return reject(error, QStringLiteral("At most 32 local taste seeds can be stored."));
-    }
     const QByteArray bytes = QJsonDocument(QJsonObject{
         {QStringLiteral("format"), QStringLiteral("muzaiten-taste-seeds")},
         {QStringLiteral("version"), 1}, {QStringLiteral("profiles"), entries}}).toJson();
+    if (bytes.size() > TasteProfiles::MaximumStoreBytes) {
+        return reject(error, QStringLiteral("Local taste seed store would exceed its size limit."));
+    }
     return atomicWrite(TasteProfiles::storagePath(), bytes, true, error);
 }
 
@@ -386,6 +392,10 @@ bool parse(const QByteArray &bytes, TasteProfile *profile, QString *error)
     }
     if (parsed.genres.isEmpty() && parsed.features.isEmpty()) {
         return reject(error, QStringLiteral("Taste seed needs a supported genre or feature distribution."));
+    }
+    // Export and seed storage write objectFor(parsed); the bound applies to its serialization.
+    if (QJsonDocument(objectFor(parsed)).toJson().size() > MaximumBytes) {
+        return reject(error, QStringLiteral("Normalized taste profile exceeds 64 KiB."));
     }
     *profile = std::move(parsed);
     return true;
@@ -545,14 +555,14 @@ bool load(QMap<QString, TasteProfile> *profiles, QString *error)
     }
     QByteArray bytes;
     QJsonObject object;
-    if (!readBytes(path, 2 * 1024 * 1024, &bytes, error) || !document(bytes, &object, error)
+    if (!readBytes(path, TasteProfiles::MaximumStoreBytes, &bytes, error) || !document(bytes, &object, error)
         || !keys(object, {QStringLiteral("format"), QStringLiteral("version"), QStringLiteral("profiles")}, {}, error)) {
         return false;
     }
     if (object.value(QStringLiteral("format")) != QJsonValue(QStringLiteral("muzaiten-taste-seeds"))
         || object.value(QStringLiteral("version")) != QJsonValue(1)
         || !object.value(QStringLiteral("profiles")).isArray()
-        || object.value(QStringLiteral("profiles")).toArray().size() > 32) {
+        || object.value(QStringLiteral("profiles")).toArray().size() > TasteProfiles::MaximumSeeds) {
         return reject(error, QStringLiteral("Invalid local taste seed store."));
     }
     for (const QJsonValue &value : object.value(QStringLiteral("profiles")).toArray()) {
