@@ -104,6 +104,7 @@ set(MUZAITEN_SOURCES
     src/db/SettingsStore.cpp
     src/db/SqlUtil.cpp
     src/features/FeatureStore.cpp
+    src/features/FeatureStoreLock.cpp
     src/features/QualityRank.cpp
     src/features/QueryVectorCache.cpp
     src/features/SongIdentity.cpp
