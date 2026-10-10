@@ -25,6 +25,7 @@
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QTextStream>
+#include <QUrl>
 #include <QUuid>
 #include <QVariant>
 #include <QtEndian>
@@ -2970,11 +2971,74 @@ int runRefresh(const RefreshOptions &options)
     return 0;
 }
 
+// True when the store is exactly what initSchema() produces for this build,
+// judged through read-only queries alone.
+bool hasCurrentSchema(QSqlDatabase &database)
+{
+    const QStringList tables = database.tables();
+    for (const QString &table : {QStringLiteral("meta"), QStringLiteral("files"), QStringLiteral("content_groups"),
+                                 QStringLiteral("features"), QStringLiteral("file_features"),
+                                 QStringLiteral("semantic_generations"), QStringLiteral("embeddings"),
+                                 QStringLiteral("track_neighbors")}) {
+        if (!tables.contains(table)) {
+            return false;
+        }
+    }
+    if (tables.contains(QStringLiteral("embeddings_v4")) || tables.contains(QStringLiteral("track_neighbors_v4"))
+        || !featuresTableHasCurrentShape(database)
+        || !tableColumns(database, QStringLiteral("embeddings")).contains(QStringLiteral("generation_id"))
+        || !tableColumns(database, QStringLiteral("track_neighbors")).contains(QStringLiteral("generation_id"))) {
+        return false;
+    }
+    QSqlQuery version(database);
+    return version.exec(QStringLiteral("SELECT value FROM meta WHERE key = 'schema_version'")) && version.next()
+        && version.value(0).toString() == QString::number(kSchemaVersion);
+}
+
+// Diagnostics read a current-schema store through a read-only connection: they
+// write no schema or metadata, a WAL reader does not wait for an active writer,
+// and read-only media work. Any other store keeps the initializing open.
+bool openCurrentStoreReadOnly(const QString &path, SqlConnection &connection)
+{
+    const QFileInfo info(path);
+    if (!info.isFile()) {
+        return false;
+    }
+    // A WAL reader needs the shared-memory file. When neither sidecar exists
+    // and the directory cannot be written, no writer can be active either, so
+    // the store is read as immutable instead.
+    const bool immutable = !QFileInfo(info.absolutePath()).isWritable()
+        && !QFileInfo::exists(path + QStringLiteral("-wal")) && !QFileInfo::exists(path + QStringLiteral("-shm"));
+    QSqlDatabase &database = connection.database();
+    if (immutable) {
+        database.setDatabaseName(QUrl::fromLocalFile(info.absoluteFilePath()).toString(QUrl::FullyEncoded)
+                                 + QStringLiteral("?immutable=1"));
+        database.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY;QSQLITE_OPEN_URI"));
+    } else {
+        database.setDatabaseName(path);
+        database.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000"));
+    }
+    if (!database.open()) {
+        return false;
+    }
+    QSqlQuery queryOnly(database);
+    if (!queryOnly.exec(QStringLiteral("PRAGMA query_only=ON")) || !hasCurrentSchema(database)) {
+        database.close();
+        return false;
+    }
+    return true;
+}
+
 int runStatus(const StatusOptions &options)
 {
-    SqlConnection connection;
-    QSqlDatabase database = openFeaturesDatabase(options.featuresPath, connection);
-    initSchema(database);
+    SqlConnection readOnly;
+    std::optional<SqlConnection> initializing;
+    QSqlDatabase database = readOnly.database();
+    if (!openCurrentStoreReadOnly(options.featuresPath, readOnly)) {
+        initializing.emplace();
+        database = openFeaturesDatabase(options.featuresPath, *initializing);
+        initSchema(database);
+    }
     QJsonObject payload = statusJson(database);
     const bool enabled = settingEnabled(readStateSetting(
         options.statePath, QStringLiteral("analysis.semantic.enabled"), QStringLiteral("false")));

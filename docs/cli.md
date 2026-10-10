@@ -195,6 +195,14 @@ Chromaprint work. Initial scans and recovery from pre-existing ungrouped rows
 still perform an exact full regroup. `phase grouping` remains in the progress
 protocol and is normally instantaneous on an unchanged store.
 
+`status` and `doctor` read a store that already has this build's schema through
+a read-only connection. They write nothing, including the `dsp_version` that
+`muzaitenctl features-status` compares, report the last committed state
+without waiting for a running refresh, and work on read-only media. A missing
+store, or one with an older or newer schema, is still initialized as `refresh`
+initializes it: a missing store and its directory are created, and other
+schemas are rewritten to this build's.
+
 Both `muzaiten-features status --json` and refresh JSON retain `featured_groups` as
 the total number of existing feature rows and add `featured_fresh` /
 `featured_stale` counts for the running build. `muzaitenctl features-status`

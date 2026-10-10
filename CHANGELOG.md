@@ -206,6 +206,11 @@
 
 ### Fixed
 
+- `muzaiten-features status` and `doctor`, which the Analysis status dialog
+  also runs, now read a current-schema feature store read-only. They no longer
+  rewrite its schema metadata or `dsp_version`, fail on read-only media, or
+  wait out the busy timeout and exit 4 while a refresh holds a write
+  transaction. Missing and other-schema stores are initialized as before.
 - A scan whose read of the library's known tracks fails now stops before
   enumerating, adding placeholders, reading tags or marking files missing,
   and reports the database error in the status bar and the source
