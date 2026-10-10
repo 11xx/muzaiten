@@ -2518,14 +2518,20 @@ QString AppCore::activeTasteSeedName() const
     return m_radioSession == nullptr ? QString{} : m_radioSession->tasteProfileName();
 }
 
-bool AppCore::startTasteRadio(const QString &name)
+AppCore::TasteRadioStart AppCore::startTasteRadio(const QString &name)
 {
     QMap<QString, TasteProfile> profiles;
     QString error;
-    if (!TasteProfiles::load(&profiles, &error) || !profiles.contains(name)) {
-        return false;
+    if (!TasteProfiles::load(&profiles, &error) || !profiles.contains(name) || m_database == nullptr) {
+        return TasteRadioStart::Unavailable;
     }
-    return startPoolRadio(QStringLiteral("taste"), &profiles[name], name);
+    // Alias canonicalization renormalizes shares, which can lengthen a seed
+    // accepted near the bound past it. Say so instead of reporting the seed absent.
+    if (TasteProfiles::exceedsBound(TasteProfiles::withAliases(profiles[name], m_database->genreAliases()))) {
+        return TasteRadioStart::TooLarge;
+    }
+    return startPoolRadio(QStringLiteral("taste"), &profiles[name], name)
+        ? TasteRadioStart::Started : TasteRadioStart::Unavailable;
 }
 
 bool AppCore::startMix(const QString &mode)
@@ -3316,8 +3322,15 @@ QJsonObject AppCore::handleIpcCommand(const QString &command, const QJsonObject 
         if (!TasteProfiles::validName(name)) {
             return error(QStringLiteral("start-taste-radio needs a local seed name."));
         }
-        return QJsonObject{{QStringLiteral("radio"), startTasteRadio(name)
-            ? QStringLiteral("started") : QStringLiteral("unavailable-taste-seed")}};
+        switch (startTasteRadio(name)) {
+        case TasteRadioStart::Started:
+            return QJsonObject{{QStringLiteral("radio"), QStringLiteral("started")}};
+        case TasteRadioStart::TooLarge:
+            return QJsonObject{{QStringLiteral("radio"), QStringLiteral("taste-seed-too-large")}};
+        case TasteRadioStart::Unavailable:
+            break;
+        }
+        return QJsonObject{{QStringLiteral("radio"), QStringLiteral("unavailable-taste-seed")}};
     }
     if (command == QLatin1String("start-radio")) {
         const QString path = QFileInfo(args.value(QStringLiteral("path")).toString()).absoluteFilePath();

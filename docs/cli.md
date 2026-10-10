@@ -98,7 +98,10 @@ leaves the store unchanged.
 `list` prints one local seed name per line. `remove` deletes a saved seed;
 running/restorable sessions retain their snapshot until stopped. `start-taste-radio`
 selects a saved seed through the running application's local IPC, and
-`stop-radio` deactivates it. Pick reasons name the seed. Export/import/list/remove
+`stop-radio` deactivates it. It prints `radio: started`,
+`radio: unavailable-taste-seed` for an unknown seed or empty candidate pool, or
+`radio: taste-seed-too-large` when the seed exceeds 64 KiB once the library's
+genre aliases are applied. Pick reasons name the seed. Export/import/list/remove
 work offline, without contacting an application or external service.
 
 See [radio.md](radio.md#aggregate-taste-seeds) for contents, support floors and

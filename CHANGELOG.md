@@ -206,6 +206,10 @@
 
 ### Fixed
 
+- Starting taste radio from a seed that exceeds 64 KiB only once genre aliases
+  are applied now reports that (`radio: taste-seed-too-large`, and a matching
+  status-bar message) instead of calling the seed or candidate pool
+  unavailable. Radio still does not start and no state changes.
 - `muzaiten-features status` and `doctor`, which the Analysis status dialog
   also runs, now read a current-schema feature store read-only. They no longer
   rewrite its schema metadata or `dsp_version`, fail on read-only media, or

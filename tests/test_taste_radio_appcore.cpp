@@ -162,9 +162,88 @@ private slots:
             QVERIFY(!core.player()->radioActive());
             QVERIFY(core.activeTasteSeedName().isEmpty());
             QVERIFY(core.settings()->setting(QStringLiteral("radio.session.state")).isEmpty());
-            QVERIFY(!core.startTasteRadio(name));
+            QCOMPARE(core.startTasteRadio(name), AppCore::TasteRadioStart::Unavailable);
             QCOMPARE(core.listenHistory()->radioPickEvents().size(), history.size());
         }
+    }
+
+    void nearLimitSeedThatGrowsUnderAliases()
+    {
+        QString error;
+        // 256 two-byte-letter genres at exactly representable 1/256 shares, padded
+        // with decades until the accepted profile sits just under the bound.
+        // Aliasing one genre to a placeholder drops it, and renormalizing 255
+        // shares to 1/255 lengthens every remaining number.
+        const QString letters = QStringLiteral("αβγδεζηθικλμνξοπρστυφχψω");
+        TasteProfile seed;
+        for (int i = 0; i < 256; ++i) {
+            QString label = QString(letters.at(i / 24)) + letters.at(i % 24);
+            label += QString(98, letters.at(0));
+            seed.genres.insert(label, 1.0 / 256.0);
+        }
+        QByteArray accepted;
+        for (int decades = 1; decades <= 199; ++decades) {
+            TasteProfile candidate = seed;
+            for (int i = 0; i < decades; ++i) {
+                candidate.decades.insert(QString::number(1000 + 10 * i), 1.0 / decades);
+            }
+            QByteArray bytes;
+            if (!TasteProfiles::encode(candidate, &bytes, &error)) {
+                break;
+            }
+            accepted = bytes;
+            seed.decades = candidate.decades;
+        }
+        QVERIFY2(!accepted.isEmpty(), qPrintable(error));
+        const QString dropped = seed.genres.firstKey();
+        const TasteProfile canonical = TasteProfiles::withAliases(seed, {{dropped, QStringLiteral("other")}});
+        QCOMPARE(canonical.genres.size(), 255);
+        QByteArray renormalized;
+        QVERIFY(!TasteProfiles::encode(canonical, &renormalized, &error));
+        qInfo("accepted %lld bytes; renormalized under the alias: %s",
+              static_cast<long long>(accepted.size()), qPrintable(error));
+        QVERIFY(accepted.size() <= TasteProfiles::MaximumBytes);
+        QVERIFY(!TasteProfiles::exceedsBound(seed));
+        QVERIFY(TasteProfiles::exceedsBound(canonical));
+
+        AppCore core(new FakePlayback, nullptr);
+        QVERIFY(QDir(m_root->path()).mkpath(QStringLiteral("music")));
+        for (int i = 0; i < 4; ++i) {
+            Track track;
+            track.path = m_root->filePath(QStringLiteral("music/%1.flac").arg(i));
+            track.parentDir = m_root->filePath(QStringLiteral("music"));
+            track.filename = QFileInfo(track.path).fileName();
+            track.title = QStringLiteral("Synthetic track %1").arg(i);
+            track.artistName = track.albumArtistName = QStringLiteral("Synthetic artist %1").arg(i);
+            track.albumTitle = QStringLiteral("Synthetic album %1").arg(i);
+            track.durationMs = 180000;
+            track.codec = QStringLiteral("flac");
+            QVERIFY(writeBytes(track.path, "fake playback fixture\n"));
+            QVERIFY2(core.database()->upsertTrack(track), qPrintable(core.database()->lastError()));
+        }
+        core.database()->setSetting(QStringLiteral("radio.batchSize"), QStringLiteral("2"));
+        const QString name = QStringLiteral("Near the bound");
+        QVERIFY2(TasteProfiles::importProfile(name, seed, false, false, &error), qPrintable(error));
+        const auto start = [&core, &name] {
+            return core.handleIpcCommand(QStringLiteral("start-taste-radio"), {{QStringLiteral("name"), name}})
+                .value(QStringLiteral("radio")).toString();
+        };
+        // Control: without the alias the same seed starts.
+        QCOMPARE(start(), QStringLiteral("started"));
+        core.stopRadio();
+        QVERIFY(!core.player()->radioActive());
+        const QVector<Track> queue = core.player()->queue();
+
+        QVERIFY(core.database()->setGenreAlias(dropped, QStringLiteral("other")));
+        QCOMPARE(start(), QStringLiteral("taste-seed-too-large"));
+        QVERIFY(!core.player()->radioActive());
+        QVERIFY(core.activeTasteSeedName().isEmpty());
+        QCOMPARE(core.player()->queue().size(), queue.size());
+        QVERIFY(core.settings()->setting(QStringLiteral("radio.session.state")).isEmpty());
+        QCOMPARE(core.handleIpcCommand(QStringLiteral("start-taste-radio"),
+                                       {{QStringLiteral("name"), QStringLiteral("Absent seed")}})
+                     .value(QStringLiteral("radio")).toString(),
+                 QStringLiteral("unavailable-taste-seed"));
     }
 
     void malformedState_data()
