@@ -1,7 +1,7 @@
 # Hosted build toolchain
 
 `cloud-init.sh` is the cloud environment's Setup script. It installs a pinned
-Nix binary distribution and signed package substitutes, verifies the compiler,
+Nix client when one is absent and signed package substitutes, verifies the compiler,
 Qt and media capabilities, and installs `cloud-env`. Development commands run
 directly from the captured SDK environment; the coding user does not need a
 Nix daemon, store writes, container runtime, or dependency installation.
@@ -39,3 +39,9 @@ The platform's cached environment contains files rather than running
 processes. This SDK requires no background service for build execution.
 Dependencies missing from the signed cache cause provisioning to fail;
 compiler/Qt requirements and checks are preserved.
+
+Provisioning reuses an existing Nix client of version 2.34 or newer. It adds
+the pinned SDK closure without replacing existing store paths, profiles or
+system configuration. An absent installation uses the verified bootstrap
+archive. A populated store without a usable client is preserved and causes
+setup to stop.

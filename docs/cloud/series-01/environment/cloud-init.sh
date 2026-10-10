@@ -101,7 +101,7 @@ lines.append('export GST_REGISTRY="${MUZAITEN_STATE_ROOT:-$PWD/agent-state/cloud
 lines.append('export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-2}"')
 Path(sys.argv[1]).write_text('\n'.join(lines) + '\n')
 SDK_F8B7F2CF2AFA11D9BA38E1C4FD5D58C9A5113F32B8D4104DDCFFB56AD6BEE22C
-cat > "$setup_dir/setup.sh" <<'SDK_988CAE1A446209212C94B8FF1D0FF696AE0ACD9CB7D9E79B05F9DF6E9E044707'
+cat > "$setup_dir/setup.sh" <<'SDK_0342C1C45E48535DF54350FE21CE550A628D788F2CAAC6587628D8E71701390A'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ ${1:-} != --cloud-setup || $(id -u) != 0 ]]; then
@@ -124,31 +124,45 @@ mkdir -p "$sdk_root/bin"
 export NIX_CONFIG=$'build-users-group =\nmax-jobs = 0\nbuilders =\nrequire-sigs = true\nfallback = false'
 export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 if [[ ! -x "$sdk_root/bin/nix-shell" ]]; then
-    if [[ -e /nix && ! -f "$sdk_root/owned-store" ]]; then
+    nix_system_shell=$(command -v nix-shell || true)
+    if [[ -n "$nix_system_shell" ]]; then
+        "$nix_system_shell" --version | python3 -c '
+import re, sys
+match = re.fullmatch(r"nix-shell \(Nix\) (\d+)\.(\d+)\.\d+", sys.stdin.read().strip())
+if not match or tuple(map(int, match.groups())) < (2, 34):
+    sys.exit("The existing Nix client must be version 2.34 or newer.")
+'
+        for tool in nix-shell nix-instantiate; do
+            nix_tool=$(command -v "$tool") || { printf 'Existing Nix installation lacks %s.\n' "$tool" >&2; exit 1; }
+            ln -sfn "$(readlink -f "$nix_tool")" "$sdk_root/bin/$tool"
+        done
+        printf '%s\n' 'Using the existing Nix installation for signed SDK provisioning.'
+    elif [[ -e /nix && ! -f "$sdk_root/owned-store" && -n $(find /nix -mindepth 1 -maxdepth 1 -print -quit) ]]; then
         printf '%s\n' 'An existing Nix store is not owned by this setup. Preserve it and configure a separate environment.' >&2
         exit 1
+    else
+        sdk_tmp=$(mktemp -d "$sdk_root/bootstrap.XXXXXX")
+        trap 'rm -rf -- "$sdk_tmp"' EXIT
+        curl -fsSL --retry 2 --max-time 120 \
+            https://releases.nixos.org/nix/nix-2.34.8/nix-2.34.8-x86_64-linux.tar.xz \
+            -o "$sdk_tmp/nix.tar.xz"
+        printf '%s  %s\n' 2c2e146b80834fe0ca201b51deeb939405b4f18e8d2071bf80b10f8123c50464 \
+            "$sdk_tmp/nix.tar.xz" | sha256sum -c -
+        tar -xJf "$sdk_tmp/nix.tar.xz" -C "$sdk_tmp"
+        mkdir -p /nix/store
+        : > "$sdk_root/owned-store"
+        cp -a "$sdk_tmp/nix-2.34.8-x86_64-linux/store/"* /nix/store/
+        nix_candidates=()
+        for candidate in /nix/store/*-nix-2.34.8; do
+            [[ -x "$candidate/bin/nix-store" ]] && nix_candidates+=("$candidate")
+        done
+        [[ ${#nix_candidates[@]} -eq 1 ]] || { printf '%s\n' 'Cannot identify the verified Nix bootstrap executable.' >&2; exit 1; }
+        nix_prefix=${nix_candidates[0]}
+        "$nix_prefix/bin/nix-store" --load-db < "$sdk_tmp/nix-2.34.8-x86_64-linux/.reginfo"
+        for tool in nix-shell nix-instantiate; do
+            ln -sfn "$nix_prefix/bin/$tool" "$sdk_root/bin/$tool"
+        done
     fi
-    sdk_tmp=$(mktemp -d "$sdk_root/bootstrap.XXXXXX")
-    trap 'rm -rf -- "$sdk_tmp"' EXIT
-    curl -fsSL --retry 2 --max-time 120 \
-        https://releases.nixos.org/nix/nix-2.34.8/nix-2.34.8-x86_64-linux.tar.xz \
-        -o "$sdk_tmp/nix.tar.xz"
-    printf '%s  %s\n' 2c2e146b80834fe0ca201b51deeb939405b4f18e8d2071bf80b10f8123c50464 \
-        "$sdk_tmp/nix.tar.xz" | sha256sum -c -
-    tar -xJf "$sdk_tmp/nix.tar.xz" -C "$sdk_tmp"
-    mkdir -p /nix/store
-    : > "$sdk_root/owned-store"
-    cp -a "$sdk_tmp/nix-2.34.8-x86_64-linux/store/"* /nix/store/
-    nix_candidates=()
-    for candidate in /nix/store/*-nix-2.34.8; do
-        [[ -x "$candidate/bin/nix-store" ]] && nix_candidates+=("$candidate")
-    done
-    [[ ${#nix_candidates[@]} -eq 1 ]] || { printf '%s\n' 'Cannot identify the verified Nix bootstrap executable.' >&2; exit 1; }
-    nix_prefix=${nix_candidates[0]}
-    "$nix_prefix/bin/nix-store" --load-db < "$sdk_tmp/nix-2.34.8-x86_64-linux/.reginfo"
-    for tool in nix-shell nix-instantiate nix-prefetch-url; do
-        ln -s "$nix_prefix/bin/$tool" "$sdk_root/bin/$tool"
-    done
 fi
 install -m 644 "$sdk_source/shell.nix" "$sdk_root/shell.nix"
 install -m 755 "$sdk_source/preflight.sh" "$sdk_root/preflight.sh"
@@ -170,5 +184,5 @@ python3 -m json.tool "$sdk_root/toolchain.json" >/dev/null
     "python3 '$sdk_root/capture-env.py' '$sdk_root/activate.sh'"
 install -m 755 "$sdk_root/cloud-env" /usr/local/bin/cloud-env
 printf '%s\n' 'Pinned muzaiten toolchain is ready. Run build and runtime commands through cloud-env.'
-SDK_988CAE1A446209212C94B8FF1D0FF696AE0ACD9CB7D9E79B05F9DF6E9E044707
+SDK_0342C1C45E48535DF54350FE21CE550A628D788F2CAAC6587628D8E71701390A
 bash "$setup_dir/setup.sh" --cloud-setup
