@@ -41,6 +41,21 @@ sys.exit(1)
 
 EMPTY = hashlib.sha256(b"").hexdigest()
 
+# A provider that answers the handshake and status, logging each request.
+SYNTHETIC_PROVIDER = f"""#!{sys.executable}
+import json, pathlib, sys
+here = pathlib.Path(__file__).resolve().parent
+request = json.loads(sys.stdin.readline())
+with open(here / "provider.log", "a") as log:
+    log.write(json.dumps(request) + "\\n")
+result = {{"capability": "clap", "protocol_versions": [1], "provider_version": "synthetic"}}
+if request["operation"] == "status":
+    result.update(model={{"present": False, "valid": False, "components": []}},
+                  model_extra_installed=True, device="cpu")
+print(json.dumps({{"protocol_version": 1, "request_id": request["request_id"], "event": "result",
+                  "result": result}}), flush=True)
+"""
+
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -353,6 +368,60 @@ class FeaturesStatusTest(unittest.TestCase):
                     stderr = self.refuse(command, store, "unreadable")
                     self.assertIn(cause, stderr)
                     self.assertEqual(without_new_sidecars(before, tree(self.root), store, self.root), before)
+
+    def test_semantic_only_reads_no_store(self):
+        synthetic = self.root / "synthetic"
+        synthetic.mkdir()
+        provider = synthetic / "provider"
+        provider.write_text(SYNTHETIC_PROVIDER)
+        provider.chmod(0o755)
+        log = synthetic / "provider.log"
+        unsupported = self.root / "unsupported-root"
+        (unsupported / "data").mkdir(parents=True)
+        with closing(sqlite3.connect(self.store)) as source, \
+                closing(sqlite3.connect(unsupported / "data" / "features.sqlite")) as target:
+            source.backup(target)
+            with target:
+                target.execute("UPDATE meta SET value = '99' WHERE key = 'schema_version'")
+        corrupt = self.root / "corrupt-root"
+        (corrupt / "data").mkdir(parents=True)
+        (corrupt / "data" / "features.sqlite").write_bytes(b"not an SQLite database\n" * 256)
+        for name, root in (("fresh", self.root / "fresh-root"), ("unsupported", unsupported),
+                           ("corrupt", corrupt)):
+            env = dict(self.env, MUZAITEN_STATE_ROOT=str(root))
+            for found in (True, False):
+                with self.subTest(root=name, provider_found=found):
+                    log.unlink(missing_ok=True)
+                    before = tree(self.root)
+                    choice = provider if found else self.root / "absent-provider"
+                    result = subprocess.run([str(BINARY), "status", "--semantic-only", "--json",
+                                             "--provider", str(choice)],
+                                            env=env, capture_output=True, text=True, timeout=60)
+                    self.assertEqual((result.returncode, result.stderr), (0, ""))
+                    report = json.loads(result.stdout)
+                    self.assertEqual(list(report), ["semantic"])
+                    after = tree(self.root)
+                    after.pop(str(log.relative_to(self.root)), None)
+                    self.assertEqual(after, before)
+                    if not found:
+                        self.assertEqual(report["semantic"]["state"], "provider-missing")
+                        self.assertFalse(log.exists())
+                        continue
+                    self.assertEqual(report["semantic"]["state"], "model-missing")
+                    self.assertEqual(report["semantic"]["provider_path"], str(provider))
+                    requests = [json.loads(line) for line in log.read_text().splitlines()]
+                    self.assertEqual([r["operation"] for r in requests], ["capabilities", "status"])
+                    self.assertEqual(requests[1]["parameters"], {})
+
+    def test_semantic_only_is_status_only_and_storeless(self):
+        for args in (["doctor", "--semantic-only"],
+                     ["status", "--semantic-only", "--features", str(self.store)]):
+            with self.subTest(args=args[0]):
+                result = subprocess.run([str(BINARY), *args, "--provider", str(self.provider)],
+                                        env=self.env, capture_output=True, text=True, timeout=60)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertFalse(self.provider_ran.exists())
 
     def test_refresh_still_creates_store(self):
         explicit = self.root / "new-dir" / "nested" / "features.sqlite"

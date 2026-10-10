@@ -248,9 +248,9 @@ are provided. See [radio.md](radio.md#aggregate-taste-seeds) and
 
 ### Feature-store diagnostics
 
-`muzaiten-features status` and `doctor`, which the Analysis status dialog and
-the semantic provider checks also run, never create, initialize, migrate or
-rewrite `features.sqlite`. They read only a store with the running build's
+`muzaiten-features status` and `doctor` never create, initialize, migrate or
+rewrite `features.sqlite`. The GUI's semantic provider checks run
+`status --semantic-only`, which resolves and opens no feature store. They read only a store with the running build's
 schema. An absent, unsupported or unreadable store is reported with exit 4
 and left exactly as it was, without consulting the semantic provider, and
 resolving the default paths creates no data, state or config directory. Only

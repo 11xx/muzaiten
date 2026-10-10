@@ -210,8 +210,7 @@
   are applied now reports that (`radio: taste-seed-too-large`, and a matching
   status-bar message) instead of calling the seed or candidate pool
   unavailable. Radio still does not start and no state changes.
-- `muzaiten-features status` and `doctor`, which the Analysis status dialog
-  and the semantic provider checks also run, now only read, and only a
+- `muzaiten-features status` and `doctor` now only read, and only a
   current-schema feature store. They no longer rewrite its schema metadata or
   `dsp_version`, fail on read-only media, or wait out the busy timeout and
   exit 4 while a refresh holds a write transaction. They also no longer
@@ -220,9 +219,12 @@
   unsupported or unreadable store now exits 4 (a missing store previously
   exited 0) with one stderr line naming that state, the path and the cause,
   prints no status JSON and does not consult the provider; `refresh` creates
-  or upgrades the store. Until a first analysis creates the store, the GUI's
-  semantic provider setup and model download checks therefore report that
-  the status check failed.
+  or upgrades the store. The new `status --semantic-only` reports only the
+  semantic provider without resolving or opening a store. The GUI's provider
+  setup, model download and Analysis status provider checks use it, so setup
+  and download consent work before a first analysis creates the store, and
+  an older store the app still reads is no longer shown as a missing
+  provider.
 - A scan whose read of the library's known tracks fails now stops before
   enumerating, adding placeholders, reading tags or marking files missing,
   and reports the database error in the status bar and the source

@@ -922,8 +922,8 @@ private slots:
         QVERIFY(!QFileInfo::exists(QDir(fixture.root).filePath(QStringLiteral("first/release"))));
         QVERIFY(window.m_semanticStatusProcess != nullptr);
         QCOMPARE(readFixtureObject(fixture.startedPath()).value(QStringLiteral("args")).toArray(),
-                 (QJsonArray{QStringLiteral("status"), QStringLiteral("--features"),
-                             core.featuresPath(), QStringLiteral("--json")}));
+                 (QJsonArray{QStringLiteral("status"), QStringLiteral("--semantic-only"),
+                             QStringLiteral("--json")}));
         QVERIFY(!QFileInfo::exists(fixture.downloadPath()));
         QVERIFY(fixture.release());
         const QString resultName = forDownload ? QStringLiteral("semantic.model.consent")
@@ -934,6 +934,100 @@ private slots:
         QVERIFY(!QFileInfo::exists(fixture.downloadPath()));
         window.cancelSemanticStatusRequest();
         QTRY_VERIFY(window.findChildren<QProcess *>(QStringLiteral("semantic.status.process")).isEmpty());
+    }
+
+    void semanticStatusRealHelperWithoutFeatureStore_data()
+    {
+        QTest::addColumn<bool>("forDownload");
+        QTest::newRow("setup") << false;
+        QTest::newRow("download") << true;
+    }
+
+    // The real native helper with a synthetic provider, before any analysis
+    // has created a feature store: setup and the download consent still get
+    // the provider's status, and canceling downloads nothing.
+    void semanticStatusRealHelperWithoutFeatureStore()
+    {
+        QFETCH(bool, forDownload);
+        const QString root = QDir(qEnvironmentVariable("MUZAITEN_STATE_ROOT")).filePath(QStringLiteral("real-helper"));
+        const QString helper = QDir(root).filePath(QStringLiteral("muzaiten-features"));
+        const QString provider = QDir(root).filePath(QStringLiteral("provider"));
+        QVERIFY(QDir().mkpath(root));
+        QVERIFY(QFile::link(QStringLiteral(MUZAITEN_FEATURES_BINARY), helper));
+        QVERIFY(writeFixtureFile(provider, R"PY(#!/usr/bin/env python3
+import json
+import pathlib
+import sys
+
+here = pathlib.Path(__file__).resolve().parent
+request = json.loads(sys.stdin.readline())
+with open(here / "provider.log", "a") as log:
+    log.write(json.dumps(request) + "\n")
+operation = request["operation"]
+result = {"capability": "clap", "protocol_versions": [1], "provider_version": "synthetic",
+          "feature_revision": "synthetic-revision"}
+if operation == "status":
+    result.update(model={"present": False, "valid": False, "components": [], "source": "synthetic-source",
+                         "license": "synthetic-license", "approximate_bytes": 1000000, "sha256": "0" * 64,
+                         "cache_path": str(here / "model-cache")},
+                  model_extra_installed=True, device="cpu")
+elif operation != "capabilities":
+    print(json.dumps({"protocol_version": 1, "request_id": request["request_id"], "event": "error",
+                      "code": "unsupported", "message": operation}), flush=True)
+    sys.exit(2)
+print(json.dumps({"protocol_version": 1, "request_id": request["request_id"], "event": "result",
+                  "result": result}), flush=True)
+)PY"));
+        QVERIFY(QFile::setPermissions(provider, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        const QByteArray savedPath = qgetenv("PATH");
+        qputenv("PATH", root.toUtf8() + ':' + savedPath);
+        qputenv("MUZAITEN_FEATURES_CLAP", provider.toUtf8());
+        const auto restore = qScopeGuard([&savedPath]() {
+            qputenv("PATH", savedPath);
+            qunsetenv("MUZAITEN_FEATURES_CLAP");
+        });
+        const auto requests = [&root]() {
+            QList<QJsonObject> result;
+            QFile log(QDir(root).filePath(QStringLiteral("provider.log")));
+            if (log.open(QIODevice::ReadOnly)) {
+                for (const QByteArray &line : log.readAll().split('\n')) {
+                    if (!line.trimmed().isEmpty()) result << QJsonDocument::fromJson(line).object();
+                }
+            }
+            return result;
+        };
+
+        AppCore core;
+        MainWindow window(&core);
+        QCOMPARE(window.resolveMuzaitenIndexBinary(), helper);
+        QVERIFY(!QFileInfo::exists(core.featuresPath()));
+        if (forDownload) window.downloadSemanticModel();
+        else window.configureSemanticProvider();
+        const QString resultName = forDownload ? QStringLiteral("semantic.model.consent")
+                                               : QStringLiteral("semantic.provider.setup");
+        QTRY_VERIFY_WITH_TIMEOUT(window.m_semanticStatusDialog != nullptr
+                                     && window.m_semanticStatusDialog->objectName() == resultName, 15'000);
+        auto *box = qobject_cast<QMessageBox *>(window.m_semanticStatusDialog.data());
+        QVERIFY(box != nullptr);
+        if (forDownload) QVERIFY2(box->text().contains(QStringLiteral("synthetic-source")), qPrintable(box->text()));
+        else QCOMPARE(box->text(), QStringLiteral("model-missing"));
+        bool statusSeen = false;
+        for (const QJsonObject &request : requests()) {
+            if (request.value(QStringLiteral("operation")).toString() == QLatin1String("status")) {
+                statusSeen = true;
+                QVERIFY(!request.value(QStringLiteral("parameters")).toObject().contains(QStringLiteral("features")));
+            }
+        }
+        QVERIFY(statusSeen);
+        window.cancelSemanticStatusRequest();
+        QTRY_VERIFY(window.findChildren<QProcess *>(QStringLiteral("semantic.status.process")).isEmpty());
+        QVERIFY(window.m_semanticStatusDialog == nullptr);
+        for (const QJsonObject &request : requests()) {
+            const QString operation = request.value(QStringLiteral("operation")).toString();
+            QVERIFY2(operation == QLatin1String("capabilities") || operation == QLatin1String("status"),
+                     qPrintable(operation));
+        }
+        QVERIFY(!QFileInfo::exists(core.featuresPath()));
     }
 
     void semanticStatusSetupResults_data()

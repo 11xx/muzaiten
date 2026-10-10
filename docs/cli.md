@@ -154,6 +154,7 @@ muzaiten-features refresh --json
 muzaiten-features refresh --semantic --progress=jsonl
 muzaiten-features refresh --no-semantic --power background
 muzaiten-features status --json
+muzaiten-features status --semantic-only --json
 muzaiten-features doctor
 muzaiten-features model download --progress=jsonl
 muzaiten-features model download --components audio   # 285 MB, radio/analysis only
@@ -211,6 +212,15 @@ stays empty (no status JSON) and the semantic provider is not consulted:
 | `feature store absent: PATH does not exist` | Nothing exists at the path yet. Neither the store, its directory nor the default data/state/config directories are created; `refresh` creates the store. |
 | `feature store unsupported: PATH has schema version N, older than this build's 5` (or `newer`) | Another schema version, a missing version, or this version with a missing table, an incompatible `features` table or a pre-v5 semantic table. The store is left as it is; `refresh` upgrades an older one. |
 | `feature store unreadable: PATH: CAUSE` | SQLite could not open or read it: a damaged or non-database file, a directory, or missing permissions. `CAUSE` is SQLite's error. |
+
+`status --semantic-only` reports only the semantic provider: it resolves and
+opens no feature store, prints only the `semantic` object, and asks the
+provider for its status without a store path (capabilities, model, runtime and
+device). It reads the saved provider path from `state.sqlite` read-only and
+creates nothing; it exits 0 whether or not a store exists. It cannot be
+combined with `--features`, and `doctor` does not accept it (exit 2). The
+GUI's provider setup, model download and Analysis status provider checks use
+it, so they work before a first analysis creates the store.
 
 Both `muzaiten-features status --json` and refresh JSON retain `featured_groups` as
 the total number of existing feature rows and add `featured_fresh` /
