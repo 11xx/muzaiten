@@ -67,3 +67,25 @@ Within-test SKIP lines (counted from the new `build/Testing/Temporary/LastTest.l
 Warnings in the recovery test log: 0.
 
 Not claimed: CTest totals are not a substitute for the within-test skip count, and this recovery did not rerun the build.
+
+## final_revision_verification (separate from the earlier witnesses)
+
+Earlier witnesses above are retained unchanged. This section binds evidence to the committed runner fix.
+
+- Tested revision: **`1f0e51e2af291f1d008b8202f8efb0a60f397eef`** (`fix(cloud): preserve CTest output before dropping root`), reached by a temporary detached checkout of `arc/cloud-ctest-output`. That branch resolves to this revision and descends from `702ab0c7…`.
+- Report branch: `claude/muzaiten-final-sdk-baseline-fqw0m5`, which descends from `702ab0c7…` and **does not contain `1f0e51e`**. The report files record evidence for that revision, not the branch's own ancestry.
+- Source-diff check (`702ab0c7…` → `1f0e51e`): only `docs/cloud/series-01/SHA256SUMS`, `environment/README.md`, `environment/cloud-init.sh`, `environment/cloud-test`, and `manifest.json` changed. No `src/`, `tests/`, or CMake file differs (empty diff).
+- Packet hashes: `sha256sum -c docs/cloud/series-01/SHA256SUMS` exit **0** (all entries OK).
+
+| Step | Command | Exit | Result |
+| --- | --- | --- | --- |
+| Build | `cloud-env make build` (incremental, existing cache) | **0** | 143 ninja steps; 0 warning lines; 0 error lines |
+| Test | `bash docs/cloud/series-01/environment/cloud-test` (committed script) | **0** | UID printed as 1000; `make test` via CTest |
+
+- CTest totals: **86 of 86 passed, 0 failed, 0 not run** (total test time 191.74 s).
+- Within-test SKIP lines (from `LastTest.log`): **one**, `SharedOutputRoutingTest::initTestCase() PipeWire configuration pipewire.conf not found`. That is the optional, FHS-only native-routing fixture. It was not suppressed and is observed coverage, not a pass.
+- Warning lines in the test log: 0.
+- The committed script archived the prior `build/Testing/Temporary` privately under ignored state. `build/Testing/Temporary` is now `ubuntu`-owned, mode 755. No `chown`, `chmod`, account, or permission change was made.
+- Raw logs stay in ignored `agent-state/sdk-pilot/` (`final-sha256.log`, `final-build.log`, `final-test.log`).
+
+Not claimed: local acceptance, independent review, or that this report branch itself contains the runner fix. Tasks 1–4 remain not started.

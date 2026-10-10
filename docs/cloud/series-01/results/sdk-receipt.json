@@ -45,6 +45,48 @@
       "The optional SharedOutputRoutingTest skip is observed coverage, not a pass"
     ]
   },
+  "final_revision_verification": {
+    "note": "Separate from the earlier witnesses; retained above. Report branch does not contain the tested revision.",
+    "tested_revision": "1f0e51e2af291f1d008b8202f8efb0a60f397eef",
+    "tested_revision_subject": "fix(cloud): preserve CTest output before dropping root",
+    "tested_revision_branch": "arc/cloud-ctest-output",
+    "report_branch_source_head": "ecbd58241e6cf1ef8dd32caf540983252867e7e7",
+    "report_branch_contains_tested_revision": false,
+    "source_diff_from_702ab0c_limited_to": ["docs/cloud/series-01/SHA256SUMS", "docs/cloud/series-01/environment/README.md", "docs/cloud/series-01/environment/cloud-init.sh", "docs/cloud/series-01/environment/cloud-test", "docs/cloud/series-01/manifest.json"],
+    "application_test_build_source_changed": false,
+    "uid": 1000,
+    "checks": [
+      {
+        "revision": "1f0e51e2af291f1d008b8202f8efb0a60f397eef",
+        "command": "sha256sum -c docs/cloud/series-01/SHA256SUMS",
+        "exit_code": 0,
+        "evidence": "observed",
+        "result": "all entries OK"
+      },
+      {
+        "revision": "1f0e51e2af291f1d008b8202f8efb0a60f397eef",
+        "command": "cloud-env make build",
+        "exit_code": 0,
+        "evidence": "observed",
+        "result": "incremental; 143 ninja steps; 0 warning lines; 0 error lines"
+      },
+      {
+        "revision": "1f0e51e2af291f1d008b8202f8efb0a60f397eef",
+        "command": "bash docs/cloud/series-01/environment/cloud-test",
+        "exit_code": 0,
+        "evidence": "observed",
+        "result": "printed UID 1000; CTest 86 of 86 passed, 0 failed, 0 not run",
+        "ctest_totals": "86 passed, 0 failed",
+        "within_test_skips": 1,
+        "within_test_skip_detail": "SharedOutputRoutingTest::initTestCase: PipeWire configuration pipewire.conf not found (optional native routing; FHS-only fixture; not suppressed)",
+        "warning_lines": 0
+      }
+    ],
+    "open_findings": [
+      "Local acceptance and independent review are not claimed",
+      "The optional SharedOutputRoutingTest skip is observed coverage, not a pass"
+    ]
+  },
   "tasks": [
     {
       "id": "0",
