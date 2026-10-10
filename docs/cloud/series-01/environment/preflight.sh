@@ -8,7 +8,7 @@ def version(command):
     return subprocess.check_output(command, text=True).strip()
 
 qt = ['Qt6Concurrent', 'Qt6Core', 'Qt6DBus', 'Qt6Gui', 'Qt6Multimedia', 'Qt6Network', 'Qt6Widgets', 'Qt6Sql', 'Qt6Test']
-libs = ['taglib', 'libzstd', 'libchromaprint', 'gstreamer-1.0', 'gstreamer-audio-1.0', 'gstreamer-pbutils-1.0', 'glib-2.0', 'gobject-2.0']
+libs = ['taglib', 'libzstd', 'libchromaprint', 'gstreamer-1.0', 'gstreamer-audio-1.0', 'gstreamer-pbutils-1.0', 'glib-2.0', 'gobject-2.0', 'sysprof-capture-4']
 versions = {name: version(['pkg-config', '--modversion', name]) for name in qt + libs}
 assert tuple(map(int, versions['Qt6Core'].split('.')[:2])) >= (6, 11), 'Qt 6.11 or later is required'
 assert int(versions['taglib'].split('.')[0]) >= 2, 'TagLib 2 or later is required'
@@ -20,10 +20,10 @@ with tempfile.TemporaryDirectory(prefix='muzaiten-sdk-preflight-') as tmp:
     (root / 'CMakeLists.txt').write_text(
         'cmake_minimum_required(VERSION 4.0)\n'
         'project(sdk_probe LANGUAGES CXX)\n'
-        'find_package(Qt6 6.11 REQUIRED COMPONENTS Core)\n'
+        'find_package(Qt6 6.11 REQUIRED COMPONENTS Concurrent Core DBus Gui Multimedia Network Widgets Sql Test Svg)\n'
         'add_executable(sdk_probe main.cpp)\n'
         'set_target_properties(sdk_probe PROPERTIES CXX_STANDARD 26)\n'
-        'target_link_libraries(sdk_probe PRIVATE Qt6::Core)\n')
+        'target_link_libraries(sdk_probe PRIVATE Qt6::Core Qt6::Widgets Qt6::Multimedia Qt6::Svg)\n')
     (root / 'main.cpp').write_text('#include <QString>\nint main() { return QString("sdk").size() != 3; }\n')
     subprocess.run(['cmake', '-S', tmp, '-B', str(root / 'build'), '-G', 'Ninja'], stdout=subprocess.DEVNULL, check=True)
     subprocess.run(['cmake', '--build', str(root / 'build')], stdout=subprocess.DEVNULL, check=True)

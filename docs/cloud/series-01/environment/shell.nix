@@ -10,7 +10,7 @@ in
     cmake ninja pkg-config git python3 gnumake binutils mold coreutils bash
   ];
   buildInputs = with pkgs; [
-    qt6.qtbase qt6.qtmultimedia qt6.qtsvg taglib zstd chromaprint glib
+    qt6.qtbase qt6.qtmultimedia qt6.qtsvg taglib zstd chromaprint glib libsysprof-capture
     gst.gstreamer gst.gst-plugins-base gst.gst-plugins-good
     gst.gst-plugins-bad gst.gst-libav pipewire pulseaudio wireplumber
     dbus ffmpeg fontconfig dejavu_fonts
