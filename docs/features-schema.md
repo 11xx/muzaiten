@@ -98,8 +98,9 @@ holds the feature-store lock.
 
 - `schema_version`: `5`.
 - `indexer_version`: `cpp`.
-- `dsp_version`: the analyzer version recorded when the indexer last opened the
-  store. It is diagnostic; app-side freshness is decided from each feature
+- `dsp_version`: the analyzer version recorded when the indexer last initialized
+  the store (`status` and `doctor` leave a current-schema store unchanged). It is
+  diagnostic; app-side freshness is decided from each feature
   row's `version` against the version expected by the running build.
 - `created_at`: Unix epoch seconds when the database was first initialized.
 - `last_scan_finished_at`: Unix epoch seconds for the last successful full
