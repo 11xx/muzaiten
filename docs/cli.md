@@ -198,13 +198,19 @@ Chromaprint work. Initial scans and recovery from pre-existing ungrouped rows
 still perform an exact full regroup. `phase grouping` remains in the progress
 protocol and is normally instantaneous on an unchanged store.
 
-`status` and `doctor` read a store that already has this build's schema through
-a read-only connection. They write nothing, including the `dsp_version` that
-`muzaitenctl features-status` compares, report the last committed state
-without waiting for a running refresh, and work on read-only media. A missing
-store, or one with an older or newer schema, is still initialized as `refresh`
-initializes it: a missing store and its directory are created, and other
-schemas are rewritten to this build's.
+`status` and `doctor` only read, and only a store that already has this build's
+schema. They use a read-only connection and write nothing, including the
+`dsp_version` that `muzaitenctl features-status` compares; they report the last
+committed state without waiting for a running refresh, and work on read-only
+media. They never create, initialize, migrate or rewrite a store. Any other
+store exits 4 with one stderr line naming its state, path and cause; stdout
+stays empty (no status JSON) and the semantic provider is not consulted:
+
+| stderr | Store |
+| --- | --- |
+| `feature store absent: PATH does not exist` | Nothing exists at the path yet. Neither the store, its directory nor the default data/state/config directories are created; `refresh` creates the store. |
+| `feature store unsupported: PATH has schema version N, older than this build's 5` (or `newer`) | Another schema version, a missing version, or this version with a missing table, an incompatible `features` table or a pre-v5 semantic table. The store is left as it is; `refresh` upgrades an older one. |
+| `feature store unreadable: PATH: CAUSE` | SQLite could not open or read it: a damaged or non-database file, a directory, or missing permissions. `CAUSE` is SQLite's error. |
 
 Both `muzaiten-features status --json` and refresh JSON retain `featured_groups` as
 the total number of existing feature rows and add `featured_fresh` /

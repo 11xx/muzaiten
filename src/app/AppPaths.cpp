@@ -13,12 +13,24 @@ namespace {
 constexpr auto kAppSubdir = "muzaiten";
 constexpr auto kConfigFileName = "muzaiten.conf";
 
-QString ensure(const QString &dir)
+QString ensure(const QString &dir, bool create)
 {
-    if (!dir.isEmpty()) {
+    if (create && !dir.isEmpty()) {
         QDir().mkpath(dir);
     }
     return dir;
+}
+
+QString resolve(const char *flagProperty,
+                const char *envVar,
+                const char *rootSubdir,
+                const char *xdgVar,
+                const char *xdgFallback,
+                bool create);
+
+QString configDirectory(bool create)
+{
+    return resolve("muzaiten.configDir", "MUZAITEN_CONFIG_DIR", "config", "XDG_CONFIG_HOME", "/.config", create);
 }
 
 QString expandUser(const QString &path)
@@ -35,9 +47,9 @@ QString expandUser(const QString &path)
 // Reads [paths]<key> from the config file. Empty when the file or key is absent.
 // The config file location never depends on the config file, so this is safe to
 // call from path resolution (no recursion).
-QString configPathValue(const char *key)
+QString configPathValue(const char *key, bool create)
 {
-    const QString file = QDir(configDir()).filePath(QString::fromLatin1(kConfigFileName));
+    const QString file = QDir(configDirectory(create)).filePath(QString::fromLatin1(kConfigFileName));
     if (!QFileInfo::exists(file)) {
         return {};
     }
@@ -74,55 +86,76 @@ QString resolve(const char *flagProperty,
                 const char *envVar,
                 const char *rootSubdir,
                 const char *xdgVar,
-                const char *xdgFallback)
+                const char *xdgFallback,
+                bool create)
 {
     if (qApp != nullptr) {
         const QString flag = qApp->property(flagProperty).toString().trimmed();
         if (!flag.isEmpty()) {
-            return ensure(QDir(expandUser(flag)).absolutePath());
+            return ensure(QDir(expandUser(flag)).absolutePath(), create);
         }
     }
     const QString fromEnv = qEnvironmentVariable(envVar).trimmed();
     if (!fromEnv.isEmpty()) {
-        return ensure(QDir(expandUser(fromEnv)).absolutePath());
+        return ensure(QDir(expandUser(fromEnv)).absolutePath(), create);
     }
     const QString root = combinedRoot();
     if (!root.isEmpty()) {
-        return ensure(QDir(root).filePath(QString::fromLatin1(rootSubdir)));
+        return ensure(QDir(root).filePath(QString::fromLatin1(rootSubdir)), create);
     }
     // Config file layer (below CLI/env/root, above the XDG default). The config
     // directory itself is bootstrap and cannot be set from the config file.
     if (qstrcmp(rootSubdir, "config") != 0) {
-        const QString fromConfig = configPathValue(rootSubdir);
+        const QString fromConfig = configPathValue(rootSubdir, create);
         if (!fromConfig.isEmpty()) {
-            return ensure(fromConfig);
+            return ensure(fromConfig, create);
         }
     }
     const QString xdg = qEnvironmentVariable(xdgVar).trimmed();
     const QString base = !xdg.isEmpty() ? xdg : QDir::homePath() + QString::fromLatin1(xdgFallback);
-    return ensure(QDir(base).filePath(QString::fromLatin1(kAppSubdir)));
+    return ensure(QDir(base).filePath(QString::fromLatin1(kAppSubdir)), create);
+}
+
+QString dataDirectory(bool create)
+{
+    return resolve("muzaiten.dataDir", "MUZAITEN_DATA_DIR", "data", "XDG_DATA_HOME", "/.local/share", create);
+}
+
+QString stateDirectory(bool create)
+{
+    return resolve("muzaiten.stateDir", "MUZAITEN_STATE_DIR", "state", "XDG_STATE_HOME", "/.local/state", create);
 }
 
 } // namespace
 
 QString dataDir()
 {
-    return resolve("muzaiten.dataDir", "MUZAITEN_DATA_DIR", "data", "XDG_DATA_HOME", "/.local/share");
+    return dataDirectory(true);
 }
 
 QString stateDir()
 {
-    return resolve("muzaiten.stateDir", "MUZAITEN_STATE_DIR", "state", "XDG_STATE_HOME", "/.local/state");
+    return stateDirectory(true);
 }
 
 QString cacheDir()
 {
-    return resolve("muzaiten.cacheDir", "MUZAITEN_CACHE_DIR", "cache", "XDG_CACHE_HOME", "/.cache");
+    return resolve("muzaiten.cacheDir", "MUZAITEN_CACHE_DIR", "cache", "XDG_CACHE_HOME", "/.cache", true);
 }
 
 QString configDir()
 {
-    return resolve("muzaiten.configDir", "MUZAITEN_CONFIG_DIR", "config", "XDG_CONFIG_HOME", "/.config");
+    return configDirectory(true);
+}
+
+QString dataDirWithoutCreating()
+{
+    return dataDirectory(false);
+}
+
+QString stateDirWithoutCreating()
+{
+    return stateDirectory(false);
 }
 
 QString configFilePath()

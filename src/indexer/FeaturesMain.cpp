@@ -2336,9 +2336,20 @@ QJsonObject statusJson(QSqlDatabase &database)
         files += count;
         statuses.insert(statusQuery.value(0).toString(), static_cast<double>(count));
     }
+    if (statusQuery.lastError().isValid()) {
+        fail(statusQuery.lastError().text());
+    }
 
-    const qint64 groups = countScalar(database, QStringLiteral("SELECT COUNT(*) FROM content_groups"));
-    const qint64 featured = countScalar(database, QStringLiteral("SELECT COUNT(*) FROM features"));
+    // Unlike countScalar(), a failed count is an error here, not zero rows.
+    const auto strictCount = [&database](const QString &sql) {
+        QSqlQuery query(database);
+        if (!query.exec(sql) || !query.next()) {
+            fail(query.lastError().text());
+        }
+        return query.value(0).toLongLong();
+    };
+    const qint64 groups = strictCount(QStringLiteral("SELECT COUNT(*) FROM content_groups"));
+    const qint64 featured = strictCount(QStringLiteral("SELECT COUNT(*) FROM features"));
     const qint64 featuredStale = staleFeatureCount(database);
     return QJsonObject{
         {QStringLiteral("schema_version"), kSchemaVersion},
@@ -2971,38 +2982,89 @@ int runRefresh(const RefreshOptions &options)
     return 0;
 }
 
-// True when the store is exactly what initSchema() produces for this build,
-// judged through read-only queries alone.
-bool hasCurrentSchema(QSqlDatabase &database)
+// Why a store SQLite can read differs from what initSchema() produces for this
+// build, judged through read-only queries; empty when it matches. A failing
+// query throws instead: a read failure is never a schema verdict.
+QString unsupportedSchemaCause(QSqlDatabase &database)
 {
-    const QStringList tables = database.tables();
-    for (const QString &table : {QStringLiteral("meta"), QStringLiteral("files"), QStringLiteral("content_groups"),
+    QSqlQuery list(database);
+    if (!list.exec(QStringLiteral("SELECT name FROM sqlite_master WHERE type = 'table'"))) {
+        fail(list.lastError().text());
+    }
+    QSet<QString> tables;
+    while (list.next()) {
+        tables.insert(list.value(0).toString());
+    }
+    if (list.lastError().isValid()) {
+        fail(list.lastError().text());
+    }
+    if (!tables.contains(QStringLiteral("meta"))) {
+        return QStringLiteral("lacks the meta table");
+    }
+    QSqlQuery version(database);
+    if (!version.exec(QStringLiteral("SELECT value FROM meta WHERE key = 'schema_version'"))) {
+        fail(version.lastError().text());
+    }
+    if (!version.next()) {
+        if (version.lastError().isValid()) {
+            fail(version.lastError().text());
+        }
+        return QStringLiteral("records no schema version");
+    }
+    const QString recorded = version.value(0).toString();
+    bool numeric = false;
+    const int schemaVersion = recorded.toInt(&numeric);
+    if (!numeric) {
+        return QStringLiteral("records schema version \"%1\"").arg(recorded);
+    }
+    if (schemaVersion != kSchemaVersion) {
+        return QStringLiteral("has schema version %1, %2 than this build's %3")
+            .arg(QString::number(schemaVersion),
+                 schemaVersion < kSchemaVersion ? QStringLiteral("older") : QStringLiteral("newer"),
+                 QString::number(kSchemaVersion));
+    }
+    for (const QString &table : {QStringLiteral("files"), QStringLiteral("content_groups"),
                                  QStringLiteral("features"), QStringLiteral("file_features"),
                                  QStringLiteral("semantic_generations"), QStringLiteral("embeddings"),
                                  QStringLiteral("track_neighbors")}) {
         if (!tables.contains(table)) {
-            return false;
+            return QStringLiteral("lacks the %1 table").arg(table);
         }
     }
-    if (tables.contains(QStringLiteral("embeddings_v4")) || tables.contains(QStringLiteral("track_neighbors_v4"))
-        || !featuresTableHasCurrentShape(database)
-        || !tableColumns(database, QStringLiteral("embeddings")).contains(QStringLiteral("generation_id"))
-        || !tableColumns(database, QStringLiteral("track_neighbors")).contains(QStringLiteral("generation_id"))) {
-        return false;
+    for (const QString &legacy : {QStringLiteral("embeddings_v4"), QStringLiteral("track_neighbors_v4")}) {
+        if (tables.contains(legacy)) {
+            return QStringLiteral("has an unfinished %1 migration").arg(legacy);
+        }
     }
-    QSqlQuery version(database);
-    return version.exec(QStringLiteral("SELECT value FROM meta WHERE key = 'schema_version'")) && version.next()
-        && version.value(0).toString() == QString::number(kSchemaVersion);
+    if (!featuresTableHasCurrentShape(database)) {
+        return QStringLiteral("has an incompatible features table");
+    }
+    for (const QString &table : {QStringLiteral("embeddings"), QStringLiteral("track_neighbors")}) {
+        if (!tableColumns(database, table).contains(QStringLiteral("generation_id"))) {
+            return QStringLiteral("lacks %1.generation_id").arg(table);
+        }
+    }
+    return {};
 }
 
-// Diagnostics read a current-schema store through a read-only connection: they
-// write no schema or metadata, a WAL reader does not wait for an active writer,
-// and read-only media work. Any other store keeps the initializing open.
-bool openCurrentStoreReadOnly(const QString &path, SqlConnection &connection)
+[[noreturn]] void failUnreadableStore(const QString &path, const QString &cause)
+{
+    failWithCode(4, QStringLiteral("feature store unreadable: %1: %2").arg(path, cause));
+}
+
+// Diagnostics read only a store with this build's schema, through a read-only
+// connection: they write no schema or metadata, a WAL reader does not wait for
+// an active writer, and read-only media work. Any other store is a data error
+// (exit 4) naming its state; diagnostics never create, initialize or migrate
+// one, so nothing here falls back to the writer's openFeaturesDatabase().
+void openCurrentStoreReadOnly(const QString &path, SqlConnection &connection)
 {
     const QFileInfo info(path);
+    if (!info.exists()) {
+        failWithCode(4, QStringLiteral("feature store absent: %1 does not exist").arg(path));
+    }
     if (!info.isFile()) {
-        return false;
+        failUnreadableStore(path, QStringLiteral("not a file"));
     }
     // A WAL reader needs the shared-memory file. When neither sidecar exists
     // and the directory cannot be written, no writer can be active either, so
@@ -3019,27 +3081,33 @@ bool openCurrentStoreReadOnly(const QString &path, SqlConnection &connection)
         database.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000"));
     }
     if (!database.open()) {
-        return false;
+        failUnreadableStore(path, database.lastError().text());
     }
     QSqlQuery queryOnly(database);
-    if (!queryOnly.exec(QStringLiteral("PRAGMA query_only=ON")) || !hasCurrentSchema(database)) {
-        database.close();
-        return false;
+    if (!queryOnly.exec(QStringLiteral("PRAGMA query_only=ON"))) {
+        failUnreadableStore(path, queryOnly.lastError().text());
     }
-    return true;
+    QString unsupported;
+    try {
+        unsupported = unsupportedSchemaCause(database);
+    } catch (const std::runtime_error &error) {
+        failUnreadableStore(path, QString::fromUtf8(error.what()));
+    }
+    if (!unsupported.isEmpty()) {
+        failWithCode(4, QStringLiteral("feature store unsupported: %1 %2").arg(path, unsupported));
+    }
 }
 
 int runStatus(const StatusOptions &options)
 {
-    SqlConnection readOnly;
-    std::optional<SqlConnection> initializing;
-    QSqlDatabase database = readOnly.database();
-    if (!openCurrentStoreReadOnly(options.featuresPath, readOnly)) {
-        initializing.emplace();
-        database = openFeaturesDatabase(options.featuresPath, *initializing);
-        initSchema(database);
+    SqlConnection connection;
+    openCurrentStoreReadOnly(options.featuresPath, connection);
+    QJsonObject payload;
+    try {
+        payload = statusJson(connection.database());
+    } catch (const std::runtime_error &error) {
+        failUnreadableStore(options.featuresPath, QString::fromUtf8(error.what()));
     }
-    QJsonObject payload = statusJson(database);
     const bool enabled = settingEnabled(readStateSetting(
         options.statePath, QStringLiteral("analysis.semantic.enabled"), QStringLiteral("false")));
     QJsonObject semantic{{QStringLiteral("enabled"), enabled}};
@@ -3416,11 +3484,12 @@ StatusOptions parseStatus(QStringList arguments)
             failWithCode(2, QStringLiteral("unknown status option \"%1\"").arg(word));
         }
     }
+    // Diagnostics only read, so resolving their defaults creates no directory.
     if (options.featuresPath.isEmpty()) {
-        options.featuresPath = QDir(AppPaths::dataDir()).filePath(QStringLiteral("features.sqlite"));
+        options.featuresPath = QDir(AppPaths::dataDirWithoutCreating()).filePath(QStringLiteral("features.sqlite"));
     }
     if (options.statePath.isEmpty()) {
-        options.statePath = QDir(AppPaths::stateDir()).filePath(QStringLiteral("state.sqlite"));
+        options.statePath = QDir(AppPaths::stateDirWithoutCreating()).filePath(QStringLiteral("state.sqlite"));
     }
     return options;
 }

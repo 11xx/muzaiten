@@ -99,7 +99,7 @@ holds the feature-store lock.
 - `schema_version`: `5`.
 - `indexer_version`: `cpp`.
 - `dsp_version`: the analyzer version recorded when the indexer last initialized
-  the store (`status` and `doctor` leave a current-schema store unchanged). It is
+  the store (`status` and `doctor` never write the store). It is
   diagnostic; app-side freshness is decided from each feature
   row's `version` against the version expected by the running build.
 - `created_at`: Unix epoch seconds when the database was first initialized.
@@ -116,6 +116,10 @@ bliss-era `features` shape is dropped and recreated because no shipped database
 contains authoritative rows in that shape. Schema v3/v4 scalar rows are
 preserved. The v5 migration assigns a uniform known CLAP corpus to its current
 generation; mixed or unknown semantic rows become inactive and require refresh.
+`muzaiten-features status` and `doctor` read only a store that already has
+schema 5 with every table above; they report an absent, older, newer,
+incompletely shaped or unreadable store as a data error (exit 4) and leave it
+unchanged. See [cli.md](cli.md#feature-orchestration).
 
 ## Identity Columns
 

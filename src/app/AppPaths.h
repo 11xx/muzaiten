@@ -23,6 +23,12 @@ QString stateDir();  // XDG_STATE_HOME - state.sqlite, pending-scrobble queues
 QString cacheDir();  // XDG_CACHE_HOME - artwork.sqlite, mpd-artwork/
 QString configDir(); // XDG_CONFIG_HOME - holds the config file
 
+// The same locations as dataDir() / stateDir(), resolved without creating any
+// directory (the config file is consulted only if it already exists). For
+// read-only diagnostics that must leave a fresh root untouched.
+QString dataDirWithoutCreating();
+QString stateDirWithoutCreating();
+
 // Path to the INI config file (configDir()/muzaiten.conf).
 QString configFilePath();
 
