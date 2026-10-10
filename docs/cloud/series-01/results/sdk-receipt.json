@@ -1,0 +1,103 @@
+{
+  "schema": "cloud-dispatch-receipt/1",
+  "series": "muzaiten-cloud-01",
+  "pilot": "sdk-environment-baseline",
+  "source_base": "702ab0c7ef0822f5708775cd7e49d04e41460725",
+  "packet_commit": "702ab0c7ef0822f5708775cd7e49d04e41460725",
+  "result_branch": "claude/muzaiten-final-sdk-baseline-fqw0m5",
+  "source_head": "702ab0c7ef0822f5708775cd7e49d04e41460725",
+  "source_head_note": "No source changes were made; the report commit follows source_head.",
+  "environment": {
+    "toolchain": {
+      "compiler": "GCC 16.2.0",
+      "cmake": "4.4.3",
+      "qt6": "6.11.2",
+      "taglib": "2.2.1",
+      "gstreamer": "1.28.7",
+      "glib": "2.88.3"
+    },
+    "uid": {
+      "build_and_preflight": 0,
+      "test": 1000
+    },
+    "run_model_effort": "omitted: repository artifacts must not carry model identifiers"
+  },
+  "tasks": [
+    {
+      "id": "0",
+      "outcome": "blocked",
+      "commits": [],
+      "checks": [
+        {
+          "revision": "702ab0c7ef0822f5708775cd7e49d04e41460725",
+          "command": "git rev-parse HEAD",
+          "exit_code": 0,
+          "evidence": "observed",
+          "result": "702ab0c7ef0822f5708775cd7e49d04e41460725 matches source"
+        },
+        {
+          "revision": "702ab0c7ef0822f5708775cd7e49d04e41460725",
+          "command": "sha256sum -c docs/cloud/series-01/SHA256SUMS",
+          "exit_code": 0,
+          "evidence": "observed",
+          "result": "20 of 20 entries OK"
+        },
+        {
+          "revision": "702ab0c7ef0822f5708775cd7e49d04e41460725",
+          "command": "cloud-env bash docs/cloud/series-01/environment/preflight.sh",
+          "exit_code": 0,
+          "evidence": "observed",
+          "result": "toolchain verified; stderr empty"
+        },
+        {
+          "revision": "702ab0c7ef0822f5708775cd7e49d04e41460725",
+          "command": "cloud-env make build",
+          "exit_code": 0,
+          "evidence": "observed",
+          "result": "986 ninja steps; 0 warning lines; 0 error lines"
+        },
+        {
+          "revision": "702ab0c7ef0822f5708775cd7e49d04e41460725",
+          "command": "cloud-test",
+          "exit_code": 2,
+          "evidence": "observed",
+          "result": "failed before any test ran: CTest could not create build/Testing/Temporary/LastTest.log (Permission denied); directory owned by root:root",
+          "ctest_totals": "not observed",
+          "within_test_skips": "not observed"
+        }
+      ],
+      "open_findings": [
+        "build/Testing/Temporary is root-owned after the root-run configure; setup must create it owned by 1000:1000 before cloud-test",
+        "CTest totals and within-test skip count are unobserved for this pilot"
+      ]
+    },
+    {
+      "id": "1",
+      "outcome": "not-started",
+      "commits": [],
+      "checks": [],
+      "open_findings": []
+    },
+    {
+      "id": "2",
+      "outcome": "not-started",
+      "commits": [],
+      "checks": [],
+      "open_findings": []
+    },
+    {
+      "id": "3",
+      "outcome": "not-started",
+      "commits": [],
+      "checks": [],
+      "open_findings": []
+    },
+    {
+      "id": "4",
+      "outcome": "not-started",
+      "commits": [],
+      "checks": [],
+      "open_findings": []
+    }
+  ]
+}
