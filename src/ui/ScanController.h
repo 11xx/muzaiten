@@ -36,6 +36,7 @@ public:
     void finishScan(qint64, qint64, qint64, bool);
     void markScannedTracksMissing(const QStringList &paths);
 private:
+    void abortScanBeforeStart(const QString &rootPath, int scanRootId, const QString &error);
     MainWindow &m_window;
     bool m_enumerationIncomplete = false;
 };

@@ -1284,20 +1284,24 @@ int Database::enumeratedOnlyCount() const
     return 0;
 }
 
-QHash<QString, TrackFingerprint> Database::trackFingerprints(const QString &rootPrefix) const
+std::expected<QHash<QString, TrackFingerprint>, QString> Database::trackFingerprints(const QString &rootPrefix) const
 {
     QHash<QString, TrackFingerprint> fingerprints;
     QSqlQuery query(m_db);
-    if (rootPrefix.isEmpty()) {
-        query.prepare(QStringLiteral("SELECT path, file_mtime, file_size, metadata_scanned FROM tracks"));
-    } else {
-        query.prepare(QStringLiteral("SELECT path, file_mtime, file_size, metadata_scanned FROM tracks WHERE path = ? OR path LIKE ? ESCAPE '\\'"));
+    // A statement that cannot be prepared carries the useful error; exec() would
+    // only report that there is no query.
+    if (!query.prepare(rootPrefix.isEmpty()
+            ? QStringLiteral("SELECT path, file_mtime, file_size, metadata_scanned FROM tracks")
+            : QStringLiteral("SELECT path, file_mtime, file_size, metadata_scanned FROM tracks WHERE path = ? OR path LIKE ? ESCAPE '\\'"))) {
+        return std::unexpected(query.lastError().text());
+    }
+    if (!rootPrefix.isEmpty()) {
         query.addBindValue(rootPrefix);
         const QString likePrefix = SqlUtil::likeEscaped(rootPrefix);
         query.addBindValue(likePrefix + QStringLiteral("/%"));
     }
     if (!query.exec()) {
-        return fingerprints;
+        return std::unexpected(query.lastError().text());
     }
     while (query.next()) {
         TrackFingerprint fingerprint;

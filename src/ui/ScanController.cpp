@@ -55,10 +55,20 @@ void ScanController::startScan(const QString &rootPath, int scanRootId)
         return;
     }
 
+    // Read the known tracks before committing any scan state. The pipeline takes
+    // an empty map to mean a new root, so a failed read must stop here: passed on,
+    // it would treat every known file as new and skip missing-file detection.
+    const QString cleanRoot = cleanDirectoryPath(rootPath);
+    auto fingerprints = m_window.m_database->trackFingerprints(cleanRoot);
+    if (!fingerprints) {
+        abortScanBeforeStart(cleanRoot, scanRootId, fingerprints.error());
+        return;
+    }
+
     qCInfo(uiLog) << "starting scan" << rootPath;
     m_enumerationIncomplete = false;
     m_window.m_activeScanRootId = scanRootId;
-    m_window.m_activeScanRootPath = cleanDirectoryPath(rootPath);
+    m_window.m_activeScanRootPath = cleanRoot;
     m_window.statusBar()->showMessage(QStringLiteral("Scanning %1").arg(m_window.m_activeScanRootPath));
     m_window.m_scanProgress->setVisible(true);
     m_window.m_stopScanButton->setEnabled(true);
@@ -77,7 +87,7 @@ void ScanController::startScan(const QString &rootPath, int scanRootId)
 
     m_window.m_scanThread = new QThread(this);
     m_window.m_scanPipeline = new ScanPipeline(m_window.m_activeScanRootPath, scanRootId,
-                                      m_window.m_database->trackFingerprints(m_window.m_activeScanRootPath), options);
+                                      std::move(*fingerprints), options);
     m_window.m_scanPipeline->moveToThread(m_window.m_scanThread);
 
     connect(m_window.m_scanThread, &QThread::started, m_window.m_scanPipeline, &ScanPipeline::run);
@@ -114,6 +124,25 @@ void ScanController::startScan(const QString &rootPath, int scanRootId)
     });
 
     m_window.m_scanThread->start();
+}
+
+void ScanController::abortScanBeforeStart(const QString &rootPath, int scanRootId, const QString &error)
+{
+    // Nothing has started: no thread, ingest session, UI progress or fill pause.
+    // A library that cannot be read would fail every queued root the same way,
+    // so the queued run ends with this one error instead of repeating it.
+    const QString message = QStringLiteral("Scan aborted: could not read known tracks under %1 (%2)")
+                                 .arg(rootPath, error);
+    qCWarning(uiLog) << "scan aborted before enumeration:" << rootPath << error;
+    if (scanRootId > 0) {
+        m_window.m_database->setScanRootLastScanned(scanRootId, message);
+    }
+    m_window.m_pendingScanRoots.clear();
+    m_window.m_forceFullRescan = false;
+    m_window.statusBar()->showMessage(message, 10000);
+    // An earlier root of this run may have left placeholders; resume their fill
+    // as a finished run would.
+    pumpMetadataFill();
 }
 
 void ScanController::scanEnabledSourceDirectories()

@@ -142,7 +142,7 @@ void ScanPipelineTest::fastFirstPassDefersThenFills()
     ScanPipeline::Options options;
     options.lowPriority = false;
     {
-        ScanPipeline scan(musicRoot, 0, database.trackFingerprints(), options);
+        ScanPipeline scan(musicRoot, 0, database.trackFingerprints().value(), options);
         const ScanRun run = runPipeline(scan, database, /*ingestPlaceholders=*/true);
         QCOMPARE(run.placeholderCount, 2);   // both files are new
         QCOMPARE(run.batchTrackCount, 0);    // nothing changed -> no foreground read
@@ -154,7 +154,7 @@ void ScanPipelineTest::fastFirstPassDefersThenFills()
     QVERIFY(database.allTracksForSearch().isEmpty());
     QCOMPARE(database.enumeratedOnlyPaths().size(), 2);
     QCOMPARE(database.enumeratedOnlyPaths(albumDir).size(), 2);
-    QVERIFY(!database.trackFingerprints().value(wav16).metadataScanned);
+    QVERIFY(!database.trackFingerprints()->value(wav16).metadataScanned);
 
     // --- Background fill: read tags for the placeholder backlog. ---
     {
@@ -167,7 +167,7 @@ void ScanPipelineTest::fastFirstPassDefersThenFills()
     // Now in the artist/album browse with bit depth populated, no backlog left.
     QCOMPARE(database.albumArtists().size(), 1);
     QVERIFY(database.enumeratedOnlyPaths().isEmpty());
-    QVERIFY(database.trackFingerprints().value(wav16).metadataScanned);
+    QVERIFY(database.trackFingerprints()->value(wav16).metadataScanned);
     const QVector<Search::SearchRecord> records = database.allTracksForSearch();
     QCOMPARE(records.size(), 2);
     QList<int> depths;
@@ -179,7 +179,7 @@ void ScanPipelineTest::fastFirstPassDefersThenFills()
 
     // --- Rescan: unchanged + scanned -> all skipped, nothing re-read. ---
     {
-        ScanPipeline rescan(musicRoot, 0, database.trackFingerprints(), options);
+        ScanPipeline rescan(musicRoot, 0, database.trackFingerprints().value(), options);
         const ScanRun run = runPipeline(rescan, database, /*ingestPlaceholders=*/true);
         QCOMPARE(run.placeholderCount, 0);
         QCOMPARE(run.batchTrackCount, 0);
