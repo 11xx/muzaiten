@@ -28,8 +28,7 @@ private:
     // Async `muzaiten-features status --json`: shows the provider's own
     // feature revision next to the store's so an outdated provider (or a
     // pending re-embed after a provider upgrade) is visible at a glance.
-    void fetchProviderStatus(const QString &featuresBinary, const QString &featuresPath,
-                             const QString &storeRevision);
+    void fetchProviderStatus(const QString &featuresBinary, const QString &storeRevision);
 
     std::function<AudioAnalysisData::LiveStatus()> m_liveStatus;
     QLabel *m_providerValue = nullptr;

@@ -4798,8 +4798,9 @@ void MainWindow::startSemanticStatusRequest(bool forDownload)
         }
     });
     process->setProgram(m_semanticStatusBinary);
-    process->setArguments({QStringLiteral("status"), QStringLiteral("--features"),
-                           m_semanticStatusFeaturesPath, QStringLiteral("--json")});
+    // Provider-only: setup and download must work before a first analysis
+    // creates the feature store, which plain status reports as absent.
+    process->setArguments({QStringLiteral("status"), QStringLiteral("--semantic-only"), QStringLiteral("--json")});
     timeout->start();
     process->start();
 }

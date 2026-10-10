@@ -743,7 +743,10 @@ target_compile_features(semantic_status_fixture PRIVATE cxx_std_26)
 target_compile_options(semantic_status_fixture PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wconversion -Wshadow>
 )
-add_dependencies(test_main_window_navigation semantic_status_fixture)
+add_dependencies(test_main_window_navigation semantic_status_fixture muzaiten-features)
+# The real native helper, for the provider-only status boundary.
+target_compile_definitions(test_main_window_navigation PRIVATE
+    MUZAITEN_FEATURES_BINARY="$<TARGET_FILE:muzaiten-features>")
 add_executable(test_semantic_status_process test_semantic_status_process.cpp)
 target_include_directories(test_semantic_status_process PRIVATE ../src)
 target_link_libraries(test_semantic_status_process PRIVATE Qt6::Core Qt6::Test)

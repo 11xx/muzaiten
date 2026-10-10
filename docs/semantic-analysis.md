@@ -56,7 +56,8 @@ compatibility.
 Provider discovery is ordered and handshake-gated: `--provider`,
 `MUZAITEN_FEATURES_CLAP`, the saved GUI path, a sibling executable, uv tool-bin
 locations, then `PATH`. `muzaiten-features status --json` reports the accepted
-path and source. The GUI's provider setup dialog can select a custom executable
+path and source; `status --semantic-only --json` reports the provider alone, without
+reading a feature store. The GUI's provider setup dialog can select a custom executable
 or reset to automatic discovery.
 
 Provider setup and model download check status asynchronously. The waiting

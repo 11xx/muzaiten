@@ -126,7 +126,7 @@ AudioAnalysisStatusDialog::AudioAnalysisStatusDialog(
         if (!featuresBinary.isEmpty()) {
             m_providerValue = valueLabel(QStringLiteral("checking..."), this);
             form->addRow(QStringLiteral("Provider"), m_providerValue);
-            fetchProviderStatus(featuresBinary, featuresPath, status.embeddingVersion);
+            fetchProviderStatus(featuresBinary, status.embeddingVersion);
         }
         form->addRow(QStringLiteral("Neighbor rows"), valueLabel(countText(status.neighborRows), this));
         if (summary.lastRun.present) {
@@ -188,13 +188,13 @@ AudioAnalysisStatusDialog::AudioAnalysisStatusDialog(
 }
 
 void AudioAnalysisStatusDialog::fetchProviderStatus(const QString &featuresBinary,
-                                                    const QString &featuresPath,
                                                     const QString &storeRevision)
 {
     auto *process = new QProcess(this);
     process->setProgram(featuresBinary);
-    process->setArguments({QStringLiteral("status"), QStringLiteral("--features"), featuresPath,
-                           QStringLiteral("--json")});
+    // Provider-only: a store this app reads but the helper would not (an
+    // older schema) must not be reported as a missing provider.
+    process->setArguments({QStringLiteral("status"), QStringLiteral("--semantic-only"), QStringLiteral("--json")});
     connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
             [this, process, storeRevision](int exitCode, QProcess::ExitStatus exitStatus) {
         process->deleteLater();

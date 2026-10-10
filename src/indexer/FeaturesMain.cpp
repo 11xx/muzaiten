@@ -125,6 +125,8 @@ struct StatusOptions {
     QString statePath;
     QString providerPath;
     bool json = false;
+    // Only the provider: no feature-store path is resolved or opened.
+    bool semanticOnly = false;
 };
 
 struct ProviderOptions {
@@ -3098,16 +3100,10 @@ void openCurrentStoreReadOnly(const QString &path, SqlConnection &connection)
     }
 }
 
-int runStatus(const StatusOptions &options)
+// The semantic provider's state. Without a feature-store path the provider
+// reports only its capabilities, model, runtime and device.
+QJsonObject semanticStatusJson(const StatusOptions &options)
 {
-    SqlConnection connection;
-    openCurrentStoreReadOnly(options.featuresPath, connection);
-    QJsonObject payload;
-    try {
-        payload = statusJson(connection.database());
-    } catch (const std::runtime_error &error) {
-        failUnreadableStore(options.featuresPath, QString::fromUtf8(error.what()));
-    }
     const bool enabled = settingEnabled(readStateSetting(
         options.statePath, QStringLiteral("analysis.semantic.enabled"), QStringLiteral("false")));
     QJsonObject semantic{{QStringLiteral("enabled"), enabled}};
@@ -3117,10 +3113,14 @@ int runStatus(const StatusOptions &options)
         semantic.insert(QStringLiteral("state"), QStringLiteral("provider-ready"));
         semantic.insert(QStringLiteral("provider_path"), provider->path);
         semantic.insert(QStringLiteral("provider_source"), provider->source);
+        QJsonObject parameters;
+        if (!options.semanticOnly) {
+            parameters.insert(QStringLiteral("features"), options.featuresPath);
+        }
         const auto providerStatus = FeatureProvider::invoke(
             provider->path,
             QStringLiteral("status"),
-            QJsonObject{{QStringLiteral("features"), options.featuresPath}},
+            parameters,
             false,
             [] { return false; },
             kProviderStatusTimeoutMs);
@@ -3140,7 +3140,22 @@ int runStatus(const StatusOptions &options)
     } else {
         semantic.insert(QStringLiteral("state"), QStringLiteral("provider-missing"));
     }
-    payload.insert(QStringLiteral("semantic"), semantic);
+    return semantic;
+}
+
+int runStatus(const StatusOptions &options)
+{
+    QJsonObject payload;
+    if (!options.semanticOnly) {
+        SqlConnection connection;
+        openCurrentStoreReadOnly(options.featuresPath, connection);
+        try {
+            payload = statusJson(connection.database());
+        } catch (const std::runtime_error &error) {
+            failUnreadableStore(options.featuresPath, QString::fromUtf8(error.what()));
+        }
+    }
+    payload.insert(QStringLiteral("semantic"), semanticStatusJson(options));
     options.json ? emitJson(payload) : emitPlain(payload);
     return 0;
 }
@@ -3318,6 +3333,7 @@ void printUsage()
         "        [--limit N] [--jobs N] [--staging-bytes N] [--semantic-decode-workers N] [--power background|balanced|turbo]\n"
         "        [--json|--progress=jsonl] [--verbose]\n"
         "status [--features PATH] [--state PATH] [--provider PATH] [--json]\n"
+        "status --semantic-only [--state PATH] [--provider PATH] [--json]\n"
         "doctor [--features PATH] [--state PATH] [--provider PATH] [--json]\n"
         "pack export|import FILE [--features PATH] [--dry-run] [--replace] [--json]\n"
         "  Local scalar features only. Taste/history absent; content hashes identify recordings.\n"
@@ -3458,9 +3474,10 @@ RefreshOptions parseRefresh(QStringList arguments)
     return options;
 }
 
-StatusOptions parseStatus(QStringList arguments)
+StatusOptions parseStatus(QStringList arguments, bool semanticOnlyAllowed)
 {
     StatusOptions options;
+    bool featuresGiven = false;
     for (int index = 0; index < arguments.size(); ++index) {
         const QString word = arguments.at(index);
         if (word == QLatin1String("--features")) {
@@ -3468,8 +3485,11 @@ StatusOptions parseStatus(QStringList arguments)
                 failWithCode(2, QStringLiteral("status --features needs a path"));
             }
             options.featuresPath = arguments.at(++index);
+            featuresGiven = true;
         } else if (word == QLatin1String("--json")) {
             options.json = true;
+        } else if (word == QLatin1String("--semantic-only") && semanticOnlyAllowed) {
+            options.semanticOnly = true;
         } else if (word == QLatin1String("--state")) {
             if (index + 1 >= arguments.size()) {
                 failWithCode(2, QStringLiteral("status --state needs a path"));
@@ -3484,8 +3504,11 @@ StatusOptions parseStatus(QStringList arguments)
             failWithCode(2, QStringLiteral("unknown status option \"%1\"").arg(word));
         }
     }
+    if (options.semanticOnly && featuresGiven) {
+        failWithCode(2, QStringLiteral("status --semantic-only does not read a feature store; omit --features"));
+    }
     // Diagnostics only read, so resolving their defaults creates no directory.
-    if (options.featuresPath.isEmpty()) {
+    if (options.featuresPath.isEmpty() && !options.semanticOnly) {
         options.featuresPath = QDir(AppPaths::dataDirWithoutCreating()).filePath(QStringLiteral("features.sqlite"));
     }
     if (options.statePath.isEmpty()) {
@@ -3522,10 +3545,10 @@ int main(int argc, char **argv)
             return 0;
         }
         if (command == QLatin1String("status")) {
-            return runStatus(parseStatus(arguments));
+            return runStatus(parseStatus(arguments, true));
         }
         if (command == QLatin1String("doctor")) {
-            return runStatus(parseStatus(arguments));
+            return runStatus(parseStatus(arguments, false));
         }
         if (command == QLatin1String("model")) {
             if (arguments.isEmpty() || arguments.takeFirst() != QLatin1String("download")) {
