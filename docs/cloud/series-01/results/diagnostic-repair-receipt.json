@@ -1,0 +1,136 @@
+{
+  "schema": "cloud-dispatch-receipt/1",
+  "series": "muzaiten-cloud-01",
+  "repair": "diagnostic read policy",
+  "input": {
+    "branch": "dispatch/cloud-01-result",
+    "commit": "471858c001b10df14553a64539ae9b3042051179"
+  },
+  "source_base": "471858c001b10df14553a64539ae9b3042051179",
+  "result_branch": "claude/muzaiten-diagnostic-repair-87irzs",
+  "source_head": "e52b83c16bcca9b82fe97f48840f301752be1958",
+  "tested_head": "e52b83c16bcca9b82fe97f48840f301752be1958",
+  "source_head_note": "The report commit follows source_head and changes only results/. report.md and receipt.json remain the original delivery's snapshot of source head 8d090e9.",
+  "implementation_model": "omitted: the executing platform forbids model identifiers in repository artifacts",
+  "tasks": [
+    {
+      "id": "3-repair",
+      "outcome": "repaired; contract decision required for GUI first-time semantic setup/model download",
+      "commits": [
+        "e52b83c16bcca9b82fe97f48840f301752be1958"
+      ],
+      "checks": [
+        {
+          "revision": "471858c001b10df14553a64539ae9b3042051179",
+          "command": "sha256sum -c docs/cloud/series-01/SHA256SUMS",
+          "exit_code": 0,
+          "environment": "cloud container, Ubuntu 24.04, Linux 6.18.44 x86_64; SDK /opt/muzaiten-cloud, nixpkgs e7439b6b14ad3cc35d05608ebca9bce01a25f5f8 (GCC 16.2.0, CMake 4.4.3, Qt 6.11.2, SQLite 3.53.3); builds UID 0 via cloud-env, tests and probes UID 1000",
+          "evidence": "observed",
+          "result": "20 entries OK",
+          "log_sha256": "00759102e61b6e25881e953f94143fc97642d15919d730553931a408282796f6"
+        },
+        {
+          "revision": "471858c001b10df14553a64539ae9b3042051179",
+          "command": "cloud-env bash docs/cloud/series-01/environment/preflight.sh",
+          "exit_code": 0,
+          "environment": "cloud container, Ubuntu 24.04, Linux 6.18.44 x86_64; SDK /opt/muzaiten-cloud, nixpkgs e7439b6b14ad3cc35d05608ebca9bce01a25f5f8 (GCC 16.2.0, CMake 4.4.3, Qt 6.11.2, SQLite 3.53.3); builds UID 0 via cloud-env, tests and probes UID 1000",
+          "evidence": "observed",
+          "result": "toolchain verified",
+          "log_sha256": "e1f667b686edde636b21fe43017d79bf487589ff449ecde58b60c11c48eb82c7"
+        },
+        {
+          "revision": "471858c001b10df14553a64539ae9b3042051179",
+          "command": "cloud-env make build",
+          "exit_code": 0,
+          "environment": "cloud container, Ubuntu 24.04, Linux 6.18.44 x86_64; SDK /opt/muzaiten-cloud, nixpkgs e7439b6b14ad3cc35d05608ebca9bce01a25f5f8 (GCC 16.2.0, CMake 4.4.3, Qt 6.11.2, SQLite 3.53.3); builds UID 0 via cloud-env, tests and probes UID 1000",
+          "evidence": "observed",
+          "result": "986 steps; 0 warnings, 0 errors",
+          "log_sha256": "b3aec23356e1e667718e1cefb87b5f304fbb165ac9c8fd8514a7eda41c69b290"
+        },
+        {
+          "revision": "471858c001b10df14553a64539ae9b3042051179",
+          "command": "runuser -u ubuntu -- cloud-env python3 tests/test_features_status.py build/muzaiten-features (new fixtures, baseline binary)",
+          "exit_code": 1,
+          "environment": "cloud container, Ubuntu 24.04, Linux 6.18.44 x86_64; SDK /opt/muzaiten-cloud, nixpkgs e7439b6b14ad3cc35d05608ebca9bce01a25f5f8 (GCC 16.2.0, CMake 4.4.3, Qt 6.11.2, SQLite 3.53.3); builds UID 0 via cloud-env, tests and probes UID 1000",
+          "evidence": "observed",
+          "result": "witness: 33 subtest failures in 4 refusal tests; 5 other tests pass",
+          "log_sha256": "869ba6161958b7c8728efd228b770e435de97294c80c7045ddc695b93b27b7c2"
+        },
+        {
+          "revision": "471858c001b10df14553a64539ae9b3042051179",
+          "command": "agent-state/cloud/probes/repair_mutation_probe.py build/muzaiten-features (private)",
+          "exit_code": 0,
+          "environment": "cloud container, Ubuntu 24.04, Linux 6.18.44 x86_64; SDK /opt/muzaiten-cloud, nixpkgs e7439b6b14ad3cc35d05608ebca9bce01a25f5f8 (GCC 16.2.0, CMake 4.4.3, Qt 6.11.2, SQLite 3.53.3); builds UID 0 via cloud-env, tests and probes UID 1000",
+          "evidence": "observed",
+          "result": "baseline exits 0: schema 99 rewritten to 5; pre-v3 rows dropped; absent store and dirs created",
+          "log_sha256": "1b1aef005fefbf0d4901e682d2aa06736f776b15ec3b41b0cec60b09efbe68be"
+        },
+        {
+          "revision": "e52b83c16bcca9b82fe97f48840f301752be1958",
+          "command": "cloud-env make build (working tree identical to commit)",
+          "exit_code": 0,
+          "environment": "cloud container, Ubuntu 24.04, Linux 6.18.44 x86_64; SDK /opt/muzaiten-cloud, nixpkgs e7439b6b14ad3cc35d05608ebca9bce01a25f5f8 (GCC 16.2.0, CMake 4.4.3, Qt 6.11.2, SQLite 3.53.3); builds UID 0 via cloud-env, tests and probes UID 1000",
+          "evidence": "observed",
+          "result": "253 steps; 0 warnings, 0 errors",
+          "log_sha256": "7b7ed75489f769b31945d172f5f4cc2701b7da04239b7ada8919163a7e23ae19"
+        },
+        {
+          "revision": "e52b83c16bcca9b82fe97f48840f301752be1958",
+          "command": "runuser -u ubuntu -- cloud-env python3 tests/test_features_status.py build/muzaiten-features -v (working tree identical to commit)",
+          "exit_code": 0,
+          "environment": "cloud container, Ubuntu 24.04, Linux 6.18.44 x86_64; SDK /opt/muzaiten-cloud, nixpkgs e7439b6b14ad3cc35d05608ebca9bce01a25f5f8 (GCC 16.2.0, CMake 4.4.3, Qt 6.11.2, SQLite 3.53.3); builds UID 0 via cloud-env, tests and probes UID 1000",
+          "evidence": "observed",
+          "result": "9/9 ok, 0 skipped, UID 1000",
+          "log_sha256": "63103b4b757cea7ff260795a07fcc779486f70734e876c5a9801b963ff4e6332"
+        },
+        {
+          "revision": "e52b83c16bcca9b82fe97f48840f301752be1958",
+          "command": "agent-state/cloud/probes/repair_mutation_probe.py build/muzaiten-features (private)",
+          "exit_code": 0,
+          "environment": "cloud container, Ubuntu 24.04, Linux 6.18.44 x86_64; SDK /opt/muzaiten-cloud, nixpkgs e7439b6b14ad3cc35d05608ebca9bce01a25f5f8 (GCC 16.2.0, CMake 4.4.3, Qt 6.11.2, SQLite 3.53.3); builds UID 0 via cloud-env, tests and probes UID 1000",
+          "evidence": "observed",
+          "result": "all exit 4 with distinct causes; stores unchanged; nothing created",
+          "log_sha256": "5ada3b091c71524fb78fcedf526b813fd2b5e8040fa26b54df4919c315473775"
+        },
+        {
+          "revision": "e52b83c16bcca9b82fe97f48840f301752be1958",
+          "command": "cloud-env make build (clean tree)",
+          "exit_code": 0,
+          "environment": "cloud container, Ubuntu 24.04, Linux 6.18.44 x86_64; SDK /opt/muzaiten-cloud, nixpkgs e7439b6b14ad3cc35d05608ebca9bce01a25f5f8 (GCC 16.2.0, CMake 4.4.3, Qt 6.11.2, SQLite 3.53.3); builds UID 0 via cloud-env, tests and probes UID 1000",
+          "evidence": "observed",
+          "result": "151 steps; 0 warnings, 0 errors",
+          "log_sha256": "e7843c4b0fad7ce1140dc4e30c751b6cf0aac086c9ec84d4f530b870c68ba0a7"
+        },
+        {
+          "revision": "e52b83c16bcca9b82fe97f48840f301752be1958",
+          "command": "cloud-test (clean tree)",
+          "exit_code": 0,
+          "environment": "cloud container, Ubuntu 24.04, Linux 6.18.44 x86_64; SDK /opt/muzaiten-cloud, nixpkgs e7439b6b14ad3cc35d05608ebca9bce01a25f5f8 (GCC 16.2.0, CMake 4.4.3, Qt 6.11.2, SQLite 3.53.3); builds UID 0 via cloud-env, tests and probes UID 1000",
+          "evidence": "observed",
+          "result": "UID 1000; CTest 88/88 passed; QTest 1538 passed, 0 failed, 1 skipped",
+          "log_sha256": "9d0a2ce2261031b8d1f7ac7126c8ecd7837da5f33c43958f673a9d628e675de6"
+        }
+      ],
+      "skips": [
+        "SharedOutputRoutingTest: QSKIP, no pipewire.conf in the headless container (omission)",
+        "test_version test_arch_ordering: vercmp absent (omission)",
+        "test_fold_han_rare cached smoke: pinned references not cached (omission)"
+      ],
+      "open_findings": [
+        "Contract decision: GUI Semantic provider setup / Download semantic model run `status`; with no store yet it exits 4 without a provider call, so first-time GUI model download is disabled and setup shows 'Provider status unavailable'. Needs e.g. a store-independent provider check; no consumer code changed.",
+        "Analysis status dialog shows 'not available (install muzaiten-features-clap)' for an app-supported v3/v4 store before its first refresh (status now exits 4 unsupported).",
+        "A WAL store whose -shm is missing in an unwritable directory is reported unreadable (exit 4); reading it needs a WAL policy change outside this series."
+      ]
+    }
+  ],
+  "bounds": {
+    "execution_start_utc": "2026-10-10T22:42:09Z",
+    "final_gate_end_utc": "2026-10-10T23:14:31Z",
+    "cost": "unavailable: no billing or token figures in this environment"
+  },
+  "private_artifacts": {
+    "baseline_binary_sha256": "26ee50e47fe4c508d94efed42d5355c8d1bd4f27981cc654f11b76cd8c2f0f41",
+    "final_ctest_lasttest_sha256": "f5d36b63f38e0b7fb1d9a506439d6d3db1362a8fe1fffb204d748cb5f9d84f8d",
+    "location": "agent-state/cloud/logs/ (ignored, not committed)"
+  }
+}
