@@ -86,7 +86,7 @@ void FilePublishTest::refusesSymlinkAppearingBeforePublication()
     const QString target = QDir(directory).filePath(QStringLiteral("target.bin"));
     writeFile(target, foreignContent);
     SeamReset reset;
-    FilePublish::setBeforePublishHookForTesting([path, target] { makeSymlink(target, path); });
+    FilePublish::setBeforePublishHookForTesting([path, target] { QVERIFY(makeSymlink(target, path)); });
     QVERIFY(FilePublish::publish(path, exportContent, false) == FilePublish::Outcome::Exists);
     QVERIFY(QFileInfo(path).isSymLink());
     QCOMPARE(contents(target), foreignContent);

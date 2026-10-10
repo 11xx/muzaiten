@@ -453,7 +453,7 @@ void RadioProfileTest::exportRefusesExistingSymlink()
     const QString path = QDir(directory).filePath(QStringLiteral("export.json"));
     const QString target = QDir(directory).filePath(QStringLiteral("target.json"));
     writeFile(target, foreignContent);
-    makeSymlink(target, path);
+    QVERIFY(makeSymlink(target, path));
     QString error;
     QVERIFY(!RadioProfileExchange::write(path, RadioProfileStore::defaultProfile(), false, false, &error));
     QCOMPARE(error, QStringLiteral("Export file already exists. Explicit replace is required."));
@@ -483,7 +483,7 @@ void RadioProfileTest::exportRefusesSymlinkAppearingBeforePublication()
     const QString target = QDir(directory).filePath(QStringLiteral("target.json"));
     writeFile(target, foreignContent);
     SeamReset reset;
-    FilePublish::setBeforePublishHookForTesting([path, target] { makeSymlink(target, path); });
+    FilePublish::setBeforePublishHookForTesting([path, target] { QVERIFY(makeSymlink(target, path)); });
     QString error;
     QVERIFY(!RadioProfileExchange::write(path, RadioProfileStore::defaultProfile(), false, false, &error));
     QCOMPARE(error, QStringLiteral("Export file already exists. Explicit replace is required."));
