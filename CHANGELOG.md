@@ -211,10 +211,18 @@
   status-bar message) instead of calling the seed or candidate pool
   unavailable. Radio still does not start and no state changes.
 - `muzaiten-features status` and `doctor`, which the Analysis status dialog
-  also runs, now read a current-schema feature store read-only. They no longer
-  rewrite its schema metadata or `dsp_version`, fail on read-only media, or
-  wait out the busy timeout and exit 4 while a refresh holds a write
-  transaction. Missing and other-schema stores are initialized as before.
+  and the semantic provider checks also run, now only read, and only a
+  current-schema feature store. They no longer rewrite its schema metadata or
+  `dsp_version`, fail on read-only media, or wait out the busy timeout and
+  exit 4 while a refresh holds a write transaction. They also no longer
+  create a missing store or its directories, drop a pre-v3 store's feature
+  rows, or rewrite a newer store's schema version to this build's. An absent,
+  unsupported or unreadable store now exits 4 (a missing store previously
+  exited 0) with one stderr line naming that state, the path and the cause,
+  prints no status JSON and does not consult the provider; `refresh` creates
+  or upgrades the store. Until a first analysis creates the store, the GUI's
+  semantic provider setup and model download checks therefore report that
+  the status check failed.
 - A scan whose read of the library's known tracks fails now stops before
   enumerating, adding placeholders, reading tags or marking files missing,
   and reports the database error in the status bar and the source

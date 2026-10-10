@@ -246,6 +246,17 @@ need no taste fields. No network transport, accounts, URLs or external sharing
 are provided. See [radio.md](radio.md#aggregate-taste-seeds) and
 [features-schema.md](features-schema.md#aggregate-taste-profile-format).
 
+### Feature-store diagnostics
+
+`muzaiten-features status` and `doctor`, which the Analysis status dialog and
+the semantic provider checks also run, never create, initialize, migrate or
+rewrite `features.sqlite`. They read only a store with the running build's
+schema. An absent, unsupported or unreadable store is reported with exit 4
+and left exactly as it was, without consulting the semantic provider, and
+resolving the default paths creates no data, state or config directory. Only
+`muzaiten-features refresh` creates or upgrades the store. See
+[cli.md](cli.md#feature-orchestration).
+
 ### Storage locations
 
 Application-owned state belongs under XDG locations:
