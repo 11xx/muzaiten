@@ -34,7 +34,9 @@ cloud-env ./build/muzaitenctl --version
 `cloud-test` runs the suite under the hosted VM's existing `ubuntu` account
 when invoked by root. Setup prepares the checkout's generated test directories
 and isolated test state for that account. It preserves source ownership and
-account configuration. Run filesystem permission tests under a normal user. A root process can bypass
+account configuration. Root-created CTest temporary logs are preserved under
+the isolated state root before the normal user creates its own test output.
+Run filesystem permission tests under a normal user. A root process can bypass
 the fixture's permission bits and cannot establish those assertions. Record
 the actual user ID, tested revision and SDK identity in the return receipt.
 Do not skip the permission tests or label a root-only result equivalent.
