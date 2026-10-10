@@ -104,7 +104,11 @@ public:
     // seed built from the artist's genre/era aggregate and opens with a
     // representative track by that artist.
     bool startArtistRadio(const QString &artistName);
-    bool startTasteRadio(const QString &name);
+    // Start a session biased by a saved taste seed. TooLarge: the seed fits the
+    // exchange bound as saved but not once this library's genre aliases are
+    // applied, so its session copy could not be stored; nothing changes.
+    enum class TasteRadioStart { Started, Unavailable, TooLarge };
+    TasteRadioStart startTasteRadio(const QString &name);
     QString activeTasteSeedName() const;
     // Start a seedless, radio-backed library mix. Returns false without state
     // change when the mode is unknown or filtering cannot produce playable

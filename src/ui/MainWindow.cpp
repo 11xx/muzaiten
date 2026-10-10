@@ -1088,8 +1088,16 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     connect(m_playerBar, &PlayerBar::tasteProfilesRequested, this, [this]() {
         TasteProfileDialog dialog(this);
         connect(&dialog, &TasteProfileDialog::startRequested, this, [this](const QString &name) {
-            if (!m_core->startTasteRadio(name)) {
+            switch (m_core->startTasteRadio(name)) {
+            case AppCore::TasteRadioStart::Started:
+                break;
+            case AppCore::TasteRadioStart::TooLarge:
+                statusBar()->showMessage(
+                    QStringLiteral("Taste radio: this seed exceeds 64 KiB once your genre aliases are applied"), 6000);
+                break;
+            case AppCore::TasteRadioStart::Unavailable:
                 statusBar()->showMessage(QStringLiteral("Taste radio: seed or candidate pool is unavailable"), 4000);
+                break;
             }
         });
         connect(&dialog, &TasteProfileDialog::stopRequested, m_core, &AppCore::stopRadio);

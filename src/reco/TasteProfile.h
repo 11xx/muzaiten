@@ -34,6 +34,8 @@ QString contentsDescription();
 bool validName(const QString &name);
 bool parse(const QByteArray &bytes, TasteProfile *profile, QString *error);
 bool encode(const TasteProfile &profile, QByteArray *bytes, QString *error);
+// True when the canonical serialization of profile is larger than MaximumBytes.
+bool exceedsBound(const TasteProfile &profile);
 bool read(const QString &path, TasteProfile *profile, QString *error);
 bool write(const QString &path, const QByteArray &preview, bool replace, QString *error);
 bool aggregate(const QVector<TrackScorer::Candidate> &tracks, bool optIn, bool includeDecades,

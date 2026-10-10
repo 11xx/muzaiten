@@ -259,7 +259,11 @@ after seed removal. They are absent from exchange files. Picks from seeded
 sessions can inform ordinary local learning through their other score components.
 
 The strict `muzaiten-taste-profile` v1 file is limited to 64 KiB, both as
-received and once normalized to the export layout. Unknown
+received and once normalized to the export layout. Starting radio applies this
+library's genre aliases, which merge or drop labels and renormalize the
+remaining shares; a seed accepted near the limit can then exceed it. Radio does
+not start, and the status bar (or `radio: taste-seed-too-large` from
+`muzaitenctl start-taste-radio`) says so; nothing else changes. Unknown
 keys, versions, duplicate keys, invalid shares,
 unordered/out-of-range/nonfinite quartiles, invalid UTF-8 and incomplete
 inputs are rejected before import changes. Existing export files and same-name

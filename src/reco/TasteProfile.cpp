@@ -416,6 +416,11 @@ bool encode(const TasteProfile &profile, QByteArray *bytes, QString *error)
     return true;
 }
 
+bool exceedsBound(const TasteProfile &profile)
+{
+    return QJsonDocument(objectFor(profile)).toJson().size() > MaximumBytes;
+}
+
 bool read(const QString &path, TasteProfile *profile, QString *error)
 {
     QByteArray bytes;
