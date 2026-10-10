@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+sdk_root=/opt/muzaiten-cloud
+if [[ ! -f "$sdk_root/activate.sh" ]]; then
+    printf '%s\n' 'Cloud toolchain is absent. Configure the environment Setup script before running this command.' >&2
+    exit 1
+fi
+if [[ $# -eq 0 ]]; then
+    printf '%s\n' 'Usage: cloud-env COMMAND [ARG...]' >&2
+    exit 2
+fi
+source "$sdk_root/activate.sh"
+exec "$@"
