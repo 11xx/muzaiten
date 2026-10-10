@@ -16,6 +16,12 @@ Setup script. Keep the account's existing network and authentication policy.
 Provisioning needs the GitHub and Nix release/cache hosts. `render-init.py`
 regenerates the script from its explicitly selected inputs.
 
+The generated script passes the hosted checkout `/workspace/muzaiten`
+explicitly. Set `MUZAITEN_CLOUD_CHECKOUT` when a runner clones elsewhere.
+`setup.sh --cloud-setup CHECKOUT` validates the selected repository before
+preparing its generated test directories; it does not depend on setup's
+working directory. Without a checkout argument it provisions only the SDK.
+
 Build and run in the SDK:
 
 ```sh
