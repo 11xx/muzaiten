@@ -41,9 +41,9 @@ inline QStringList entries(const QString &directory)
     return names;
 }
 
-inline void makeSymlink(const QString &target, const QString &path)
+inline bool makeSymlink(const QString &target, const QString &path)
 {
-    ::symlink(QFile::encodeName(target).constData(), QFile::encodeName(path).constData());
+    return ::symlink(QFile::encodeName(target).constData(), QFile::encodeName(path).constData()) == 0;
 }
 
 inline int permissionBits(const QString &path)

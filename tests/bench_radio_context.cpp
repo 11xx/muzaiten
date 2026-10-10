@@ -1107,7 +1107,7 @@ int main(int argc, char **argv)
     std::printf("timed_reps=%d\n", options.reps);
     std::printf("picks=%d\n", options.picks);
     std::printf("seeds_requested=%d\n", options.seeds);
-    std::printf("seeds_used=%d\n", fixture.seeds.size());
+    std::printf("seeds_used=%lld\n", static_cast<long long>(fixture.seeds.size()));
     std::printf("pool_limit=%d\n", options.poolLimit);
     std::printf("library_track_count=%lld\n", static_cast<long long>(libraryTrackCount));
     std::printf("feature_file_count=%lld\n", static_cast<long long>(featureStatus.files));
@@ -1115,9 +1115,9 @@ int main(int argc, char **argv)
     std::printf("embedded_group_count=%lld\n", static_cast<long long>(featureStatus.embeddedGroups));
     std::printf("eligible_seed_count=%d\n", eligibleSeedCount);
     std::printf("seed_path_digest=%s\n", qPrintable(seedPathDigest));
-    std::printf("pool_count=%d\n", fixture.pool.size());
+    std::printf("pool_count=%lld\n", static_cast<long long>(fixture.pool.size()));
     std::printf("pool_path_digest=%s\n", qPrintable(fixture.poolPathDigest));
-    std::printf("hydrated_embedding_count=%d\n", hydratedEmbeddings.size());
+    std::printf("hydrated_embedding_count=%lld\n", static_cast<long long>(hydratedEmbeddings.size()));
     std::printf("selected_placeholder_count=%d\n", selectedPickCount);
     std::printf("resolved_pick_count=%d\n", selectedPickCount);
     std::printf("queue_batch_calls=%d\n", queueBatchCalls);

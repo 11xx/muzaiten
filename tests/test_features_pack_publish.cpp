@@ -143,7 +143,7 @@ void FeaturesPackPublishTest::exportRefusesExistingSymlink()
     const QString path = QDir(directory).filePath(QStringLiteral("scalars.ndjson"));
     const QString target = QDir(directory).filePath(QStringLiteral("target.ndjson"));
     writeFile(target, foreignContent);
-    makeSymlink(target, path);
+    QVERIFY(makeSymlink(target, path));
     const ExportResult result = exportPack(path, m_store, false);
     QVERIFY(!result.published);
     QCOMPARE(result.code, 2);
@@ -173,7 +173,7 @@ void FeaturesPackPublishTest::exportRefusesSymlinkAppearingBeforePublication()
     const QString target = QDir(directory).filePath(QStringLiteral("target.ndjson"));
     writeFile(target, foreignContent);
     SeamReset reset;
-    FilePublish::setBeforePublishHookForTesting([path, target] { makeSymlink(target, path); });
+    FilePublish::setBeforePublishHookForTesting([path, target] { QVERIFY(makeSymlink(target, path)); });
     const ExportResult result = exportPack(path, m_store, false);
     QVERIFY(!result.published);
     QCOMPARE(result.code, 2);
