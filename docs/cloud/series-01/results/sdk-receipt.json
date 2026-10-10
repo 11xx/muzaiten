@@ -1,0 +1,127 @@
+{
+  "schema": "cloud-dispatch-receipt/1",
+  "series": "muzaiten-cloud-01",
+  "source_head": "225b1139e5b5687b23d33faf448dffe92a38f35b",
+  "packet_commit": "225b1139e5b5687b23d33faf448dffe92a38f35b",
+  "result_branch": "claude/muzaiten-sdk-baseline-9wbyzp",
+  "source_head_note": "Environment baseline pilot; no source edits. The report commit follows source_head.",
+  "environment": {
+    "kernel": "Linux 6.18.44-fc-v114 x86_64",
+    "toolchain_source": "preflight (muzaiten-cloud-toolchain/1)",
+    "compiler": "GCC 16.2.0",
+    "cmake": "4.4.3",
+    "qt6": "6.11.2 (Core, Gui, Widgets, Sql, Network, Concurrent, DBus, Multimedia, Test)",
+    "libraries": {
+      "taglib": "2.2.1",
+      "libzstd": "1.5.7",
+      "libchromaprint": "1.6.1",
+      "gstreamer-1.0": "1.28.7",
+      "glib-2.0": "2.88.3",
+      "gobject-2.0": "2.88.3"
+    },
+    "sdk": "not recorded in this pilot",
+    "variables": {
+      "CMAKE_BUILD_PARALLEL_LEVEL": "not set by this pilot"
+    }
+  },
+  "tasks": [
+    {
+      "id": "0",
+      "outcome": "blocked",
+      "commits": [],
+      "checks": [
+        {
+          "revision": "225b1139e5b5687b23d33faf448dffe92a38f35b",
+          "command": "git rev-parse HEAD",
+          "exit_code": 0,
+          "environment": "cloud container, uid 0",
+          "evidence": "observed",
+          "result": "225b1139e5b5687b23d33faf448dffe92a38f35b"
+        },
+        {
+          "revision": "225b1139e5b5687b23d33faf448dffe92a38f35b",
+          "command": "id",
+          "exit_code": 0,
+          "environment": "cloud container, uid 0",
+          "evidence": "observed",
+          "result": "uid=0(root) gid=0(root); the cloud-env steps ran as root"
+        },
+        {
+          "revision": "225b1139e5b5687b23d33faf448dffe92a38f35b",
+          "command": "sha256sum -c docs/cloud/series-01/SHA256SUMS",
+          "exit_code": 0,
+          "environment": "cloud container, uid 0",
+          "evidence": "observed",
+          "result": "20 of 20 entries OK"
+        },
+        {
+          "revision": "225b1139e5b5687b23d33faf448dffe92a38f35b",
+          "command": "cloud-env bash docs/cloud/series-01/environment/preflight.sh",
+          "exit_code": 0,
+          "environment": "cloud container, uid 0",
+          "evidence": "observed",
+          "result": "toolchain JSON recorded; function_ref, qt_compile_link, native audio tools, gstreamer elements reported verified or available",
+          "log_sha256": "2e5558574368ab12a2bbf56ec7ff2481daa80bf9b9da723c5e7e7ddd63a9f2c5"
+        },
+        {
+          "revision": "225b1139e5b5687b23d33faf448dffe92a38f35b",
+          "command": "cloud-env make build",
+          "exit_code": 2,
+          "environment": "cloud container, uid 0",
+          "evidence": "observed",
+          "result": "failed at CMake configure (make target configure): Qt6Gui not found because WrapOpenGL could not find OPENGL_opengl_LIBRARY, OPENGL_glx_LIBRARY, OPENGL_INCLUDE_DIR; 1 CMake error block, 1 CMake warning block, 0 compiler warnings, nothing compiled",
+          "log_sha256": "e81980635e6a0c620c21f078a67bd9d139d9bdf608f95094ba3fb040f989f92e"
+        },
+        {
+          "revision": "225b1139e5b5687b23d33faf448dffe92a38f35b",
+          "command": "cloud-test",
+          "exit_code": null,
+          "environment": "not run",
+          "evidence": "not-run",
+          "result": "not run: stopped after the step 3 failure, per the pilot rule; no UID 1000 evidence and no test counts"
+        }
+      ],
+      "open_findings": [
+        "make build fails at CMake configure: the OpenGL development files needed by WrapOpenGL are missing, so the Qt6Gui component is not found. Nothing was compiled, and no source was implicated. The fix belongs in the environment setup; this pilot did not provision or change permissions.",
+        "preflight.sh reported qt_compile_link as verified but does not exercise the Qt6Gui/WrapOpenGL configure path, so it passed while the real configure failed.",
+        "The SDK version was not recorded in this pilot.",
+        "cloud-test was not run, so there is no UID 1000 evidence and no test counts or skips."
+      ]
+    },
+    {
+      "id": "1",
+      "outcome": "not started",
+      "commits": [],
+      "checks": [],
+      "open_findings": ["Pilot stopped at the task 0 build failure."]
+    },
+    {
+      "id": "2",
+      "outcome": "not started",
+      "commits": [],
+      "checks": [],
+      "open_findings": ["Pilot stopped at the task 0 build failure."]
+    },
+    {
+      "id": "3",
+      "outcome": "not started",
+      "commits": [],
+      "checks": [],
+      "open_findings": ["Pilot stopped at the task 0 build failure."]
+    },
+    {
+      "id": "4",
+      "outcome": "not started",
+      "commits": [],
+      "checks": [],
+      "open_findings": ["Pilot stopped at the task 0 build failure."]
+    }
+  ],
+  "implementation": {
+    "effort": "high",
+    "model": "omitted per repository policy",
+    "independent_review": false,
+    "local_acceptance": false,
+    "cloud_signatures": "unavailable"
+  }
+}
