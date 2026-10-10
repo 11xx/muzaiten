@@ -160,7 +160,9 @@ claim corpus compatibility or legal clearance.
 `tools/version.py` supplies the same PEP 440 version to CMake, native archives
 and the VCS package. Clean tagged releases use an unpadded UTC date such as
 `2026.9.11`, with `.1`, `.2`, etc. for additional releases on that date. The tag,
-binary version and release archive version match exactly. Published historical
+binary version and release archive version match exactly. `muzaiten --version`,
+`muzaitenctl --version` and `muzaiten-features --version` all print that one
+compiled-in version. Published historical
 tags and download URLs retain their original spelling.
 
 Untagged builds use the commit's UTC date and `a0.devN+g<sha>`. After a same-day

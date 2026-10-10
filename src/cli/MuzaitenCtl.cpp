@@ -25,6 +25,7 @@
 #include "search/SearchIndex.h"
 #include "search/SearchQuery.h"
 #include "search/SearchRecord.h"
+#include "Version.h"
 
 #include <QCoreApplication>
 #include <QDate>
@@ -123,7 +124,8 @@ void printUsage()
         "  stop-radio              stop the current radio session\n"
         "\n"
         "Options:\n"
-        "  --json                  print the raw JSON reply\n",
+        "  --json                  print the raw JSON reply\n"
+        "  --version               print the build version and exit\n",
         stderr);
 }
 
@@ -2186,6 +2188,12 @@ int main(int argc, char **argv)
     QCoreApplication app(argc, argv);
     QStringList arguments = QCoreApplication::arguments();
     arguments.removeFirst();
+    // Answered locally from the compiled-in build identity, before any path,
+    // store or socket is resolved: it describes this binary, not a running app.
+    if (arguments.size() == 1 && arguments.first() == QLatin1String("--version")) {
+        std::printf("muzaitenctl %s\n", MUZAITEN_VERSION);
+        return 0;
+    }
 
     const bool json = arguments.removeAll(QStringLiteral("--json")) > 0;
     if (arguments.isEmpty() || arguments.first() == QLatin1String("--help") || arguments.first() == QLatin1String("-h")) {

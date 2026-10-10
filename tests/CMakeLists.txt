@@ -569,6 +569,10 @@ set_tests_properties(test_features_pack PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 
 add_test(NAME test_version
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_version.py
 )
+add_test(NAME test_cli_version
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_cli_version.py
+            ${CMAKE_COMMAND} ${CMAKE_BINARY_DIR}
+)
 add_test(NAME test_startup_storage
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_startup_storage.py $<TARGET_FILE:muzaiten>
 )
