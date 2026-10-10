@@ -37,8 +37,8 @@ remain available.
 - Use private `MUZAITEN_STATE_ROOT`, XDG, runtime, and test roots. Use synthetic
   libraries and fixtures. Never import account data, music libraries, service
   credentials, signing keys, or the operator's environment.
-- Run `make build && make test` in the checkout's `build/` for each source
-  slice through `cloud-env`. Use it for built CLI/runtime probes too. Record
+- Run `cloud-env make build` and `cloud-test` from the checkout root for each
+  source slice, keeping build output in `build/`. Use `cloud-env` for built CLI/runtime probes too. Record
   the exact tree, SDK and user ID. Fix relevant failures without
   weakening requirements, adding skips, increasing timeouts to hide races, or
   disabling checks. Classify unrelated/environment failures with evidence.

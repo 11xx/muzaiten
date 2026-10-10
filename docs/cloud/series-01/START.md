@@ -7,7 +7,7 @@ environment described in `environment/README.md`. Inspect its compiler,
 CMake, Qt, dependency versions and actual user ID. Provisioning belongs in the
 environment Setup script before this session. Do not lower project
 requirements. Establish the baseline with
-`cloud-env bash -c 'make build && make test'`. If it cannot be established within one setup
+`cloud-env make build` followed by `cloud-test`. If it cannot be established within one setup
 attempt, return the blocker report and do not start product changes.
 
 After the pilot passes, execute tasks 1 through 4 sequentially. Each task has

@@ -14,18 +14,21 @@ uses about 3.5 GiB; build output remains in the checkout's `build/`.
 Use a dedicated cloud environment with the contents of `cloud-init.sh` as its
 Setup script. Keep the account's existing network and authentication policy.
 Provisioning needs the GitHub and Nix release/cache hosts. `render-init.py`
-regenerates the script from its five explicitly selected inputs.
+regenerates the script from its explicitly selected inputs.
 
 Build and run in the SDK:
 
 ```sh
 cloud-env bash docs/cloud/series-01/environment/preflight.sh
 cloud-env make build
-cloud-env make test
+cloud-test
 cloud-env ./build/muzaitenctl --version
 ```
 
-Run filesystem permission tests under a normal user. A root process can bypass
+`cloud-test` runs the suite under the hosted VM's existing `ubuntu` account
+when invoked by root. Setup prepares the checkout's generated test directories
+and isolated test state for that account. It preserves source ownership and
+account configuration. Run filesystem permission tests under a normal user. A root process can bypass
 the fixture's permission bits and cannot establish those assertions. Record
 the actual user ID, tested revision and SDK identity in the return receipt.
 Do not skip the permission tests or label a root-only result equivalent.
