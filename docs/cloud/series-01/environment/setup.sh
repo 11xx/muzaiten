@@ -13,7 +13,7 @@ for tool in curl tar xz sha256sum python3; do
 done
 sdk_root=/opt/muzaiten-cloud
 sdk_source=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-for input in shell.nix preflight.sh cloud-env capture-env.py; do
+for input in shell.nix preflight.sh cloud-env cloud-test capture-env.py; do
     [[ -f "$sdk_source/$input" ]] || { printf 'Missing toolchain input: %s\n' "$input" >&2; exit 1; }
 done
 mkdir -p "$sdk_root/bin"
@@ -63,6 +63,7 @@ fi
 install -m 644 "$sdk_source/shell.nix" "$sdk_root/shell.nix"
 install -m 755 "$sdk_source/preflight.sh" "$sdk_root/preflight.sh"
 install -m 755 "$sdk_source/cloud-env" "$sdk_root/cloud-env"
+install -m 755 "$sdk_source/cloud-test" "$sdk_root/cloud-test"
 install -m 755 "$sdk_source/capture-env.py" "$sdk_root/capture-env.py"
 source_path=$(
     "$sdk_root/bin/nix-instantiate" --eval --json --expr '
@@ -79,4 +80,15 @@ python3 -m json.tool "$sdk_root/toolchain.json" >/dev/null
 "$sdk_root/bin/nix-shell" "$sdk_root/shell.nix" --pure --run \
     "python3 '$sdk_root/capture-env.py' '$sdk_root/activate.sh'"
 install -m 755 "$sdk_root/cloud-env" /usr/local/bin/cloud-env
+install -m 755 "$sdk_root/cloud-test" /usr/local/bin/cloud-test
+if [[ -d .git && -f CMakeLists.txt && -f tools/version.py ]]; then
+    test_uid=$(id -u ubuntu)
+    test_gid=$(id -g ubuntu)
+    [[ "$test_uid" != 0 ]] || { printf '%s\n' 'A normal ubuntu account is required for filesystem permission tests.' >&2; exit 1; }
+    for directory in build build/tests build/Testing agent-state agent-state/cloud-tests agent-state/cloud-tests/runtime; do
+        [[ ! -L "$directory" ]] || { printf 'Test directory must not be a symlink: %s\n' "$directory" >&2; exit 1; }
+        install -d -o "$test_uid" -g "$test_gid" "$directory"
+    done
+    chmod 700 agent-state/cloud-tests/runtime
+fi
 printf '%s\n' 'Pinned muzaiten toolchain is ready. Run build and runtime commands through cloud-env.'

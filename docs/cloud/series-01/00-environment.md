@@ -27,7 +27,8 @@ Before any source edit, run:
 export MUZAITEN_STATE_ROOT="$PWD/agent-state/cloud"
 export CMAKE_BUILD_PARALLEL_LEVEL=2
 cloud-env bash docs/cloud/series-01/environment/preflight.sh
-cloud-env bash -c 'make build && make test'
+cloud-env make build
+cloud-test
 ```
 
 Record the unchanged source revision, command exit codes, warnings/errors,

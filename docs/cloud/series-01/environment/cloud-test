@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ $(id -u) == 0 ]]; then
+    exec runuser -u ubuntu -- "$(readlink -f "${BASH_SOURCE[0]}")" "$@"
+fi
+export MUZAITEN_STATE_ROOT="$PWD/agent-state/cloud-tests"
+export XDG_RUNTIME_DIR="$MUZAITEN_STATE_ROOT/runtime"
+[[ -w build/Testing && -w build/tests && -w "$XDG_RUNTIME_DIR" ]] || {
+    printf '%s\n' 'Test directories are not prepared. Configure the cloud environment Setup script from the checkout.' >&2
+    exit 1
+}
+printf 'Running the test suite as UID %s.\n' "$(id -u)"
+exec cloud-env make test "$@"

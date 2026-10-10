@@ -3,7 +3,7 @@ import hashlib
 from pathlib import Path
 
 root = Path(__file__).resolve().parent
-files = ['shell.nix', 'preflight.sh', 'cloud-env', 'capture-env.py', 'setup.sh']
+files = ['shell.nix', 'preflight.sh', 'cloud-env', 'cloud-test', 'capture-env.py', 'setup.sh']
 lines = ['#!/usr/bin/env bash', 'set -euo pipefail', 'setup_dir=/opt/muzaiten-cloud-setup', 'mkdir -p "$setup_dir"']
 for name in files:
     body = (root / name).read_text()
