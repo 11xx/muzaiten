@@ -1,0 +1,92 @@
+{
+  "schema": "cloud-dispatch-receipt/1",
+  "series": "muzaiten-cloud-01",
+  "repair": "store-free semantic provider status for GUI callers",
+  "input": {
+    "branch": "claude/muzaiten-diagnostic-repair-87irzs",
+    "commit": "9d430facf327946ea9ba7e1448b31b3de555bad4"
+  },
+  "source_base": "9d430facf327946ea9ba7e1448b31b3de555bad4",
+  "result_branch": "claude/muzaiten-diagnostic-repair-87irzs",
+  "source_head": "7b22fb9d3a55863056f37da1e33153eb4566ddf3",
+  "tested_head": "7b22fb9d3a55863056f37da1e33153eb4566ddf3",
+  "source_head_note": "The report commit follows source_head and changes only results/. diagnostic-repair.md and its receipt remain the snapshot of source head e52b83c.",
+  "implementation_model": "omitted: the executing platform forbids model identifiers in repository artifacts",
+  "tasks": [
+    {
+      "id": "3-repair-semantic-provider",
+      "outcome": "repaired (lead-selected option 1)",
+      "commits": [
+        "7b22fb9d3a55863056f37da1e33153eb4566ddf3"
+      ],
+      "checks": [
+        {
+          "revision": "7b22fb9d3a55863056f37da1e33153eb4566ddf3",
+          "command": "real helper + synthetic provider, fresh root: old GUI argv vs status --semantic-only (working tree identical to commit)",
+          "exit_code": 0,
+          "environment": "cloud container, Ubuntu 24.04, Linux 6.18.44 x86_64; SDK /opt/muzaiten-cloud, nixpkgs e7439b6b14ad3cc35d05608ebca9bce01a25f5f8 (GCC 16.2.0, CMake 4.4.3, Qt 6.11.2); builds UID 0 via cloud-env, tests and probes UID 1000",
+          "evidence": "observed",
+          "result": "old argv exit 4, no provider call; new argv exit 0, semantic only, provider ran capabilities+status; nothing created",
+          "log_sha256": "3c24897ce37df2567573b04fb19d68b4c3a590b9378232b31dde591f159a1439"
+        },
+        {
+          "revision": "7b22fb9d3a55863056f37da1e33153eb4566ddf3",
+          "command": "cloud-env make build (warm, working tree identical to commit)",
+          "exit_code": 0,
+          "environment": "cloud container, Ubuntu 24.04, Linux 6.18.44 x86_64; SDK /opt/muzaiten-cloud, nixpkgs e7439b6b14ad3cc35d05608ebca9bce01a25f5f8 (GCC 16.2.0, CMake 4.4.3, Qt 6.11.2); builds UID 0 via cloud-env, tests and probes UID 1000",
+          "evidence": "observed",
+          "result": "0 warnings, 0 errors",
+          "log_sha256": "3f87369f2e53ea629b49950d160625f566d791c95baf18081b9508a106f99a7c"
+        },
+        {
+          "revision": "7b22fb9d3a55863056f37da1e33153eb4566ddf3",
+          "command": "python3 tests/test_features_status.py build/muzaiten-features -v; build/tests/test_main_window_navigation semanticStatusRealHelperWithoutFeatureStore semanticStatusHeartbeat semanticStatusSetupResults",
+          "exit_code": 0,
+          "environment": "cloud container, Ubuntu 24.04, Linux 6.18.44 x86_64; SDK /opt/muzaiten-cloud, nixpkgs e7439b6b14ad3cc35d05608ebca9bce01a25f5f8 (GCC 16.2.0, CMake 4.4.3, Qt 6.11.2); builds UID 0 via cloud-env, tests and probes UID 1000",
+          "evidence": "observed",
+          "result": "native 11/11 ok, GUI 11 passed, 0 skipped, UID 1000",
+          "log_sha256": "b3be0ab2a0bf16e5eaea44b19aeaffb2d9ba28081bf0cda57f39f00d02e1b0fa"
+        },
+        {
+          "revision": "7b22fb9d3a55863056f37da1e33153eb4566ddf3",
+          "command": "cloud-env make build (clean tree)",
+          "exit_code": 0,
+          "environment": "cloud container, Ubuntu 24.04, Linux 6.18.44 x86_64; SDK /opt/muzaiten-cloud, nixpkgs e7439b6b14ad3cc35d05608ebca9bce01a25f5f8 (GCC 16.2.0, CMake 4.4.3, Qt 6.11.2); builds UID 0 via cloud-env, tests and probes UID 1000",
+          "evidence": "observed",
+          "result": "152 steps; 0 warnings, 0 errors",
+          "log_sha256": "42c77063724cede8e6607aad962cd57715de346fa180360ac9391350ef19db54"
+        },
+        {
+          "revision": "7b22fb9d3a55863056f37da1e33153eb4566ddf3",
+          "command": "cloud-test (clean tree)",
+          "exit_code": 0,
+          "environment": "cloud container, Ubuntu 24.04, Linux 6.18.44 x86_64; SDK /opt/muzaiten-cloud, nixpkgs e7439b6b14ad3cc35d05608ebca9bce01a25f5f8 (GCC 16.2.0, CMake 4.4.3, Qt 6.11.2); builds UID 0 via cloud-env, tests and probes UID 1000",
+          "evidence": "observed",
+          "result": "UID 1000; CTest 88/88 passed; QTest 1540 passed, 0 failed, 1 skipped",
+          "log_sha256": "9aa7dff93193610dfd1d8dda21776e943b80a78691a6f4bd26c37e325911b76c"
+        }
+      ],
+      "skips": [
+        "SharedOutputRoutingTest: QSKIP, no pipewire.conf (omission)",
+        "test_version test_arch_ordering: vercmp absent (omission)",
+        "test_fold_han_rare cached smoke: pinned references not cached (omission)"
+      ],
+      "open_findings": [
+        "Analysis status dialog provider row has no dedicated GUI fixture (covered by native semantic-only fixtures and compile).",
+        "Pre-existing: GUI command-line --state-dir/--state-root are not forwarded to the helper, which reads the saved provider path from its own default state; environment overrides are inherited.",
+        "Unchanged: a WAL store with a missing -shm in an unwritable directory is reported unreadable.",
+        "The new GUI fixture was not run against the pre-change GUI code; the caller witness covers the pre-change argv."
+      ]
+    }
+  ],
+  "bounds": {
+    "continuation_start_utc": "2026-10-10T23:21:41Z",
+    "final_gate_end_utc": "2026-10-10T23:33:34Z",
+    "absolute_stop_utc": "2026-10-10T23:54:41Z",
+    "cost": "unavailable: no billing or token figures in this environment"
+  },
+  "private_artifacts": {
+    "final_ctest_lasttest_sha256": "b1562394eb841618b44259a85a88b07327dca92411fa0b7e2fca7c51c95b500c",
+    "location": "agent-state/cloud/logs/ (ignored, not committed)"
+  }
+}
