@@ -1,0 +1,73 @@
+{
+  "schema": "cloud-dispatch-receipt/1",
+  "series": "muzaiten-cloud-01",
+  "source_head": "6fd3362015c7467efa1c2b1ca549b12a65263947",
+  "packet_commit": "6fd3362015c7467efa1c2b1ca549b12a65263947",
+  "result_branch": "claude/muzaiten-sdk-verified-baseline-a6zdp5",
+  "scope": "environment-baseline-pilot",
+  "tasks": {
+    "0": {
+      "outcome": "blocked-at-test-step",
+      "detail": "Source identity, checksums, preflight, and build passed; cloud-test did not run tests."
+    },
+    "1": "not-started",
+    "2": "not-started",
+    "3": "not-started",
+    "4": "not-started"
+  },
+  "checks": [
+    {
+      "name": "source-identity",
+      "command": "git rev-parse HEAD; id",
+      "observed_exit": 0,
+      "uid": 0
+    },
+    {
+      "name": "packet-checksums",
+      "command": "sha256sum -c docs/cloud/series-01/SHA256SUMS",
+      "observed_exit": 0
+    },
+    {
+      "name": "sdk-preflight",
+      "command": "cloud-env bash docs/cloud/series-01/environment/preflight.sh",
+      "observed_exit": 0,
+      "toolchain": {
+        "compiler": "16.2.0",
+        "cmake": "4.4.3",
+        "qt6": "6.11.2",
+        "gstreamer": "1.28.7",
+        "function_ref": "verified",
+        "qt_compile_link": "verified"
+      }
+    },
+    {
+      "name": "build",
+      "command": "cloud-env make build",
+      "observed_exit": 0,
+      "compiler_warnings": 0,
+      "error_matches": 0,
+      "steps_logged": "985/986",
+      "pkg_config_diagnostics": {
+        "kind": "configure-time, not compiler warnings",
+        "count": 4,
+        "message": "Package libunwind was not found in the pkg-config search path."
+      }
+    },
+    {
+      "name": "test",
+      "command": "cloud-test",
+      "observed_exit": 1,
+      "uid": null,
+      "tests": null,
+      "failure": "Test directories are not prepared. Configure the cloud environment Setup script from the checkout."
+    }
+  ],
+  "not_done": [
+    "tasks 1-4",
+    "uid-1000 test totals",
+    "source edits",
+    "account or permission changes",
+    "pull request"
+  ],
+  "review": "No independent review or local acceptance claimed. Cloud signatures unavailable."
+}
