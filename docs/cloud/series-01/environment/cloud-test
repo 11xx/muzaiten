@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ $(id -u) == 0 ]]; then
+    if [[ -e build/Testing/Temporary ]]; then
+        [[ -d build/Testing/Temporary && ! -L build/Testing/Temporary ]] || {
+            printf '%s\n' 'CTest temporary output must be a directory, not a symlink.' >&2
+            exit 1
+        }
+        archive=$(mktemp -d "$PWD/agent-state/cloud-tests/ctest-history.XXXXXX")
+        mv -- build/Testing/Temporary "$archive/Temporary"
+    fi
     exec runuser -u ubuntu -- "$(readlink -f "${BASH_SOURCE[0]}")" "$@"
 fi
 export MUZAITEN_STATE_ROOT="$PWD/agent-state/cloud-tests"

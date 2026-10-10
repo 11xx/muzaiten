@@ -91,10 +91,18 @@ fi
 source "$sdk_root/activate.sh"
 exec "$@"
 SDK_2233C468584D5A91002C61F1F2D0E06648E9A73296426EEF732154089046C82C
-cat > "$setup_dir/cloud-test" <<'SDK_167BB5878F6988A740CD45D3F36136C59D799BF9C732B4BF5F04A18678B3D79B'
+cat > "$setup_dir/cloud-test" <<'SDK_6DE75518D615DB2E74E717C5E4FDB6F5A32FCE2BCC3DE5103426CEC463B6D748'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ $(id -u) == 0 ]]; then
+    if [[ -e build/Testing/Temporary ]]; then
+        [[ -d build/Testing/Temporary && ! -L build/Testing/Temporary ]] || {
+            printf '%s\n' 'CTest temporary output must be a directory, not a symlink.' >&2
+            exit 1
+        }
+        archive=$(mktemp -d "$PWD/agent-state/cloud-tests/ctest-history.XXXXXX")
+        mv -- build/Testing/Temporary "$archive/Temporary"
+    fi
     exec runuser -u ubuntu -- "$(readlink -f "${BASH_SOURCE[0]}")" "$@"
 fi
 export MUZAITEN_STATE_ROOT="$PWD/agent-state/cloud-tests"
@@ -105,7 +113,7 @@ export XDG_RUNTIME_DIR="$MUZAITEN_STATE_ROOT/runtime"
 }
 printf 'Running the test suite as UID %s.\n' "$(id -u)"
 exec cloud-env make test "$@"
-SDK_167BB5878F6988A740CD45D3F36136C59D799BF9C732B4BF5F04A18678B3D79B
+SDK_6DE75518D615DB2E74E717C5E4FDB6F5A32FCE2BCC3DE5103426CEC463B6D748
 cat > "$setup_dir/capture-env.py" <<'SDK_99D21873E923DAF84B12360D6FA6AEE8213E6B77DEB717FE3794A17A3F1C6AA0'
 #!/usr/bin/env python3
 import os
