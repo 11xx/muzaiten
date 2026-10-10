@@ -14,6 +14,7 @@
 #include <QSet>
 #include <QStringList>
 
+#include <expected>
 #include <memory>
 
 #include "core/Album.h"
@@ -135,7 +136,9 @@ public:
     // path -> {file_mtime, file_size, metadata_scanned} for tracks under
     // rootPrefix, for the incremental-rescan diff. Empty rootPrefix returns all
     // tracks. metadata_scanned lets the diff re-queue enumerated-only placeholders.
-    QHash<QString, TrackFingerprint> trackFingerprints(const QString &rootPrefix = {}) const;
+    // A failed read is an error, never an empty map: to the scanner an empty map
+    // means a new root.
+    std::expected<QHash<QString, TrackFingerprint>, QString> trackFingerprints(const QString &rootPrefix = {}) const;
     // Paths of enumerated-only placeholder rows (metadata_scanned=0) awaiting a tag
     // read, optionally scoped to one directory and/or capped, for the lazy fill.
     QStringList enumeratedOnlyPaths(const QString &parentDir = {}, int limit = 0) const;

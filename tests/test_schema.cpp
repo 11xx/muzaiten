@@ -882,23 +882,38 @@ void SchemaTest::enumeratedPlaceholdersStayIsolatedUntilScanned()
     QVERIFY(database.tracksForArtist(QStringLiteral("Album Artist")).isEmpty());
     QVERIFY(database.allTracksForSearch().isEmpty());
 
+    // A successful read of a root without tracks is a valid empty map.
+    const auto emptyRoot = database.trackFingerprints(temp.filePath(QStringLiteral("elsewhere")));
+    QVERIFY(emptyRoot.has_value());
+    QVERIFY(emptyRoot->isEmpty());
+
     // The rescan diff must re-queue an enumerated-only placeholder.
     auto fingerprints = database.trackFingerprints();
-    QVERIFY(fingerprints.contains(full.path));
-    QVERIFY(!fingerprints.value(full.path).metadataScanned);
+    QVERIFY(fingerprints.has_value());
+    QVERIFY(fingerprints->contains(full.path));
+    QVERIFY(!fingerprints->value(full.path).metadataScanned);
 
     // The metadata pass upserts full tags and flips the row to scanned.
     QVERIFY2(database.upsertTrack(full), qPrintable(database.lastError()));
     QCOMPARE(database.albumArtists().size(), 1);
     QCOMPARE(database.tracksForArtist(QStringLiteral("Album Artist")).size(), 1);
     fingerprints = database.trackFingerprints();
-    QVERIFY(fingerprints.value(full.path).metadataScanned);
+    QVERIFY(fingerprints->value(full.path).metadataScanned);
 
     // A late placeholder for an already-scanned path must not reset it (DO NOTHING).
     QVERIFY2(database.insertEnumeratedPlaceholders({placeholder}), qPrintable(database.lastError()));
     QCOMPARE(database.albumArtists().size(), 1);
     fingerprints = database.trackFingerprints();
-    QVERIFY(fingerprints.value(full.path).metadataScanned);
+    QVERIFY(fingerprints->value(full.path).metadataScanned);
+
+    // A failed read is reported, not mistaken for an empty root.
+    {
+        QSqlQuery rename(QSqlDatabase::database(connectionName));
+        QVERIFY(rename.exec(QStringLiteral("ALTER TABLE tracks RENAME COLUMN metadata_scanned TO metadata_scanned_fault")));
+    }
+    fingerprints = database.trackFingerprints();
+    QVERIFY(!fingerprints.has_value());
+    QVERIFY2(fingerprints.error().contains(QStringLiteral("metadata_scanned")), qPrintable(fingerprints.error()));
 }
 
 void SchemaTest::guessedPlaceholdersFollowVisibilitySetting()

@@ -38,6 +38,7 @@
 #include "ui/RightSidebar.h"
 #undef private
 
+#include <QApplication>
 #include <QEventLoop>
 #include <functional>
 #include <QDataStream>
@@ -609,6 +610,120 @@ private slots:
         QVERIFY(core.database()->upsertTrack(track));
         window.m_searchView->forceRefresh();
         QTRY_COMPARE(Search::IndexCache::read(cache).records.value(0).title, QStringLiteral("Changed"));
+    }
+
+    void scanAbortsWhenFingerprintReadFails()
+    {
+        QTemporaryDir music;
+        QVERIFY(music.isValid());
+        const QString rootA = QDir(music.path()).filePath(QStringLiteral("a"));
+        const QString rootB = QDir(music.path()).filePath(QStringLiteral("b"));
+        for (const QString &root : {rootA, rootB}) {
+            QVERIFY(QDir().mkpath(root));
+            QVERIFY(writeSilentWav(QDir(root).filePath(QStringLiteral("new.wav"))));
+        }
+        AppCore core;
+        Database *database = core.database();
+        // A scanned track whose file is gone: only a successful read can mark it missing.
+        Track gone;
+        gone.path = QDir(rootA).filePath(QStringLiteral("gone.wav"));
+        gone.parentDir = rootA;
+        gone.filename = QStringLiteral("gone.wav");
+        gone.title = QStringLiteral("Gone");
+        gone.fileSize = 1;
+        gone.fileMtime = 1;
+        QVERIFY2(database->upsertTrack(gone), qPrintable(database->lastError()));
+        for (const QString &root : {rootA, rootB}) {
+            ScanRoot scanRoot;
+            scanRoot.name = QFileInfo(root).fileName();
+            scanRoot.path = root;
+            QVERIFY2(database->saveScanRoot(scanRoot), qPrintable(database->lastError()));
+        }
+        QCOMPARE(database->enabledScanRoots().size(), 2);
+
+        const QString fixtureConnection = QStringLiteral("fingerprint-fault-%1")
+                                              .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        const auto removeFixture = qScopeGuard([&fixtureConnection] { QSqlDatabase::removeDatabase(fixtureConnection); });
+        {
+            QSqlDatabase fixture = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), fixtureConnection);
+            fixture.setDatabaseName(core.databasePath());
+            QVERIFY(fixture.open());
+            QSqlQuery query(fixture);
+            // Only the fingerprint SELECT reads this column before the scan pipeline starts.
+            QVERIFY(query.exec(QStringLiteral("ALTER TABLE tracks RENAME COLUMN metadata_scanned TO metadata_scanned_fault")));
+            QVERIFY(!query.exec(QStringLiteral("SELECT path, file_mtime, file_size, metadata_scanned FROM tracks")));
+            QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM tracks")) && query.next());
+            QCOMPARE(query.value(0).toInt(), 1);
+        }
+        const auto countTracks = [&fixtureConnection](const QString &where) {
+            QSqlQuery query(QSqlDatabase::database(fixtureConnection));
+            return query.exec(QStringLiteral("SELECT COUNT(*) FROM tracks WHERE ") + where) && query.next()
+                ? query.value(0).toInt() : -1;
+        };
+
+        MainWindow window(&core);
+        QStringList messages;
+        connect(window.statusBar(), &QStatusBar::messageChanged, &window, [&messages](const QString &message) {
+            if (!message.isEmpty()) messages.append(message);
+        });
+        QStringList dialogs;
+        QTimer dismiss;
+        connect(&dismiss, &QTimer::timeout, &window, [&dialogs] {
+            if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+                dialogs.append(box->text());
+                box->reject();
+            }
+        });
+        dismiss.start(10);
+
+        window.scanSourceRoots(database->enabledScanRoots());
+        const bool started = window.m_scanThread != nullptr;
+        if (started) {
+            window.cancelScan();
+            QTRY_VERIFY_WITH_TIMEOUT(window.m_scanThread == nullptr, 10000);
+        }
+        QVERIFY2(!started, "A failed fingerprint read must not start the scan pipeline");
+        QVERIFY(window.m_scanPipeline == nullptr);
+        QVERIFY(window.m_pendingScanRoots.isEmpty());
+        QVERIFY(!window.m_ingestSessionActive);
+        QVERIFY(window.m_activeScanRootPath.isEmpty());
+        QVERIFY(window.m_scanProgress->isHidden());
+        QVERIFY(window.m_stopScanButton->isHidden());
+        QVERIFY(dialogs.isEmpty());
+        const QStringList failures = messages.filter(QStringLiteral("Scan aborted"));
+        QCOMPARE(failures.size(), 1);
+        QVERIFY(failures.first().contains(rootA));
+        QVERIFY2(failures.first().contains(QStringLiteral("metadata_scanned")), qPrintable(failures.first()));
+        QCOMPARE(window.statusBar()->currentMessage(), failures.first());
+        QCOMPARE(countTracks(QStringLiteral("1")), 1);
+        QCOMPARE(countTracks(QStringLiteral("COALESCE(missing, 0) <> 0")), 0);
+        const QVector<ScanRoot> afterFailure = database->scanRoots();
+        QCOMPARE(afterFailure.size(), 2);
+        QCOMPARE(afterFailure.at(0).path, rootA);
+        QCOMPARE(afterFailure.at(0).lastError, failures.first());
+        QVERIFY(afterFailure.at(1).lastScannedAt.isEmpty());
+
+        {
+            QSqlQuery query(QSqlDatabase::database(fixtureConnection));
+            QVERIFY(query.exec(QStringLiteral("ALTER TABLE tracks RENAME COLUMN metadata_scanned_fault TO metadata_scanned")));
+        }
+        messages.clear();
+        window.scanSourceRoots(database->enabledScanRoots());
+        QVERIFY(window.m_scanThread != nullptr);
+        QCOMPARE(window.m_activeScanRootPath, rootA);
+        QTRY_VERIFY_WITH_TIMEOUT(window.m_scanThread == nullptr && window.m_pendingScanRoots.isEmpty()
+                                 && window.m_fillThread == nullptr, 20000);
+        QVERIFY(dialogs.isEmpty());
+        QVERIFY(messages.filter(QStringLiteral("Scan aborted")).isEmpty());
+        const qsizetype firstDone = messages.indexOf(QStringLiteral("Source scan complete: %1").arg(rootA));
+        QVERIFY(firstDone >= 0);
+        QVERIFY(messages.lastIndexOf(QStringLiteral("Source scans complete")) > firstDone);
+        QCOMPARE(database->missingTrackPaths(), QStringList{gone.path});
+        QCOMPARE(countTracks(QStringLiteral("path LIKE '%/new.wav'")), 2);
+        for (const ScanRoot &root : database->scanRoots()) {
+            QVERIFY(root.lastError.isEmpty());
+            QVERIFY(!root.lastScannedAt.isEmpty());
+        }
     }
 
     void coreOwnsItsWindowUntilDestruction()

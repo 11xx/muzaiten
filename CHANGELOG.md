@@ -206,6 +206,12 @@
 
 ### Fixed
 
+- A scan whose read of the library's known tracks fails now stops before
+  enumerating, adding placeholders, reading tags or marking files missing,
+  and reports the database error in the status bar and the source
+  directory's scan status. The failed read was previously treated as an
+  empty directory, so every known file looked new and missing-file
+  detection was silently skipped.
 - Seed stores holding 31 or 32 near-limit taste profiles stay listable,
   removable and writable. Earlier versions accepted those imports but then could
   not read the store, which grew past its 2 MiB read limit. Reads and writes now

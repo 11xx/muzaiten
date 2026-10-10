@@ -34,6 +34,11 @@ Missing files are marked missing rather than deleted from the database until you
 explicitly choose `Library > Remove missing tracks`. An incomplete directory
 enumeration skips missing-file detection so an unreadable subtree is not treated
 as deleted.
+A scan first reads the library's record of the tracks under its directory. If
+that read fails, the scan stops before enumerating files, adding placeholders,
+reading tags or marking anything missing. The status bar and the source
+directory's last-scan status show the error, and the rest of that scan run is
+not started; the next scan starts normally.
 
 ## Listening history and scrobbling
 
