@@ -10,11 +10,10 @@ Read `CMakeLists.txt`, `Makefile`, `tests/CMakeLists.txt`, and
 - Python and the test suite's media/tool dependencies. Native PipeWire support
   is optional; report whether it is present and the resulting test coverage.
 
-Hosted Ubuntu images do not establish these versions merely by having a C++
-compiler. Use an environment setup script or a disposable container with the
-required dependencies. Record the image identity and actual package/compiler
-versions. A disposable Arch environment is one possible route; do not assume
-its unpinned current packages meet the requirements without checking.
+The hosted Ubuntu environment uses the pinned SDK described in
+[environment/README.md](environment/README.md). Configure its Setup script
+before starting the task. Record the SDK identity, actual versions, and user
+ID. The compiler and runtime commands use `cloud-env`.
 
 Keep build output in the checkout's `build/`, with bounded parallelism such as
 `CMAKE_BUILD_PARALLEL_LEVEL=2`. Do not provide embedded service credentials.
@@ -25,10 +24,10 @@ remain omissions, not passes. Use the suite's existing isolation helpers.
 Before any source edit, run:
 
 ```sh
-export QT_QPA_PLATFORM=offscreen
 export MUZAITEN_STATE_ROOT="$PWD/agent-state/cloud"
 export CMAKE_BUILD_PARALLEL_LEVEL=2
-make build && make test
+cloud-env bash docs/cloud/series-01/environment/preflight.sh
+cloud-env bash -c 'make build && make test'
 ```
 
 Record the unchanged source revision, command exit codes, warnings/errors,

@@ -38,14 +38,17 @@ remain available.
   libraries and fixtures. Never import account data, music libraries, service
   credentials, signing keys, or the operator's environment.
 - Run `make build && make test` in the checkout's `build/` for each source
-  slice. Record the exact tree and environment. Fix relevant failures without
+  slice through `cloud-env`. Use it for built CLI/runtime probes too. Record
+  the exact tree, SDK and user ID. Fix relevant failures without
   weakening requirements, adding skips, increasing timeouts to hide races, or
   disabling checks. Classify unrelated/environment failures with evidence.
 - Ship affected guides and `CHANGELOG.md` Unreleased entries with behavior
   changes. Preserve unrelated entries and existing UI copy style.
 - Keep Git identity as supplied by the environment. Use structured commit
-  messages and evidenced `Implemented-by`/`Planned-by` role trailers. Do not
-  invent model coordinates or independent review. Unsigned cloud delivery is
+  messages and evidenced `Implemented-by`/`Planned-by` role trailers. Copy
+  coordinates from `arc env` when available; omit an unestablished coordinate
+  and its trailer. Do not use placeholders or claim independent review.
+  Unsigned cloud delivery is
   accepted for local signing; signing keys are never transported.
 - Exclude AI `Co-Authored-By` trailers and private session URLs from commits,
   PRs, code, and reports. Disable automatic session-link and coauthor
@@ -68,7 +71,9 @@ integration determine whether it ships.
 ## Starting and retrieving
 
 At `https://claude.ai/code`, select `11xx/muzaiten`, base branch
-`dispatch/cloud-01`, and an environment capable of satisfying task 0. Paste
+`dispatch/cloud-01`, and the dedicated SDK environment described in
+[environment/README.md](environment/README.md). Create a distinct result
+branch before source edits; the packet's branch remains the PR target. Paste
 the contents of [START.md](START.md). The GitHub chat connector can read this
 packet for planning; a Claude Code cloud session executes it.
 

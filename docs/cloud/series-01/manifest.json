@@ -34,8 +34,8 @@
     },
     {
       "path": "docs/cloud/series-01/00-environment.md",
-      "sha256": "d3401ce4ba6353e3f901526bfe65bdd2f295a08bd5b23c002b13e35ed547c588",
-      "bytes": 1911
+      "sha256": "b30f32919c654dfb4017ee085be3cdbfa0f9c99b46ed35474c51a59a830cf323",
+      "bytes": 1852
     },
     {
       "path": "docs/cloud/series-01/01-cli-version.md",
@@ -59,25 +59,72 @@
     },
     {
       "path": "docs/cloud/series-01/README.md",
-      "sha256": "fa739868cd44835e453cd0f6ad849db4eaa53936ec08042b149a7b3dbf61003e",
-      "bytes": 4992
+      "sha256": "08608c997cc4cc3d7a99c5d3862c7e55c0805d36c952b2ad2353490a3d5be7be",
+      "bytes": 5298
     },
     {
       "path": "docs/cloud/series-01/RETURN.md",
-      "sha256": "aa1e76d922e4818b1450a62403e710480e6643127217a5e28f60e3fd790fd9a3",
-      "bytes": 2306
+      "sha256": "c652b02a1161b1cdaffc0c8eecb56ae2a6b3a28c707b35c08af9dcb5ff0380ab",
+      "bytes": 2345
     },
     {
       "path": "docs/cloud/series-01/START.md",
-      "sha256": "3078abf19f09c5d3a0aa6c2bc5d5cbe25c5f01ffff0170baccc173cc53880b3b",
-      "bytes": 1390
+      "sha256": "e5a83383086438f68a77a83fc7ec8afcbde9e3558981002b146b905648f7e15c",
+      "bytes": 1587
     },
     {
       "path": "docs/cloud/series-01/TRANSPORT.md",
       "sha256": "ec8d047a24b6bca58aec6578f616aa0be84a443c2a328671d94d68f9e75835c7",
       "bytes": 1728
+    },
+    {
+      "path": "docs/cloud/series-01/environment/README.md",
+      "sha256": "d2f1541ace16ec514a89aa6954c0c2607e79f53ef2b135e8c8b8cf7a259a2b7d",
+      "bytes": 2035
+    },
+    {
+      "path": "docs/cloud/series-01/environment/capture-env.py",
+      "sha256": "f8b7f2cf2afa11d9ba38e1c4fd5d58c9a5113f32b8d4104ddcffb56ad6bee22c",
+      "bytes": 1214
+    },
+    {
+      "path": "docs/cloud/series-01/environment/cloud-env",
+      "sha256": "2233c468584d5a91002c61f1f2d0e06648e9a73296426eef732154089046c82c",
+      "bytes": 381
+    },
+    {
+      "path": "docs/cloud/series-01/environment/cloud-init.sh",
+      "sha256": "2be06192dc101a164677776c2f206c2907bfc87afd8565402026567ac145cbfe",
+      "bytes": 9262
+    },
+    {
+      "path": "docs/cloud/series-01/environment/preflight.sh",
+      "sha256": "d1a0df63e45e9bff6ae4f3b40630107a6e454adad6019f0da7fd85b4a8899449",
+      "bytes": 1750
+    },
+    {
+      "path": "docs/cloud/series-01/environment/render-init.py",
+      "sha256": "b2a3da9bb0dc33ca4eb6ce87cc1db4834fbed3a794cbbb5ff0a3603d1bd64b2b",
+      "bytes": 688
+    },
+    {
+      "path": "docs/cloud/series-01/environment/setup.sh",
+      "sha256": "988cae1a446209212c94b8ff1d0ff696ae0acd9cb7d9e79b05f9df6e9e044707",
+      "bytes": 3526
+    },
+    {
+      "path": "docs/cloud/series-01/environment/shell.nix",
+      "sha256": "2e47d058460f30a36ebb843a247410e7a973974f381c1b53b8ae4f76bf86280f",
+      "bytes": 1392
     }
   ],
   "authority": "local-lead",
-  "receipt_schema": "cloud-dispatch-receipt/1"
+  "receipt_schema": "cloud-dispatch-receipt/1",
+  "environment": {
+    "name": "muzaiten-cloud-build",
+    "sdk": "docs/cloud/series-01/environment/shell.nix",
+    "setup_script": "docs/cloud/series-01/environment/cloud-init.sh",
+    "setup_sha256": "2be06192dc101a164677776c2f206c2907bfc87afd8565402026567ac145cbfe",
+    "runtime": "cloud-env"
+  }
 }

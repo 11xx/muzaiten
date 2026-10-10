@@ -13,8 +13,9 @@ The report records:
 - Exact fixture discrimination and baseline/final outcomes, with command
   exits, warning/error totals, test totals/skips, and environment identity.
 - Changed guides/changelog sections and any unresolved material risk.
-- Declared/observed implementation model and effort, or `unknown` where not
-  established. Never claim an independent review or local acceptance.
+- Declared/observed implementation model and effort when established; omit
+  unavailable coordinates. Never use placeholders, claim an independent
+  review, or assert local acceptance.
 
 Use a receipt with `schema: "cloud-dispatch-receipt/1"`, `series`,
 `source_base`, `packet_commit`, `result_branch`, `source_head`, and `tasks`.
