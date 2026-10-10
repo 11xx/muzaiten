@@ -4,6 +4,9 @@
 talk to a running instance over its IPC socket (resolved from the same
 `MUZAITEN_*` environment as the app, so they target the matching instance).
 Every command supports `--json` for machine-readable output.
+`muzaitenctl --version` prints the installed build's version (the same string
+as `muzaiten --version`) and exits without contacting an instance or creating
+state; `muzaiten-features --version` does the same for the analyzer.
 
 `status` adds an `output:` line when the chosen output is missing (waiting,
 or playing through the system output) or cannot be used by the transport.

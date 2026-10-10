@@ -43,6 +43,10 @@
 
 ### Added
 
+- `muzaitenctl --version` and `muzaiten-features --version` print the same build
+  version as `muzaiten --version` and exit 0. They answer locally, before any
+  socket connection or state, configuration or database access, so they work
+  with no running app and create no files.
 - Opt-in local aggregate taste-profile export/import in `Radio > Taste profiles…`
   and `muzaitenctl radio-taste`, with exact previews, five-track support floors,
   strict versioned JSON, explicit replacement and atomic writes (exclusive

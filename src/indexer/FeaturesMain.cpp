@@ -6,6 +6,7 @@
 #include "indexer/Dsp.h"
 #include "indexer/FeaturesPack.h"
 #include "indexer/StagingBuffer.h"
+#include "Version.h"
 
 #include <QByteArray>
 #include <QCoreApplication>
@@ -3179,6 +3180,7 @@ void printUsage()
 {
     std::fputs(
         "Usage: muzaiten-features <refresh|status|doctor|pack|model download|query|neighbors> [options]\n"
+        "       muzaiten-features --version\n"
         "\n"
         "refresh [--library PATH] [--features PATH] [--state PATH] [--semantic|--no-semantic] [--provider PATH]\n"
         "        [--limit N] [--jobs N] [--staging-bytes N] [--semantic-decode-workers N] [--power background|balanced|turbo]\n"
@@ -3366,6 +3368,12 @@ int main(int argc, char **argv)
     QCoreApplication app(argc, argv);
     QStringList arguments = app.arguments();
     arguments.removeFirst();
+    // Answered from the compiled-in build identity before any store, state or
+    // provider path is resolved.
+    if (arguments.size() == 1 && arguments.first() == QLatin1String("--version")) {
+        std::printf("muzaiten-features %s\n", MUZAITEN_VERSION);
+        return 0;
+    }
     if (arguments.isEmpty()) {
         printUsage();
         return 2;
