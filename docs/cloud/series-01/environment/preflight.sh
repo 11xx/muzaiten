@@ -10,6 +10,7 @@ def version(command):
 qt = ['Qt6Concurrent', 'Qt6Core', 'Qt6DBus', 'Qt6Gui', 'Qt6Multimedia', 'Qt6Network', 'Qt6Widgets', 'Qt6Sql', 'Qt6Test']
 libs = ['taglib', 'libzstd', 'libchromaprint', 'gstreamer-1.0', 'gstreamer-audio-1.0', 'gstreamer-pbutils-1.0', 'glib-2.0', 'gobject-2.0', 'sysprof-capture-4']
 versions = {name: version(['pkg-config', '--modversion', name]) for name in qt + libs}
+subprocess.run(['pkg-config', '--libs', '--static', *libs], stdout=subprocess.DEVNULL, check=True)
 assert tuple(map(int, versions['Qt6Core'].split('.')[:2])) >= (6, 11), 'Qt 6.11 or later is required'
 assert int(versions['taglib'].split('.')[0]) >= 2, 'TagLib 2 or later is required'
 cmake = version(['cmake', '--version']).splitlines()[0]
