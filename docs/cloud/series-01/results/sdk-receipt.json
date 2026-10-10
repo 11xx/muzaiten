@@ -22,6 +22,29 @@
     },
     "run_model_effort": "omitted: repository artifacts must not carry model identifiers"
   },
+  "recovery_checkpoint": {
+    "note": "Separate from the original pilot; the original failed cloud-test witness remains in tasks[0].",
+    "source_head": "702ab0c7ef0822f5708775cd7e49d04e41460725",
+    "maintenance": "moved root-created build/Testing/Temporary into a private ignored archive; no chown, chmod, account, or source change",
+    "uid": 1000,
+    "checks": [
+      {
+        "revision": "702ab0c7ef0822f5708775cd7e49d04e41460725",
+        "command": "cloud-test",
+        "exit_code": 0,
+        "evidence": "observed",
+        "result": "printed UID 1000; CTest 86 of 86 passed, 0 failed, 0 not run",
+        "ctest_totals": "86 passed, 0 failed",
+        "within_test_skips": 1,
+        "within_test_skip_detail": "SharedOutputRoutingTest::initTestCase: PipeWire configuration pipewire.conf not found (optional native routing; FHS-only fixture; not suppressed)",
+        "warning_lines": 0
+      }
+    ],
+    "open_findings": [
+      "Setup should still provision build/Testing/Temporary as 1000:1000; the recovery archived a root-created copy rather than fixing setup",
+      "The optional SharedOutputRoutingTest skip is observed coverage, not a pass"
+    ]
+  },
   "tasks": [
     {
       "id": "0",
