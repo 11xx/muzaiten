@@ -2,7 +2,7 @@
 set -euo pipefail
 setup_dir=/opt/muzaiten-cloud-setup
 mkdir -p "$setup_dir"
-cat > "$setup_dir/shell.nix" <<'SDK_2E47D058460F30A36EBB843A247410E7A973974F381C1B53B8AE4F76BF86280F'
+cat > "$setup_dir/shell.nix" <<'SDK_EE0DEE2BCEA85C5AB3C2B4ECAEED2BEAD0A502BE07795877F4D7DA28D22A0A61'
 let
   pkgs = import (builtins.fetchTarball {
     url = "https://github.com/NixOS/nixpkgs/archive/e7439b6b14ad3cc35d05608ebca9bce01a25f5f8.tar.gz";
@@ -15,7 +15,7 @@ in
     cmake ninja pkg-config git python3 gnumake binutils mold coreutils bash
   ];
   buildInputs = with pkgs; [
-    qt6.qtbase qt6.qtmultimedia qt6.qtsvg taglib zstd chromaprint glib
+    qt6.qtbase qt6.qtmultimedia qt6.qtsvg taglib zstd chromaprint glib libsysprof-capture
     gst.gstreamer gst.gst-plugins-base gst.gst-plugins-good
     gst.gst-plugins-bad gst.gst-libav pipewire pulseaudio wireplumber
     dbus ffmpeg fontconfig dejavu_fonts
@@ -35,8 +35,8 @@ in
     export CMAKE_BUILD_PARALLEL_LEVEL="''${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
   '';
 }
-SDK_2E47D058460F30A36EBB843A247410E7A973974F381C1B53B8AE4F76BF86280F
-cat > "$setup_dir/preflight.sh" <<'SDK_0B56290F57BD3CC66E7431E07A019A8AA43E0A9C36C75FA4E8046C4083DF57F7'
+SDK_EE0DEE2BCEA85C5AB3C2B4ECAEED2BEAD0A502BE07795877F4D7DA28D22A0A61
+cat > "$setup_dir/preflight.sh" <<'SDK_6FCD6AFC2FCCC9FD9DC8FECE0B6E48AFF83DA06FA07E6FA07D07862D805901B1'
 #!/usr/bin/env bash
 set -euo pipefail
 python3 - <<'PY'
@@ -47,7 +47,7 @@ def version(command):
     return subprocess.check_output(command, text=True).strip()
 
 qt = ['Qt6Concurrent', 'Qt6Core', 'Qt6DBus', 'Qt6Gui', 'Qt6Multimedia', 'Qt6Network', 'Qt6Widgets', 'Qt6Sql', 'Qt6Test']
-libs = ['taglib', 'libzstd', 'libchromaprint', 'gstreamer-1.0', 'gstreamer-audio-1.0', 'gstreamer-pbutils-1.0', 'glib-2.0', 'gobject-2.0']
+libs = ['taglib', 'libzstd', 'libchromaprint', 'gstreamer-1.0', 'gstreamer-audio-1.0', 'gstreamer-pbutils-1.0', 'glib-2.0', 'gobject-2.0', 'sysprof-capture-4']
 versions = {name: version(['pkg-config', '--modversion', name]) for name in qt + libs}
 assert tuple(map(int, versions['Qt6Core'].split('.')[:2])) >= (6, 11), 'Qt 6.11 or later is required'
 assert int(versions['taglib'].split('.')[0]) >= 2, 'TagLib 2 or later is required'
@@ -59,10 +59,10 @@ with tempfile.TemporaryDirectory(prefix='muzaiten-sdk-preflight-') as tmp:
     (root / 'CMakeLists.txt').write_text(
         'cmake_minimum_required(VERSION 4.0)\n'
         'project(sdk_probe LANGUAGES CXX)\n'
-        'find_package(Qt6 6.11 REQUIRED COMPONENTS Core)\n'
+        'find_package(Qt6 6.11 REQUIRED COMPONENTS Concurrent Core DBus Gui Multimedia Network Widgets Sql Test Svg)\n'
         'add_executable(sdk_probe main.cpp)\n'
         'set_target_properties(sdk_probe PROPERTIES CXX_STANDARD 26)\n'
-        'target_link_libraries(sdk_probe PRIVATE Qt6::Core)\n')
+        'target_link_libraries(sdk_probe PRIVATE Qt6::Core Qt6::Widgets Qt6::Multimedia Qt6::Svg)\n')
     (root / 'main.cpp').write_text('#include <QString>\nint main() { return QString("sdk").size() != 3; }\n')
     subprocess.run(['cmake', '-S', tmp, '-B', str(root / 'build'), '-G', 'Ninja'], stdout=subprocess.DEVNULL, check=True)
     subprocess.run(['cmake', '--build', str(root / 'build')], stdout=subprocess.DEVNULL, check=True)
@@ -73,7 +73,7 @@ for element in ['fakesink', 'pulsesink', 'pipewiresink', 'audiotestsrc', 'avdec_
     subprocess.run(['gst-inspect-1.0', element], stdout=subprocess.DEVNULL, check=True)
 print(json.dumps({'schema': 'muzaiten-cloud-toolchain/1', 'compiler': version(['g++', '-dumpfullversion']), 'cmake': cmake, 'libraries': versions, 'function_ref': 'verified', 'qt_compile_link': 'verified', 'native_audio_tools': 'available', 'gstreamer_elements': 'available'}, indent=2))
 PY
-SDK_0B56290F57BD3CC66E7431E07A019A8AA43E0A9C36C75FA4E8046C4083DF57F7
+SDK_6FCD6AFC2FCCC9FD9DC8FECE0B6E48AFF83DA06FA07E6FA07D07862D805901B1
 cat > "$setup_dir/cloud-env" <<'SDK_2233C468584D5A91002C61F1F2D0E06648E9A73296426EEF732154089046C82C'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -104,7 +104,7 @@ export XDG_RUNTIME_DIR="$MUZAITEN_STATE_ROOT/runtime"
 printf 'Running the test suite as UID %s.\n' "$(id -u)"
 exec cloud-env make test "$@"
 SDK_167BB5878F6988A740CD45D3F36136C59D799BF9C732B4BF5F04A18678B3D79B
-cat > "$setup_dir/capture-env.py" <<'SDK_97019304A6382970370660F3E15F0F741474971026D3F12C46AEF4F83A93FE68'
+cat > "$setup_dir/capture-env.py" <<'SDK_99D21873E923DAF84B12360D6FA6AEE8213E6B77DEB717FE3794A17A3F1C6AA0'
 #!/usr/bin/env python3
 import os
 import shlex
@@ -113,12 +113,14 @@ from pathlib import Path
 
 keys = [
     'CC', 'CXX', 'LD', 'AR', 'AS', 'RANLIB', 'STRIP', 'NM', 'OBJCOPY', 'OBJDUMP',
-    'CMAKE_PREFIX_PATH', 'PKG_CONFIG_PATH', 'PKG_CONFIG_LIBDIR',
+    'CMAKE_PREFIX_PATH', 'CMAKE_INCLUDE_PATH', 'CMAKE_LIBRARY_PATH',
+    'PKG_CONFIG_PATH', 'PKG_CONFIG_LIBDIR',
     'NIX_CC', 'NIX_BINTOOLS', 'NIX_HARDENING_ENABLE', 'NIX_PURITY_PKG_CONFIG',
     'NIX_CC_WRAPPER_TARGET_HOST_x86_64_unknown_linux_gnu',
     'NIX_BINTOOLS_WRAPPER_TARGET_HOST_x86_64_unknown_linux_gnu',
     'NIX_CFLAGS_COMPILE', 'NIX_CFLAGS_LINK', 'NIX_LDFLAGS', 'NIX_ENFORCE_PURITY',
-    'NIX_SSL_CERT_FILE', 'QT_PLUGIN_PATH', 'QT_QPA_PLATFORM',
+    'NIX_SSL_CERT_FILE', 'QT_ADDITIONAL_PACKAGES_PREFIX_PATH',
+    'QT_PLUGIN_PATH', 'QT_QPA_PLATFORM',
     'FONTCONFIG_FILE', 'FONTCONFIG_PATH', 'GST_PLUGIN_SYSTEM_PATH_1_0',
     'GI_TYPELIB_PATH', 'XDG_DATA_DIRS', 'GLIBC_LOCALE_PATH',
 ]
@@ -131,7 +133,7 @@ for key in keys:
 lines.append('export GST_REGISTRY="${MUZAITEN_STATE_ROOT:-$PWD/agent-state/cloud}/cache/gstreamer-registry.bin"')
 lines.append('export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-2}"')
 Path(sys.argv[1]).write_text('\n'.join(lines) + '\n')
-SDK_97019304A6382970370660F3E15F0F741474971026D3F12C46AEF4F83A93FE68
+SDK_99D21873E923DAF84B12360D6FA6AEE8213E6B77DEB717FE3794A17A3F1C6AA0
 cat > "$setup_dir/setup.sh" <<'SDK_DB720AB1B928D7EC25666BFB059CD49A94ECA6B1AE3BC72405C2273DFAFDA508'
 #!/usr/bin/env bash
 set -euo pipefail
