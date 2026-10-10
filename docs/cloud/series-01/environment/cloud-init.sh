@@ -136,11 +136,11 @@ lines.append('export GST_REGISTRY="${MUZAITEN_STATE_ROOT:-$PWD/agent-state/cloud
 lines.append('export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-2}"')
 Path(sys.argv[1]).write_text('\n'.join(lines) + '\n')
 SDK_99D21873E923DAF84B12360D6FA6AEE8213E6B77DEB717FE3794A17A3F1C6AA0
-cat > "$setup_dir/setup.sh" <<'SDK_DB720AB1B928D7EC25666BFB059CD49A94ECA6B1AE3BC72405C2273DFAFDA508'
+cat > "$setup_dir/setup.sh" <<'SDK_1213271CDB5E77BF24A56777B3C23FCF1B42F75D17C741E7CDADCD2AC6133C53'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ ${1:-} != --cloud-setup || $(id -u) != 0 ]]; then
-    printf '%s\n' 'Run this script as root in the cloud environment Setup script phase, with --cloud-setup.' >&2
+    printf '%s\n' 'Run this script as root in the cloud environment Setup script phase, with --cloud-setup [CHECKOUT].' >&2
     exit 2
 fi
 if [[ $(uname -s) != Linux || $(uname -m) != x86_64 ]]; then
@@ -152,6 +152,15 @@ for tool in curl tar xz sha256sum python3; do
 done
 sdk_root=/opt/muzaiten-cloud
 sdk_source=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+sdk_checkout=${2:-}
+if [[ -n "$sdk_checkout" ]]; then
+    sdk_checkout=$(realpath -e -- "$sdk_checkout")
+    [[ -e "$sdk_checkout/.git" && -f "$sdk_checkout/CMakeLists.txt" && -f "$sdk_checkout/docs/cloud/series-01/manifest.json" ]] || {
+        printf '%s\n' 'The checkout must contain the Git repository and dispatch packet.' >&2
+        exit 1
+    }
+    cd -- "$sdk_checkout"
+fi
 for input in shell.nix preflight.sh cloud-env cloud-test capture-env.py; do
     [[ -f "$sdk_source/$input" ]] || { printf 'Missing toolchain input: %s\n' "$input" >&2; exit 1; }
 done
@@ -220,7 +229,7 @@ python3 -m json.tool "$sdk_root/toolchain.json" >/dev/null
     "python3 '$sdk_root/capture-env.py' '$sdk_root/activate.sh'"
 install -m 755 "$sdk_root/cloud-env" /usr/local/bin/cloud-env
 install -m 755 "$sdk_root/cloud-test" /usr/local/bin/cloud-test
-if [[ -d .git && -f CMakeLists.txt && -f tools/version.py ]]; then
+if [[ -n "$sdk_checkout" ]]; then
     test_uid=$(id -u ubuntu)
     test_gid=$(id -g ubuntu)
     [[ "$test_uid" != 0 ]] || { printf '%s\n' 'A normal ubuntu account is required for filesystem permission tests.' >&2; exit 1; }
@@ -231,5 +240,5 @@ if [[ -d .git && -f CMakeLists.txt && -f tools/version.py ]]; then
     chmod 700 agent-state/cloud-tests/runtime
 fi
 printf '%s\n' 'Pinned muzaiten toolchain is ready. Run build and runtime commands through cloud-env.'
-SDK_DB720AB1B928D7EC25666BFB059CD49A94ECA6B1AE3BC72405C2273DFAFDA508
-bash "$setup_dir/setup.sh" --cloud-setup
+SDK_1213271CDB5E77BF24A56777B3C23FCF1B42F75D17C741E7CDADCD2AC6133C53
+bash "$setup_dir/setup.sh" --cloud-setup "${MUZAITEN_CLOUD_CHECKOUT:-/workspace/muzaiten}"

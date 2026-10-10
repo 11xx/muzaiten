@@ -10,5 +10,5 @@ for name in files:
     delimiter = 'SDK_' + hashlib.sha256(body.encode()).hexdigest().upper()
     assert delimiter not in body.splitlines()
     lines += [f'cat > "$setup_dir/{name}" <<\'{delimiter}\'', body.rstrip('\n'), delimiter]
-lines.append('bash "$setup_dir/setup.sh" --cloud-setup')
+lines.append('bash "$setup_dir/setup.sh" --cloud-setup "${MUZAITEN_CLOUD_CHECKOUT:-/workspace/muzaiten}"')
 (root / 'cloud-init.sh').write_text('\n'.join(lines) + '\n')
