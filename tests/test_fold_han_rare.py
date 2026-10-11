@@ -1182,6 +1182,16 @@ class PinnedReferenceSmokeTests(unittest.TestCase):
             row = next(r for r in self.refs.cns.rule_rows if r["cns"] == code)
             self.assertEqual(row["status"], "quarantine")
 
+    def test_sms_tier_moves_share_unihan_lineage_without_mainland_precedence(self):
+        for ch, tier in (("䖬", "exta"), ("䪡", "exta"), ("䵍", "exta"), ("𦍋", "core")):
+            self.assertIn(ch, self.tiers[tier])
+            self.assertNotIn(ch, self.tiers["cns"])
+        fields = {name: {} for name in rare.FIELDS}
+        fields["kSMSZD2003Readings"] = {"㐀": "mā粵maa1"}
+        refs = rare.References(fields, {}, {}, self.refs.pins)
+        self.assertEqual(refs.attestations("㐀"), {"mā": {"unihan"}})
+        self.assertEqual(refs.mainland("㐀"), set())
+
     def test_every_tier_assembles(self):
         for name in (path.removesuffix(".tsv") for path in data.RARE_FILES):
             with self.subTest(tier=name):

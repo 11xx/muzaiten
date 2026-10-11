@@ -272,6 +272,29 @@ class FoldHanDataTests(unittest.TestCase):
                 self.assertEqual(checker.check([table], reviewed, authored_dir=root), 1)
             self.assertIn("quarantined cns-mou3/1 reading", output.getvalue())
 
+    def test_sms_mandarin_prefix_order_and_syllable_admission(self):
+        value = "lì,l̀粵lik6 yái,liì,yīngcùn,gěm粵ngaai4 mā,mā粵maa1"
+        self.assertEqual(checker.field_readings("kSMSZD2003Readings", value), ["lì", "yái", "mā"])
+        self.assertEqual(checker.field_readings("kSMSZD2003Readings", "gē粵go1 yì,ì粵ngat6"), ["gē", "yì"])
+        for malformed in ("mā", "粵maa1", "mā粵maa1粵maa2"):
+            self.assertEqual(checker.field_readings("kSMSZD2003Readings", malformed), [])
+
+    def test_sms_held_tokens_retain_archive_member_and_raw_witnesses(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = pathlib.Path(directory) / "Unihan.zip"
+            raw = "U+516D\tkSMSZD2003Readings\tliì粵luk6 lù粵luk6"
+            with zipfile.ZipFile(archive, "w") as zipped:
+                zipped.writestr("Unihan_Readings.txt", raw + "\n")
+            fields = checker.unihan_fields(archive, *checker.READING_FIELDS)
+            self.assertIn("kSMSZD2003Readings", fields)
+            self.assertEqual(fields["kSMSZD2003Readings"]["六"], "liì粵luk6 lù粵luk6")
+            held = fields.held["六"][0]
+            self.assertEqual((held["field"], held["reading"], held["status"]), ("kSMSZD2003Readings", "liì", "held"))
+            self.assertEqual(held["witness"]["raw"], raw)
+            self.assertEqual(held["witness"]["line"], 1)
+            self.assertEqual(held["witness"]["archive_sha256"], hashlib.sha256(archive.read_bytes()).hexdigest())
+            self.assertNotIn("lii", checker.pinyin_inventory(fields))
+
     def test_rare_tiers_are_ordered_and_disjoint(self):
         fields = {name: {} for name in (*checker.READING_FIELDS, *checker.VARIANT_FIELDS,
                                         "kZVariant", "kTGH", "kUnihanCore2020")}

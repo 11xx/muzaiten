@@ -102,6 +102,15 @@ Any other reference spelling that is not
 tone-marked pinyin attests nothing and is a blocking `provenance` finding naming
 the character, the spelling and its source, such as `unparseable cns reading`.
 
+`kSMSZD2003Readings` contributes Mandarin prefixes from the pinned Unihan
+archive. Each definition group has Mandarin comma-separated tokens before
+`粵`; Cantonese tokens are not Mandarin evidence. Admitted tokens retain
+definition order and normalize to NFC. Malformed groups and unresolved or
+polysyllabic tokens, including `liì`, `yīngcùn` and `gěm`, remain in the held
+evidence ledger with their exact Unihan witnesses. All Unihan fields form one
+lineage. SMS evidence does not add mainland precedence or override essential
+table policies; its admitted readings participate in D3 tier selection.
+
 Syllable matching removes the four tone marks and preserves ü versus u and ê
 versus e. An exact prediction has priority over a syllable-only match when
 choosing its batch; within a match class, the first lexical batch is used.

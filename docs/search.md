@@ -144,6 +144,10 @@ fill rows, and quarantines uncertain source classes and eight 某-containing
 imports. Excluded and quarantined readings provide no tones or family-target
 evidence; a sole quarantined reading blocks approval. Raw witnesses remain
 available for audit, and the rule refuses another CNS Properties pin.
+Mandarin prefixes in Unihan's `kSMSZD2003Readings` pass the same syllable
+admission. Malformed and polysyllabic tokens are held with raw witnesses.
+This field contributes to the Unihan lineage and tier membership; it does
+not establish mainland precedence or override essential-table policies.
 It reports `family-target` disagreements for astral variant
 families and `variant-guard` findings for unsupported semantic variant folds.
 Rare files and tables marked with `# schema: fold-han-provenance/1` require a

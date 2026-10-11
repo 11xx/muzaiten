@@ -86,13 +86,13 @@ IDEOGRAPH_BLOCKS = [
 REFERENCE_IDEOGRAPH_BLOCKS = [*IDEOGRAPH_BLOCKS, (0x323B0, 0x3347F)]
 
 READING_FIELDS = (
-    "kMandarin", "kHanyuPinyin", "kXHC1983", "kTGHZ2013", "kHanyuPinlu",
+    "kMandarin", "kHanyuPinyin", "kXHC1983", "kTGHZ2013", "kHanyuPinlu", "kSMSZD2003Readings",
 )
 ATTESTING_FIELDS = READING_FIELDS
 MODERN_DICTIONARY_FIELDS = ("kTGHZ2013", "kXHC1983")
 # Evidence of current use; a reading only kHanyuPinyin (Hanyu Da Zidian, a
 # historical dictionary) attests is reported as archaic.
-CURRENT_FIELDS = ("kMandarin", "kXHC1983", "kTGHZ2013", "kHanyuPinlu")
+CURRENT_FIELDS = ("kMandarin", "kXHC1983", "kTGHZ2013", "kHanyuPinlu", "kSMSZD2003Readings")
 VARIANT_FIELDS = ("kSimplifiedVariant", "kTraditionalVariant")
 TONE_MARKS = {"\u0304", "\u0301", "\u030c", "\u0300"}
 DIACRITIC = "\u0308"
@@ -371,19 +371,50 @@ def cedict_words(archive: pathlib.Path) -> tuple[str, dict[str, set[tuple[str, .
     return date_line, words
 
 
-def unihan_fields(archive: pathlib.Path, *wanted: str) -> dict[str, dict[str, str]]:
+class UnihanFields(dict[str, dict[str, str]]):
+    """Raw Unihan values and witnessed admission results for SMS definition groups."""
+
+    def __init__(self, wanted):
+        super().__init__((name, {}) for name in wanted)
+        self.evidence: dict[str, list[dict]] = defaultdict(list)
+        self.held: dict[str, list[dict]] = defaultdict(list)
+
+
+def sms_tokens(value: str):
+    """Yield raw Mandarin tokens by definition, holding malformed language separators."""
+    for group, entry in enumerate(value.split(), 1):
+        if entry.count("粵") != 1 or not all(entry.split("粵")):
+            yield group, entry, None
+            continue
+        mandarin = entry.split("粵", 1)[0]
+        for raw in mandarin.split(","):
+            yield group, raw, admit_syllable(raw)
+
+
+def unihan_fields(archive: pathlib.Path, *wanted: str) -> UnihanFields:
     """Map each selected Unihan field to its raw value by ideograph."""
-    fields: dict[str, dict[str, str]] = {name: {} for name in wanted}
+    fields = UnihanFields(wanted)
     with zipfile.ZipFile(archive) as z:
         for member in z.namelist():
             if not member.startswith("Unihan_") or not member.endswith(".txt"):
                 continue
-            for line in z.read(member).decode("utf-8").splitlines():
+            content = z.read(member)
+            witness = member_witness(archive, member, content)
+            for number, line in enumerate(content.decode("utf-8").splitlines(), 1):
                 if not line or line.startswith("#"):
                     continue
                 code, field, value = line.split("\t", 2)
                 if field in fields:
-                    fields[field][chr(int(code[2:], 16))] = value
+                    ch = chr(int(code[2:], 16))
+                    fields[field][ch] = value
+                    if field == "kSMSZD2003Readings":
+                        for group, raw, admitted in sms_tokens(value):
+                            evidence = {"field": field, "group": group, "reading": raw,
+                                        "status": "keep" if admitted else "held", "normalized": admitted,
+                                        "witness": source_witness(witness, number, line)}
+                            fields.evidence[ch].append(evidence)
+                            if not admitted:
+                                fields.held[ch].append(evidence)
     return fields
 
 
@@ -412,6 +443,9 @@ def field_readings(field: str, value: str) -> list[str]:
 
     if field == "kHanyuPinlu":
         return re.findall(r"([^\s(),;，]+)\s*\(\d+\)", value)
+
+    if field == "kSMSZD2003Readings":
+        return list(dict.fromkeys(admitted for _, _, admitted in sms_tokens(value) if admitted))
 
     return []
 
@@ -616,6 +650,8 @@ def pinyin_inventory(fields: dict[str, dict[str, str]]) -> set[str]:
     """Collect Unihan syllable spellings and the admitted exceptional CNS classes."""
     inventory = {"pia", "yai", "nui", "sei", "gue"}
     for field in READING_FIELDS:
+        if field == "kSMSZD2003Readings":
+            continue
         for value in fields.get(field, {}).values():
             inventory.update(
                 base for reading in field_readings(field, value)
