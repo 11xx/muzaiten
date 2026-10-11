@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("fold_han_notice", ROOT / "tools/fold-han-notice.py")
 notice = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(notice)
+
+# Package component licenses of published releases, keyed by version. muzaiten-bin
+# downloads one of these artifacts rather than building the current source.
+RELEASED_COMPONENT_LICENSES = {"2026.9.11": {"Unlicense", "Unicode-3.0"}}
 
 
 class HanNoticeTests(unittest.TestCase):
@@ -253,10 +258,16 @@ class HanNoticeTests(unittest.TestCase):
         for name in ("muzaiten-bin", "muzaiten-git"):
             text = (ROOT / "packaging/aur" / name / ".SRCINFO").read_text()
             declared = {line.split("=", 1)[1].strip() for line in text.splitlines() if line.strip().startswith("license =")}
-            self.assertEqual(declared, licenses, name)
             build = (ROOT / "packaging/aur" / name / "PKGBUILD").read_text()
-            for license in licenses:
-                self.assertIn("'" + license + "'", build)
+            expected = licenses
+            if name == "muzaiten-bin":
+                # The binary recipe repackages a published artifact, so it declares the
+                # components of that release; a new release ships the current inventory.
+                version = re.search(r"^pkgver=(\S+)$", build, re.M).group(1)
+                expected = RELEASED_COMPONENT_LICENSES.get(version, licenses)
+            self.assertEqual(declared, expected, name)
+            build_licenses = set(re.search(r"^license=\(([^)]*)\)$", build, re.M).group(1).replace("'", "").split())
+            self.assertEqual(build_licenses, expected, name)
         expression = ET.parse(ROOT / "packaging/org.11xx.muzaiten.metainfo.xml").getroot().findtext("project_license")
         self.assertEqual(set(expression.split(" AND ")), licenses)
         for license in licenses:

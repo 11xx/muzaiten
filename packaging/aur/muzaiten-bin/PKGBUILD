@@ -1,14 +1,15 @@
 # Maintainer: Lucas Gabriel <g at 11xx dot org>
 pkgname=muzaiten-bin
 # PEP 440 version, matching the release tag and artifact.
-# Bump this, _release_tag, and sha256sums for every published release.
+# Bump this, _release_tag, and sha256sums for every published release, and set
+# license to the components that release artifact ships.
 pkgver=2026.9.11
 _release_tag=2026.9.11
 pkgrel=1
 pkgdesc="Native music player for local libraries, with ratings and scrobbling"
 arch=('x86_64')
 url="https://github.com/11xx/muzaiten"
-license=('Unlicense' 'Unicode-3.0' 'OGDL-Taiwan-1.0' 'Apache-2.0')
+license=('Unlicense' 'Unicode-3.0')
 depends=('qt6-base' 'qt6-multimedia' 'taglib' 'chromaprint' 'gstreamer' 'gst-plugins-base-libs' 'glib2' 'zstd' 'python')
 optdepends=('gst-plugins-good: extra audio decoders and sinks'
             'gst-plugin-pipewire: PipeWire audio output'
