@@ -210,6 +210,21 @@ class FoldHanRareTests(unittest.TestCase):
             records, _ = rare.ordered_readings("𠀀", refs, empty, invalid, tier="tgh")
             self.assertEqual([r.value for r in records], ["liàn", "lì", "bá"])
 
+    def test_opencc_class_requires_one_d1_candidate_and_attested_mapping(self):
+        refs = self.refs_for({"kSimplifiedVariant": {"叚": "U+5047"}}, opencc={"叚": ["叚", "假"]})
+        self.assertTrue(rare.opencc_informational("叚", "假", refs, set()))
+        self.assertFalse(rare.opencc_informational("叚", "叚", refs, set()))
+        refs.fields["kSimplifiedVariant"]["叚"] = "U+5047 U+4E00"
+        self.assertFalse(rare.opencc_informational("叚", "假", refs, set()))
+        f = ("tgh.tsv", "1", "叚", "opencc", "假", "叚/假")
+        self.assertFalse(rare.informational_finding(f, refs, set()))
+
+    def test_opencc_class_accepts_unmapped_key_and_preserves_other_findings(self):
+        refs = self.refs_for({"kSimplifiedVariant": {"𠀀": "U+5047"}}, opencc={"假": ["𠀀", "假"]})
+        self.assertTrue(rare.opencc_informational("假", "假", refs, set()))
+        self.assertFalse(rare.informational_finding(("x.tsv", "1", "假", "family-target", "假", "unresolved"), refs, set()))
+        self.assertFalse(rare.informational_finding(("x.tsv", "1", "假", "opencc", "假", "stale"), refs, set()))
+
     def test_basis_exact_syllable_agreed_and_single(self):
         rows, records, gaps, findings = rare.assemble(list("𠀀𠀁𠀂"), self.refs, self.predictions, set())
         self.assertEqual(findings, [])

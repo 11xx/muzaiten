@@ -458,12 +458,40 @@ def ordered_readings(ch: str, refs: References, predictions: Predictions,
     return [records[value] for value in placed], issues
 
 
-def informational_finding(finding: tuple) -> bool:
-    """Identify source-order reports that require no individual default decision."""
-    return finding[-3] == "reading-order"
+def opencc_informational(ch: str, ours: str, refs: References, authored: set[str],
+                         resolution: tuple | None = None) -> bool:
+    """Apply the OpenCC source-order class only to unique, attested D1 results."""
+    if resolution is None:
+        details = {}
+        mappings, _, _ = family_mappings(refs, authored, details=details)
+    else:
+        mappings, details = resolution
+    target, candidates = details.get(ch, (None, set()))
+    return (target == ours and candidates == {ours}
+            and (ch == ours or ch in mappings and mappings[ch][0] == ours and bool(mappings[ch][1])))
 
 
-def family_mappings(refs: References, authored: set[str], choices: dict[str, str] | None = None
+def informational_finding(finding: tuple, refs: References | None = None,
+                          authored: set[str] | None = None, resolution: tuple | None = None) -> bool:
+    """Classify information without discharging another kind of finding."""
+    kind = finding[-3]
+    if kind in {"reading-order", "opencc-order"}:
+        return True
+    ch, ours, reference = finding[-4], finding[-2], finding[-1]
+    return (kind == "opencc" and refs is not None
+            and reference == "/".join(refs.opencc.get(ch, ()))
+            and opencc_informational(ch, ours, refs, authored or set(), resolution))
+
+
+def blocking_findings(findings: list[tuple], refs: References, authored: set[str]) -> list[tuple]:
+    """Filter source-order information using one frozen, partitioned D1 graph."""
+    details = {}
+    mappings, _, _ = family_mappings(refs, authored, details=details)
+    return [f for f in findings if not informational_finding(f, refs, authored, (mappings, details))]
+
+
+def family_mappings(refs: References, authored: set[str], choices: dict[str, str] | None = None, *,
+                    details: dict | None = None
                     ) -> tuple[dict[str, tuple[str, str]], dict[str, list[str]], dict[str, list[tuple[str, str]]]]:
     """Resolve direct families, then join guarded partial links ranked by independent lineages.
 
@@ -571,6 +599,10 @@ def family_mappings(refs: References, authored: set[str], choices: dict[str, str
     result = {}
     for component in components():
         target, rule = resolve(component)
+        if details is not None:
+            candidates = rule or component & simplified or component
+            for ch in component:
+                details[ch] = target, candidates
         if target is None:
             for ch in component:
                 issues[ch].append("family-target:unresolved=" + " ".join(sorted(rule or component)))

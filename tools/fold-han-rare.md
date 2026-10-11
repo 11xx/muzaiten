@@ -414,3 +414,14 @@ Rare completion and pulled rows do not extend it. Assembly and audit validate
 `fold-han-reviewed-rules.json` against the reference pins and apply its retained
 mapping choices, including 𧭈→𫍾 and 𨰥→𫔕. Exact family findings remain visible.
 The `authored` header identifies the preceding-table input snapshot separately.
+
+An OpenCC first-output disagreement is informational only when the frozen,
+reviewed-partition D1 graph has one candidate under its first applicable clause,
+the row uses that candidate (or stays unmapped as that key), and its mapping path
+is attested. Competing candidates retain individual findings. This class resolves
+only the OpenCC disagreement and never changes a row or describes a secondary
+OpenCC output as preferred. The checker integration API is
+`blocking_findings(findings, references, authored)`: it evaluates one graph and
+retains all findings outside the class. `opencc_informational` exposes the same
+predicate for an individual row, and `informational_finding` accepts an exact
+checker tuple. Lower-rank `reading-order` reports are informational too.
