@@ -33,6 +33,7 @@ public:
     void setQueue(const QVector<Track> &tracks);
     void setPlayNextRange(int begin, int end);
     void setCurrentIndex(int index, bool reveal = false);
+    void followCurrentPlaying();
     void setAlbumArt(const QString &imagePath);
     void setAlbumArt(const QImage &image);
     void setTrackInfo(const Track &track);

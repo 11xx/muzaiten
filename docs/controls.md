@@ -22,6 +22,12 @@ The player bar carries the current track's album art on every view except the
 library ones, where the right sidebar shows it at full width. Right-click the
 art for **Find in library** and **Open containing directory**.
 
+## Queue
+
+Playing a track keeps the queue where it is and moves the cursor to the
+playing row, scrolling only when that row is off screen. `1` and `o` in the
+queue view center the playing row.
+
 ## Context menus
 
 Every track surface (library table, queue, playlists, search results,

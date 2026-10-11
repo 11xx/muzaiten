@@ -934,8 +934,26 @@ void QueueTable::selectForDemo(const QString &query)
 void QueueTable::revealCurrentPlaying()
 {
     const int row = m_store == nullptr ? -1 : m_store->currentIndex();
+    if (row < 0 || row >= rowCount()) {
+        return;
+    }
+    // scrollTo ignores an index in a hidden column, so center through the first
+    // visible one.
+    const QHeaderView *header = m_view->horizontalHeader();
+    for (int visual = 0; visual < header->count(); ++visual) {
+        const int column = header->logicalIndex(visual);
+        if (!m_view->isColumnHidden(column)) {
+            m_view->scrollTo(m_model->index(row, column), QAbstractItemView::PositionAtCenter);
+            break;
+        }
+    }
+    setCurrentRow(row);
+}
+
+void QueueTable::followCurrentPlaying()
+{
+    const int row = m_store == nullptr ? -1 : m_store->currentIndex();
     if (row >= 0 && row < rowCount()) {
-        m_view->scrollTo(m_model->index(row, 0), QAbstractItemView::PositionAtCenter);
         setCurrentRow(row);
     }
 }

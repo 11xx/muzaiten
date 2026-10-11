@@ -11,6 +11,7 @@
 #include <QHeaderView>
 #include <QLineEdit>
 #include <QMenu>
+#include <QScrollBar>
 #include <QSignalSpy>
 #include <QTableView>
 #include <QTest>
@@ -417,6 +418,50 @@ private slots:
         // A query with no matches leaves the cursor where it was.
         edit->setText(QStringLiteral("zzz-no-such-track"));
         QCOMPARE(table.currentRow(), 1);
+    }
+
+    void followingThePlayingRowKeepsAVisibleRowInPlace()
+    {
+        QueueStore store;
+        QVector<Track> tracks;
+        for (int i = 0; i < 200; ++i) {
+            Track track;
+            track.path = QStringLiteral("/%1.flac").arg(i);
+            track.title = QString::number(i);
+            tracks.push_back(track);
+        }
+        store.setTracks(tracks);
+        QueueTable table(QueueTablePreset::FullScreen);
+        table.setQueueStore(&store);
+        table.resize(600, 300);
+        table.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&table));
+        auto *view = table.findChild<QTableView *>();
+        QVERIFY(view != nullptr);
+        QScrollBar *bar = view->verticalScrollBar();
+
+        // A visible playing row: the cursor moves to it and the view stays put.
+        bar->setValue(50);
+        const int top = bar->value();
+        const int visibleRow = view->rowAt(view->viewport()->height() / 2);
+        QVERIFY(visibleRow > top + 1);
+        store.setCurrentIndex(visibleRow);
+        table.followCurrentPlaying();
+        QCOMPARE(bar->value(), top);
+        QCOMPARE(table.currentRow(), visibleRow);
+
+        // An off-screen playing row is scrolled into view without centering.
+        store.setCurrentIndex(150);
+        table.followCurrentPlaying();
+        QCOMPARE(table.currentRow(), 150);
+        QVERIFY(view->rowAt(0) <= 150);
+        QVERIFY(view->rowAt(view->viewport()->height() - 1) >= 150 || view->rowAt(view->viewport()->height() - 1) < 0);
+        QVERIFY(view->rowAt(view->viewport()->height() / 2) < 150);
+        const int followedTop = bar->value();
+
+        // An explicit reveal centers the playing row.
+        table.revealCurrentPlaying();
+        QVERIFY(bar->value() != followedTop);
     }
 
     void sidebarQueueHasNoInlineSearchBar()

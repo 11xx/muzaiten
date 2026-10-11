@@ -93,6 +93,11 @@ void QueueScreen::revealCurrentPlaying()
     m_table->revealCurrentPlaying();
 }
 
+void QueueScreen::followCurrentPlaying()
+{
+    m_table->followCurrentPlaying();
+}
+
 void QueueScreen::selectForDemo(const QString &query)
 {
     m_table->selectForDemo(query);

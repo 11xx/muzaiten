@@ -6006,10 +6006,13 @@ void MainWindow::clearPresentedTrack()
 void MainWindow::onPlayerIndexChanged(int index, bool userInitiated)
 {
     m_queueStore->setCurrentIndex(index);
+    // A play the user started moves the queue cursor to the playing row without
+    // recentering, so a row played from the visible queue stays where it is.
     if (userInitiated) {
-        m_rightSidebar->setCurrentIndex(index, /*reveal=*/true);
+        m_rightSidebar->setCurrentIndex(index);
+        m_rightSidebar->followCurrentPlaying();
         if (m_mainView == MainView::Queue) {
-            ensureQueueScreen()->revealCurrentPlaying();
+            ensureQueueScreen()->followCurrentPlaying();
         }
     }
     scheduleQueueStateSave();

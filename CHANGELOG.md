@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Playing a track keeps the queue where it is: the cursor moves to the playing
+  row and the queue scrolls only when that row is off screen. `1` and `o` in
+  the queue view still center the playing row, also with the `#` column hidden.
+
 ## [2026.10.11]
 
 ### Distribution

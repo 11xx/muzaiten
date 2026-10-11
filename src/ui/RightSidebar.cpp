@@ -159,8 +159,8 @@ void RightSidebar::setCurrentIndex(int index, bool reveal)
 {
     // The "currently playing" row is shown with its own indicator and is kept
     // independent of the user's selection, so reordering/adding/removing never
-    // hijacks the selection or scrolls the view. Only explicit playback changes
-    // (reveal == true) scroll the playing row into view.
+    // hijacks the selection or scrolls the view. reveal centers the playing row;
+    // followCurrentPlaying moves the cursor to it without recentering.
     const int rowCount = queueRowCount();
     const int current = (index >= 0 && index < rowCount) ? index : -1;
     m_currentQueueIndex = current;
@@ -170,6 +170,13 @@ void RightSidebar::setCurrentIndex(int index, bool reveal)
 
     if (reveal && current >= 0) {
         m_queueTable->revealCurrentPlaying();
+    }
+}
+
+void RightSidebar::followCurrentPlaying()
+{
+    if (m_currentQueueIndex >= 0) {
+        m_queueTable->followCurrentPlaying();
     }
 }
 

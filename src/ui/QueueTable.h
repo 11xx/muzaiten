@@ -44,7 +44,10 @@ public:
     void setCurrentRow(int row, int scrollDirection);
     void moveCurrentRow(int delta);
     void activateCurrentRow();
+    // Centers the playing row and makes it the cursor row.
     void revealCurrentPlaying();
+    // Makes the playing row the cursor row, scrolling only when it is off screen.
+    void followCurrentPlaying();
     void selectForDemo(const QString &query);
     void setNavigationScrollPadding(int rows);
     void setKeyBindingProfileName(const QString &name);
