@@ -139,14 +139,19 @@ texts block distribution. To check a staged install, use
 The CMake staging fixture installs the `HanNotices` component without compiling
 C++ and checks its files and hashes.
 
-The shipped data components are authored fold tables and Unihan 16.0.0-derived
-readings/mappings. Package and AppStream metadata declare `Unlicense` and
-`Unicode-3.0` for these components. CNS/OpenCC entries with empty NOTICE scopes
-attribute no shipped rows. Adding attributed rows requires regenerating NOTICE
-and updating package metadata with that row-bearing change; available reference
-terms alone do not add a package license. Unicode and the pinned OpenCC Apache
-texts are exact upstream copies. Full OGDL text and OpenCC AUTHORS are
-conservative offline credits chosen by project policy, rather than required
+The shipped data components are the authored fold tables, the generated Unihan
+18.0.0-derived readings and mappings, and the partial rare tables (`tgh.tsv`,
+`big5-2.tsv`, `core.tsv`, `uro.tsv`, `extb.tsv`, `extc.tsv`), whose rows draw
+on Unihan, CNS 11643 and OpenCC. NOTICE scopes each source to exactly the table
+files that use it. Source packages, native archives and AppStream metadata
+declare `Unlicense`, `Unicode-3.0`, `OGDL-Taiwan-1.0` and `Apache-2.0` for these
+components. The `muzaiten-bin` recipe repackages a published release artifact,
+so its license list names the components of that release and changes with its
+version bump. Adding attributed rows from another source requires regenerating
+NOTICE and updating package metadata with that row-bearing change; available
+reference terms alone do not add a package license. Unicode and the pinned
+OpenCC Apache texts are exact upstream copies. Full OGDL text and OpenCC AUTHORS
+are conservative offline credits chosen by project policy, rather than required
 license copies. Their inclusion is checked as that policy.
 
 CNS-derived pronunciation and mapping data uses OGDL-Taiwan-1.0 with the full
