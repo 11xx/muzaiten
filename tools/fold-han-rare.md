@@ -87,6 +87,17 @@ Unicode-mapping witnesses; it supplies neither attestation nor a tone.
 CNS reader lists follow `CNS_phonetic.txt` order, deduplicating each character's
 admitted readings across all its CNS codes. The reading evidence retains archive
 and member hashes, line numbers and raw lines, including held tokens.
+CNS `ㄇㄡˇ` rows use the pin-specific `cns-mou3/1` rule. A source label beginning
+with 常用國字標準字體表, 次常用字國字標準字體表, 罕用國字標準字體表 or 異體國字字表
+keeps the reading (22 rows). Rows whose labels are all Unicode imports of basic
+CJK, Extension A or Extension B are excluded (3,860 rows), except CNS codes
+10-2757, 10-2759, 10-2F49, 10-337B, 10-3A7B, 10-4870, 11-4231 and 11-4555.
+Those eight codes and all remaining source classes are quarantined (130 rows).
+Excluded and quarantined tokens supply no attestation, tone or family-target
+evidence. A character with only a quarantined token has a blocking provenance
+finding until independent evidence or a reviewed, dated source settles it.
+Excluded rows remain in the evidence ledger. Applying this rule to any CNS
+Properties archive other than the pinned 20260805 bytes fails.
 Any other reference spelling that is not
 tone-marked pinyin attests nothing and is a blocking `provenance` finding naming
 the character, the spelling and its source, such as `unparseable cns reading`.

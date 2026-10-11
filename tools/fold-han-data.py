@@ -60,6 +60,13 @@ OPENCC_SHA256 = "737c21c66f55a419dd6956cb3089476cdefc5a36877452631617696df1e5d92
 CNS_URL = "https://www.cns11643.gov.tw/opendata/"
 CNS_SHA256 = {"Properties.zip": "3d56ef14cc8099893245dac58fe4718d2fa64812b9159352a98a4588ad3efa5c",
               "MapingTables.zip": "4502fcf7b433d679dee51127298929543ec7f4aa99be93cd219df1552bc3d2bf"}
+CNS_MOU3_RULE = "cns-mou3/1"
+CNS_MOU3_PIN = "3d56ef14cc8099893245dac58fe4718d2fa64812b9159352a98a4588ad3efa5c"
+CNS_MOU3_COUNTS = {"keep": 22, "exclude": 3860, "quarantine": 130}
+CNS_MOU3_STANDARD_PREFIXES = ("常用國字標準字體表", "次常用字國字標準字體表", "罕用國字標準字體表", "異體國字字表")
+CNS_MOU3_IMPORTS = {"CJK認同表意文字延伸B(《CNS 11643》96年公布)",
+                    "CJK認同表意文字延伸A, CNS 14649", "CJK認同表意文字, CNS 14649"}
+CNS_MOU3_QUARANTINE = {"10-2757", "10-2759", "10-2F49", "10-337B", "10-3A7B", "10-4870", "11-4231", "11-4555"}
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FOLD_DIR = ROOT / "src" / "search" / "fold"
@@ -236,6 +243,7 @@ class CNSReadings(dict[str, list[str]]):
         self.evidence: dict[str, list[dict]] = defaultdict(list)
         self.held: dict[str, list[dict]] = defaultdict(list)
         self.rules: dict[str, dict] = {}
+        self.rule_rows: list[dict] = []
 
 
 def member_witness(path: pathlib.Path, member: str, content: bytes) -> dict:
@@ -245,6 +253,14 @@ def member_witness(path: pathlib.Path, member: str, content: bytes) -> dict:
 
 def source_witness(member: dict, line: int, raw: str) -> dict:
     return {**member, "line": line, "raw": raw}
+
+
+def cns_mou3_class(code: str, labels: list[str]) -> str:
+    if any(label.startswith(CNS_MOU3_STANDARD_PREFIXES) for label in labels):
+        return "keep"
+    if code not in CNS_MOU3_QUARANTINE and labels and all(label in CNS_MOU3_IMPORTS for label in labels):
+        return "exclude"
+    return "quarantine"
 
 
 def cns_readings(paths: tuple[pathlib.Path, pathlib.Path]) -> CNSReadings:
@@ -259,6 +275,16 @@ def cns_readings(paths: tuple[pathlib.Path, pathlib.Path]) -> CNSReadings:
         phonetic_bytes = archive.read("CNS_phonetic.txt")
         phonetic_member = member_witness(properties, "CNS_phonetic.txt", phonetic_bytes)
         phonetics = list(enumerate(phonetic_bytes.decode().splitlines(), 1))
+        sources = defaultdict(list)
+        mou3 = any(raw.split("\t")[1] == "ㄇㄡˇ" for _, raw in phonetics)
+        if mou3:
+            if phonetic_member["archive_sha256"] != CNS_MOU3_PIN:
+                raise ValueError(f"{CNS_MOU3_RULE}: CNS properties pin requires a re-measured rule")
+            source_bytes = archive.read("CNS_source.txt")
+            source_member = member_witness(properties, "CNS_source.txt", source_bytes)
+            for number, raw in enumerate(source_bytes.decode().splitlines(), 1):
+                code, label = raw.split("\t", 1)
+                sources[code].append(source_witness(source_member, number, raw))
     by_code = defaultdict(list)
     with zipfile.ZipFile(mappings) as archive:
         for member in archive.namelist():
@@ -272,23 +298,41 @@ def cns_readings(paths: tuple[pathlib.Path, pathlib.Path]) -> CNSReadings:
                 if in_reference_ideograph_blocks(chr(point)):
                     by_code[code].append((chr(point), source_witness(mapping_member, number, raw)))
     result = CNSReadings()
+    counts = Counter()
     for number, raw in phonetics:
         code, zhuyin = raw.split("\t")[:2]
+        status = cns_mou3_class(code, [w["raw"].split("\t", 1)[1] for w in sources[code]]) if zhuyin == "ㄇㄡˇ" else "keep"
+        if zhuyin == "ㄇㄡˇ":
+            counts[status] += 1
         if zhuyin not in pinyin:
             continue
         spelling, witness = pinyin[zhuyin]
-        admitted = admit_syllable(spelling)
+        admitted = admit_syllable(spelling) if status == "keep" else None
+        evidence = {"cns": code, "reading": spelling, "status": status if status != "keep" or admitted else "held",
+                    "phonetic": source_witness(phonetic_member, number, raw), "pinyin": witness}
+        if zhuyin == "ㄇㄡˇ":
+            evidence.update(rule=CNS_MOU3_RULE, sources=sources[code])
+            result.rule_rows.append(evidence)
         for ch, mapping in by_code[code]:
-            evidence = {"cns": code, "reading": spelling, "status": "keep" if admitted else "held",
-                        "phonetic": source_witness(phonetic_member, number, raw),
-                        "pinyin": witness, "mapping": mapping}
-            result.evidence[ch].append(evidence)
+            row = {**evidence, "mapping": mapping}
+            result.evidence[ch].append(row)
             readings = result.setdefault(ch, [])
             if admitted and admitted not in readings:
                 readings.append(admitted)
             elif not admitted:
-                result.held[ch].append(evidence)
+                result.held[ch].append(row)
+    if mou3:
+        result.rules[CNS_MOU3_RULE] = {"properties_sha256": CNS_MOU3_PIN,
+                                      "counts": dict(counts), "pinned_counts": CNS_MOU3_COUNTS}
     return result
+
+
+def sole_quarantined_cns(ch: str, fields: dict, cns: dict) -> list[dict]:
+    """Expose a quarantined mou3 when no admitted reading remains for the character."""
+    if cns.get(ch) or any(admit_syllable(r) for field in READING_FIELDS
+                          for r in field_readings(field, fields.get(field, {}).get(ch, ""))):
+        return []
+    return [row for row in getattr(cns, "held", {}).get(ch, ()) if row["status"] == "quarantine"]
 
 
 def cedict_pinyin(token: str) -> str | None:
@@ -972,6 +1016,9 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pa
                 for reading in cns.get(member, ()):
                     attested_by_base[toneless(reading)].add(unicodedata.normalize("NFC", reading))
             attested_spellings = {form for forms in attested_by_base.values() for form in forms}
+
+            for held in sole_quarantined_cns(raw_ch, fields, cns):
+                add(path, row_number, raw_ch, "provenance", held["reading"], "quarantined cns-mou3/1 reading")
 
             seen_readings = set()
             for reading in readings:

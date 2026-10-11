@@ -1172,6 +1172,16 @@ class PinnedReferenceSmokeTests(unittest.TestCase):
             raise unittest.SkipTest("pinned references are not cached")
         cls.tiers, cls.withheld = rare.build_tiers(cls.refs)
 
+    def test_pinned_mou3_rule_counts_and_nonattestation(self):
+        self.assertEqual(self.refs.cns.rules["cns-mou3/1"]["counts"],
+                         {"keep": 22, "exclude": 3860, "quarantine": 130})
+        self.assertEqual(len(self.refs.cns.rule_rows), 4012)
+        self.assertIn("mǒu", self.refs.attestations("牡"))
+        self.assertNotIn("mǒu", self.refs.attestations("蓟"))
+        for code in data.CNS_MOU3_QUARANTINE:
+            row = next(r for r in self.refs.cns.rule_rows if r["cns"] == code)
+            self.assertEqual(row["status"], "quarantine")
+
     def test_every_tier_assembles(self):
         for name in (path.removesuffix(".tsv") for path in data.RARE_FILES):
             with self.subTest(tier=name):

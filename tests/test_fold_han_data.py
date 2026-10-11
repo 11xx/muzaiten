@@ -217,6 +217,61 @@ class FoldHanDataTests(unittest.TestCase):
             self.assertIsNone(checker.admit_syllable("q"))
             self.assertIsNone(checker.admit_syllable("pía"))
 
+    def test_mou3_classes_keep_exclude_quarantine_and_mixed_labels(self):
+        self.cns_readings_patch.stop()
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            imported = "CJK認同表意文字延伸A, CNS 14649"
+            paths = self.cns_fixture(root, "ㄇㄡˇ\tmǒu\nㄇㄨˇ\tmǔ\n",
+                                     "1-1111\tㄇㄡˇ\n1-1112\tㄇㄡˇ\n1-1112\tㄇㄨˇ\n"
+                                     "1-1113\tㄇㄡˇ\n1-1114\tㄇㄡˇ\n10-2757\tㄇㄡˇ\n",
+                                     "1-1111\t7261\n1-1112\t84DF\n1-1113\t3400\n"
+                                     "1-1114\t3401\n10-2757\t2077A\n",
+                                     f"1-1111\t{imported}\n1-1111\t常用國字標準字體表(edition)\n"
+                                     f"1-1112\t{imported}\n1-1113\t內政部戶政用字\n"
+                                     f"1-1114\t{imported}\n1-1114\t異體字字典字\n10-2757\t{imported}\n")
+            digest = hashlib.sha256(paths[0].read_bytes()).hexdigest()
+            with mock.patch.object(checker, "CNS_MOU3_PIN", digest, create=True):
+                result = checker.cns_readings(paths)
+            self.assertEqual(result, {"牡": ["mǒu"], "蓟": ["mǔ"], "㐀": [], "㐁": [], "𠝺": []})
+            self.assertEqual(result.rules["cns-mou3/1"]["counts"], {"keep": 1, "exclude": 1, "quarantine": 3})
+            self.assertEqual(result.held["蓟"][0]["status"], "exclude")
+            self.assertEqual(result.held["𠝺"][0]["status"], "quarantine")
+            evidence = result.held["㐁"][0]
+            self.assertEqual(evidence["rule"], "cns-mou3/1")
+            self.assertEqual(len(evidence["sources"]), 2)
+            self.assertEqual(evidence["sources"][0]["archive_sha256"], digest)
+            self.assertEqual(evidence["sources"][0]["member"], "CNS_source.txt")
+            self.assertEqual(evidence["phonetic"]["line"], 5)
+
+    def test_mou3_rule_refuses_another_pin_even_if_general_pin_is_changed(self):
+        self.cns_readings_patch.stop()
+        with tempfile.TemporaryDirectory() as directory:
+            paths = self.cns_fixture(pathlib.Path(directory), "ㄇㄡˇ\tmǒu\n",
+                                     "1-1111\tㄇㄡˇ\n", "1-1111\t7261\n",
+                                     "1-1111\t常用國字標準字體表\n")
+            with mock.patch.object(checker, "CNS_SHA256", {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}):
+                with self.assertRaisesRegex(ValueError, "cns-mou3/1.*pin"):
+                    checker.cns_readings(paths)
+
+    def test_sole_quarantined_mou3_is_exposed_to_outer_checker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            table, reviewed = root / "fixture.tsv", root / "reviewed.tsv"
+            table.write_text("㐀\t-\t\n")
+            reviewed.write_text("")
+            cns = checker.CNSReadings()
+            cns["㐀"] = []
+            cns.held["㐀"] = [{"reading": "mǒu", "status": "quarantine", "rule": "cns-mou3/1"}]
+            fields = {name: {} for name in (*checker.READING_FIELDS, *checker.VARIANT_FIELDS)}
+            with mock.patch.object(checker, "unihan_archive", return_value=object()), \
+                 mock.patch.object(checker, "unihan_fields", return_value=fields), \
+                 mock.patch.object(checker, "cns_readings", return_value=cns), \
+                 contextlib.redirect_stdout(output := io.StringIO()), \
+                 contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(checker.check([table], reviewed, authored_dir=root), 1)
+            self.assertIn("quarantined cns-mou3/1 reading", output.getvalue())
+
     def test_rare_tiers_are_ordered_and_disjoint(self):
         fields = {name: {} for name in (*checker.READING_FIELDS, *checker.VARIANT_FIELDS,
                                         "kZVariant", "kTGH", "kUnihanCore2020")}

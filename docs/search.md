@@ -139,6 +139,11 @@ including the exact tone of every reading across simplified and traditional
 counterparts. Direct CNS evidence admits the exceptional syllables `piā`, `yái`,
 `nuí`, `sēi` and `gué` unchanged. Its nucleusless `q` token remains unresolved
 and cannot attest a reading. CNS evidence lists preserve phonetic-file order.
+The pinned `cns-mou3/1` rule keeps standard-list `mǒu`, excludes Unicode-import
+fill rows, and quarantines uncertain source classes and eight 某-containing
+imports. Excluded and quarantined readings provide no tones or family-target
+evidence; a sole quarantined reading blocks approval. Raw witnesses remain
+available for audit, and the rule refuses another CNS Properties pin.
 It reports `family-target` disagreements for astral variant
 families and `variant-guard` findings for unsupported semantic variant folds.
 Rare files and tables marked with `# schema: fold-han-provenance/1` require a
