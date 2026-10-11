@@ -167,8 +167,20 @@ intact. Block-based tier members outside that boundary are recorded as
 proposals cover every buildable member and report every withheld member;
 partial proposals report withheld members in their explicit selection.
 Run assembly with the same Python Unicode database used to generate the build.
-The exact 線–缐 pair is excluded from family joins so 缐 retains its written key;
-each excluded source relation remains a `policy-excluded:<relation>` gap record.
+`fold-han-reviewed-families.json` contains versioned, exhaustive key partitions.
+Each record pins the complete source family, its relations and raw witnesses,
+the typed set, the source archives, the partition keys and every excluded edge.
+Assembly and audit reject stale pins or digests, new members, overlapping or
+incomplete partitions, keys outside D1 candidates, unattested paths and
+unexcluded cross-partition relations. A new split needs a written distinction
+and exact pinned evidence for distinct use or a written-use restriction;
+readings, membership and OpenCC order cannot establish that distinction.
+
+The ratified 綫/線/线/缐 record keeps {綫, 線, 线}→线 and {缐}→缐 as an
+exact written-key policy with no surname or semantic claim. Its three excluded
+raw relations remain in the record and `<tier>-family-exclusions.json`, with
+archive/member hashes, source lines and candidate index. Each rejected join
+also has a `policy-excluded:<relation>` gap. No partition transfers readings.
 
 The family target comes from the first rule that applies: the family's BMP
 simplified members, otherwise its `kTGH` members, otherwise its BMP members.

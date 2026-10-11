@@ -225,6 +225,68 @@ class FoldHanRareTests(unittest.TestCase):
         self.assertFalse(rare.informational_finding(("x.tsv", "1", "假", "family-target", "假", "unresolved"), refs, set()))
         self.assertFalse(rare.informational_finding(("x.tsv", "1", "假", "opencc", "假", "stale"), refs, set()))
 
+    def test_reviewed_family_rejects_incomplete_stale_and_unexcluded_partitions(self):
+        refs = self.refs_for({"kSimplifiedVariant": {"線": "U+7EBF U+7F10", "綫": "U+7EBF"},
+                              "kTraditionalVariant": {"缐": "U+7DDA"}}, opencc={"線": ["线", "缐"]})
+        members = sorted("綫線线缐")
+        partitions = [{"key": "线", "members": sorted("綫線线")}, {"key": "缐", "members": ["缐"]}]
+        relations = rare.family_relations(refs)
+        record = {"schema": "fold-han-reviewed-families/1", "family_id": "line-fixture", "source_pins": refs.pins,
+                  "typed_members_sha256": rare.authored_pin(set())["sha256"], "source_family_members": members,
+                  "source_family_relations_sha256": rare.fingerprint(relations), "partitions": partitions,
+                  "source_family_witnesses": [], "source_family_witnesses_sha256": rare.fingerprint([]),
+                  "basis": {"kind": "fixture-policy"}, "distinct_use_evidence": [],
+                  "excluded_relations": [{**r, "witness": {"raw": r["raw"]}} for r in relations
+                                         if {r["from"], r["to"]} == {"線", "缐"}]}
+        refs.reviewed_families = [record]
+        mappings, _, rejected = rare.family_mappings(refs, set())
+        self.assertEqual(mappings["線"][0], "线")
+        self.assertNotIn("缐", mappings)
+        self.assertEqual(sum(len(v) for v in rejected.values()), 3)
+        for mutation in ("missing-member", "overlap", "bad-key", "stale-pin", "stale-digest", "missing-exclusion", "invented-sense"):
+            with self.subTest(mutation=mutation):
+                broken = copy.deepcopy(record)
+                if mutation == "missing-member": broken["partitions"][0]["members"].remove("綫")
+                if mutation == "overlap": broken["partitions"][1]["members"].append("線")
+                if mutation == "bad-key": broken["partitions"][0]["key"] = "線"
+                if mutation == "stale-pin": broken["source_pins"]["unihan"]["sha256"] = "0" * 64
+                if mutation == "stale-digest": broken["source_family_relations_sha256"] = "0" * 64
+                if mutation == "missing-exclusion": broken["excluded_relations"].pop()
+                if mutation == "invented-sense": broken["basis"] = {"kind": "pinned-distinct-use", "reason": "Different readings"}
+                refs.reviewed_families = [broken]
+                with self.assertRaises(ValueError): rare.family_mappings(refs, set())
+        refs.reviewed_families = [record]
+        refs.fields["kTraditionalVariant"]["𠀀"] = "U+7DDA"
+        with self.assertRaisesRegex(ValueError, "family membership"):
+            rare.family_mappings(refs, set())
+
+    def test_shipped_family_preserves_three_exact_raw_exclusions(self):
+        record = json.loads((ROOT / "tools/fold-han-reviewed-families.json").read_text())["families"][0]
+        self.assertEqual(len(record["excluded_relations"]), 3)
+        self.assertEqual({r["witness"]["raw"] for r in record["excluded_relations"]},
+                         {"U+7DDA\tkSimplifiedVariant\tU+7F10", "U+7F10\tkTraditionalVariant\tU+7DDA", "線\t线 缐"})
+        self.assertFalse(hasattr(rare, "EXCLUDED_PAIRS"))
+
+    def test_lower_tie_decisions_file_supplies_exact_reorder(self):
+        refs = self.refs_for({"kMandarin": {"乛": "yǐ"}}, {"乛": ["yā", "wān"]})
+        decision = self.root / "order.tsv"
+        decision.write_text("乛\treading-order\tyǐ wān yā\tevidence-order tie at ranks 2-3 settled by CNS listing order\tRetain a reviewed tied-block order.\n")
+        out = self.root / "reviewed-lower"
+        rare.write_assembly(out, "core", ["乛"], refs, rare.Predictions({}, []), set(), decisions=decision)
+        self.assertEqual(rare.table_rows(out / "core.tsv")["乛"][0], ["yǐ", "wān", "yā"])
+        decision.write_text(decision.read_text().replace("yǐ wān yā", "yā yǐ wān"))
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            rare.write_assembly(out, "core", ["乛"], refs, rare.Predictions({}, []), set(), decisions=decision)
+
+    def test_opencc_and_cns_class_reports_retain_exact_basis(self):
+        refs = self.refs_for({"kSimplifiedVariant": {"叚": "U+5047"}},
+                             {"叚": ["mā", "hé"]}, {"叚": ["叚", "假"]})
+        refs.cns_default = {"class": "synthetic-cns/1", "basis": "CNS listing order"}
+        out = self.root / "class-reports"
+        rare.write_assembly(out, "tgh", ["叚"], refs, rare.Predictions({}, []), set())
+        self.assertEqual(rare.document(out / "tgh-opencc-order.tsv")[1][0][1], ["叚", "假", "叚/假", "informational-d1"])
+        self.assertEqual(rare.document(out / "tgh-reviewed-defaults.tsv")[1][0][1], ["叚", "mā hé", "synthetic-cns/1", "CNS listing order"])
+
     def test_basis_exact_syllable_agreed_and_single(self):
         rows, records, gaps, findings = rare.assemble(list("𠀀𠀁𠀂"), self.refs, self.predictions, set())
         self.assertEqual(findings, [])
@@ -924,6 +986,16 @@ class FoldHanRareTests(unittest.TestCase):
                               "kTraditionalVariant": {"缐": "U+7DDA", "线": "U+7DAB"},
                               "kMandarin": {ch: "xiàn" for ch in "線缐线"}},
                              opencc={"線": ["线", "缐"]})
+        members = sorted("綫線线缐")
+        relations = rare.family_relations(refs)
+        refs.reviewed_families = [{"schema": "fold-han-reviewed-families/1", "family_id": "xian-fixture",
+            "source_pins": refs.pins, "typed_members_sha256": rare.authored_pin(set())["sha256"],
+            "source_family_members": members, "source_family_relations_sha256": rare.fingerprint(relations),
+            "source_family_witnesses": [], "source_family_witnesses_sha256": rare.fingerprint([]),
+            "basis": {"kind": "fixture-policy"}, "distinct_use_evidence": [],
+            "partitions": [{"key": "线", "members": sorted("綫線线")}, {"key": "缐", "members": ["缐"]}],
+            "excluded_relations": [{**r, "witness": {"raw": r["raw"]}} for r in relations
+                                   if {r["from"], r["to"]} == {"線", "缐"}]}]
         rows, records, gaps, findings = rare.assemble(list("線缐"), refs, rare.Predictions({}, []), set())
         self.assertEqual(rows, [("線", "xiàn", "线"), ("缐", "xiàn", "")])
         self.assertEqual(findings, [])

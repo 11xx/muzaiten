@@ -105,7 +105,9 @@ reading under each character and per-value provenance. Essential-table policies
 remain separate: 匙 has `chí shi`, with `shi` in 钥匙; Japanese-only 蟐 and 笹
 have no Mandarin reading. The native pairs 𧭈/𫍾 and 𨰥/𫔕 retain reviewed
 continuity despite competing Unihan variants. 線 folds to 线 while 缐 keeps its
-written key; the graph excludes their exact relation and records that evidence.
+written key; a versioned reviewed family partitions the four source forms and
+retains all three excluded raw source relations. A new split requires pinned
+evidence documenting distinct use or a written-use restriction.
 麪 retains the reviewed common form 面. Essential mappings for 餽, 関, 顕, 賛,
 闘, 錬, 鑵, 鴈 and 饍 are explicit policies rather than guarded source joins.
 

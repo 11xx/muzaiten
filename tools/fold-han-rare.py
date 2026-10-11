@@ -14,6 +14,7 @@ import pathlib
 import re
 import sys
 import unicodedata
+import zipfile
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 from datetime import date
@@ -49,8 +50,6 @@ PREDICTION_COLUMNS = "ideograph readings confidence sound_component stated_basis
 PROVENANCE_COLUMNS = "ideograph value basis attested_by tone_from rank batch".split()
 DIRECT_FIELDS = (*data.VARIANT_FIELDS, "kZVariant")
 PARTIAL_FIELDS = ("kSemanticVariant", "kSpecializedSemanticVariant")
-# These written forms retain separate keys despite their source relations.
-EXCLUDED_PAIRS = {frozenset(("線", "缐"))}
 RULES = pathlib.Path(__file__).with_name("fold-han-reviewed-rules.json")
 TYPED_SHA256 = "843a97bc8bcab86a9295a29074cd074863fe877d0f7d4648931d49a9e7674fa7"
 MAINLAND_FIELDS = ("kHanyuPinyin", "kXHC1983", "kTGHZ2013", "kHanyuPinlu")
@@ -296,6 +295,8 @@ class References:
     typed: frozenset[str] | None = None
     retained_mappings: dict[str, str] | None = None
     cns_default: dict | None = None
+    reviewed_families: list[dict] | None = None
+    archives: dict[str, pathlib.Path] | None = None
 
     def unihan_spellings(self, ch: str, fields: tuple[str, ...]) -> list[str]:
         return [raw for field in fields for raw in data.field_readings(field, self.fields.get(field, {}).get(ch, ""))]
@@ -336,8 +337,10 @@ def reviewed_rules(refs: References) -> dict:
 
 def typed_members(refs: References, authored: set[str]) -> frozenset[str]:
     if refs.typed is not None:
+        if not fixture_references(refs):
+            raise ValueError("frozen typed membership cannot be overridden")
         return refs.typed
-    if all(pin["source"].startswith("fixture:") for name, pin in refs.pins.items() if name != "schema"):
+    if fixture_references(refs):
         return frozenset(authored | set(refs.fields.get("kTGH", {})))
     pin = reviewed_rules(refs)["typed"]
     path = RULES.with_name(pin["file"])
@@ -352,7 +355,7 @@ def typed_members(refs: References, authored: set[str]) -> frozenset[str]:
 def retained_mapping_choices(refs: References) -> dict[str, str]:
     if refs.retained_mappings is not None:
         return refs.retained_mappings
-    if not all(pin["source"].startswith("fixture:") for name, pin in refs.pins.items() if name != "schema"):
+    if not fixture_references(refs):
         return reviewed_rules(refs)["retained_mappings"]
     return {}
 
@@ -490,6 +493,184 @@ def blocking_findings(findings: list[tuple], refs: References, authored: set[str
     return [f for f in findings if not informational_finding(f, refs, authored, (mappings, details))]
 
 
+FAMILIES = pathlib.Path(__file__).with_name("fold-han-reviewed-families.json")
+
+
+def fingerprint(value) -> str:
+    return hashlib.sha256(canonical(value).encode("utf-8")).hexdigest()
+
+
+def fixture_references(refs: References) -> bool:
+    return all(pin["source"].startswith("fixture:") for name, pin in refs.pins.items() if name != "schema")
+
+
+def family_relations(refs: References) -> list[dict]:
+    relations = []
+    for field in (*DIRECT_FIELDS, *PARTIAL_FIELDS):
+        for raw_ch, raw in refs.fields.get(field, {}).items():
+            for ch, target in links([(raw_ch, data.variant_codes(raw))]):
+                relations.append({"source": "unihan", "field": field, "from": ch, "to": target,
+                                  "raw": f"U+{ord(raw_ch):X}\t{field}\t{raw}"})
+    for raw_ch, outputs in refs.opencc.items():
+        for index, output in enumerate(outputs):
+            for ch, target in links([(raw_ch, [output])]):
+                relations.append({"source": "opencc", "field": "TSCharacters", "from": ch, "to": target,
+                                  "candidate_index": index, "raw": raw_ch + "\t" + " ".join(outputs)})
+    return sorted(relations, key=canonical)
+
+
+def relation_key(relation: dict) -> tuple:
+    return tuple(relation.get(key) for key in ("source", "field", "from", "to", "candidate_index"))
+
+
+def guarded_relation(relation: dict, refs: References, typed: frozenset[str]) -> bool:
+    if relation["field"] not in PARTIAL_FIELDS:
+        return True
+    ch, target = relation["from"], relation["to"]
+    return (ch not in typed and target in typed
+            and bool({syllable(r) for r in refs.attestations(ch)} & {syllable(r) for r in refs.attestations(target)}))
+
+
+def source_component(start: str, relations: list[dict]) -> set[str]:
+    graph = defaultdict(set)
+    for relation in relations:
+        a, b = relation["from"], relation["to"]
+        graph[a].add(b)
+        graph[b].add(a)
+    reached, queue = set(), [start]
+    while queue:
+        ch = queue.pop()
+        if ch not in reached:
+            reached.add(ch)
+            queue.extend(graph[ch])
+    return reached
+
+
+def d1_candidates(component: set[str], simplified: set[str], general: set[str]) -> set[str]:
+    bmp = {ch for ch in component if ord(ch) < 0x10000}
+    return bmp & simplified or component & general or bmp or component & simplified or component
+
+
+@functools.cache
+def witness_lines(path: pathlib.Path, member: str, archive_sha256: str, member_sha256: str) -> list[str]:
+    if digest(path) != archive_sha256:
+        raise ValueError("reviewed family witness archive checksum differs")
+    if zipfile.is_zipfile(path):
+        with zipfile.ZipFile(path) as archive:
+            raw = archive.read(member)
+    else:
+        raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != member_sha256:
+        raise ValueError("reviewed family witness member checksum differs")
+    return raw.decode("utf-8-sig").splitlines()
+
+
+def verify_witness(witness: dict, refs: References, extra_pins: dict) -> None:
+    source = witness["source"]
+    pin = refs.pins.get(source) or extra_pins.get(source)
+    if not pin or witness["archive_sha256"] != pin["sha256"]:
+        raise ValueError("reviewed family witness source pin differs")
+    path = (refs.archives or data.reference_cache()).get(source)
+    if path is None and source == "cedict":
+        path = data.TOOLS_CACHE / data.CEDICT_CACHE_FILE
+    if path is None:
+        raise ValueError("reviewed family witness archive unavailable")
+    lines = witness_lines(path, witness["member"], pin["sha256"], witness["member_sha256"])
+    number = witness["line"]
+    if not isinstance(number, int) or not 1 <= number <= len(lines) or lines[number - 1] != witness["raw"]:
+        raise ValueError("reviewed family raw witness differs")
+
+
+def reviewed_families(refs: References, authored: set[str]) -> list[dict]:
+    records = refs.reviewed_families
+    if records is None:
+        if fixture_references(refs):
+            return []
+        document = json.loads(FAMILIES.read_text(encoding="utf-8"))
+        if document["schema"] != "fold-han-reviewed-families/1":
+            raise ValueError("unsupported reviewed family schema")
+        records = document["families"]
+    typed = typed_members(refs, authored)
+    relations = family_relations(refs)
+    eligible = [r for r in relations if guarded_relation(r, refs, typed)]
+    occupied = set()
+    for record in records:
+        if record["schema"] != "fold-han-reviewed-families/1" or record["source_pins"] != refs.pins:
+            raise ValueError("reviewed family source pins differ")
+        if record["typed_members_sha256"] != authored_pin(set(typed))["sha256"]:
+            raise ValueError("reviewed family typed membership differs")
+        members = record["source_family_members"]
+        if not members or members != sorted(set(members)) or occupied & set(members):
+            raise ValueError("invalid reviewed family membership")
+        if source_component(members[0], eligible) != set(members):
+            raise ValueError("reviewed family membership is stale")
+        occupied.update(members)
+        actual = [r for r in relations if r["from"] in members or r["to"] in members]
+        if fingerprint(actual) != record["source_family_relations_sha256"]:
+            raise ValueError("reviewed family relation digest differs")
+        witnesses = record["source_family_witnesses"]
+        if fingerprint(witnesses) != record["source_family_witnesses_sha256"]:
+            raise ValueError("reviewed family witness digest differs")
+        extra_pins = record.get("witness_pins", {})
+        for pin in extra_pins.values():
+            source_pin(pin)
+        if not fixture_references(refs):
+            for witness in witnesses:
+                verify_witness(witness, refs, extra_pins)
+        basis = record["basis"]
+        if basis["kind"] == "ratified-exact-policy":
+            if reviewed_rules(refs).get("ratified_families", {}).get(record["family_id"]) != fingerprint(record):
+                raise ValueError("new split requires pinned distinct-use evidence")
+        elif basis["kind"] == "fixture-policy" and fixture_references(refs):
+            pass
+        elif (basis["kind"] == "pinned-distinct-use" and basis.get("distinction")
+              and record["distinct_use_evidence"]):
+            portable_text(basis["distinction"])
+            for witness in record["distinct_use_evidence"]:
+                if witness["source"] == "unihan" and "\tkDefinition\t" not in witness["raw"]:
+                    raise ValueError("distinct use requires a substantive source witness")
+                verify_witness(witness, refs, extra_pins)
+        else:
+            raise ValueError("new split requires pinned distinct-use evidence")
+        partitions = record["partitions"]
+        listed = [ch for p in partitions for ch in p["members"]]
+        if len(listed) != len(set(listed)) or set(listed) != set(members):
+            raise ValueError("reviewed family partitions must be disjoint and exhaustive")
+        assignment = {ch: p["key"] for p in partitions for ch in p["members"]}
+        if not fixture_references(refs):
+            essential = {}
+            for name in data.TIER_FILES[:4]:
+                essential.update(table_rows(data.ROOT / "src/search/fold/tables/han" / name))
+            native = terminal_keys(essential)
+            if any(ch in native and native[ch] != key for ch, key in assignment.items()):
+                raise ValueError("reviewed partition conflicts with retained essential keys")
+        excluded = {relation_key(r): r for r in record["excluded_relations"]}
+        if len(excluded) != len(record["excluded_relations"]):
+            raise ValueError("duplicate reviewed family exclusion")
+        for key, relation in excluded.items():
+            raw = next((r for r in actual if relation_key(r) == key), None)
+            if raw is None or raw["raw"] != relation["witness"]["raw"]:
+                raise ValueError("stale reviewed family excluded relation")
+            if assignment.get(relation["from"]) == assignment.get(relation["to"]):
+                raise ValueError("excluded relation must cross reviewed partitions")
+            if not fixture_references(refs):
+                verify_witness(relation["witness"], refs, extra_pins)
+        retained = [r for r in eligible if relation_key(r) not in excluded]
+        for relation in retained:
+            a, b = relation["from"], relation["to"]
+            if a in assignment and b in assignment and assignment[a] != assignment[b]:
+                raise ValueError("unexcluded cross-partition relation")
+        simplified = {r["to"] for r in retained if r["field"] in {"kSimplifiedVariant", "TSCharacters"}}
+        for partition in partitions:
+            component = set(partition["members"])
+            key = partition["key"]
+            if key not in component or key not in d1_candidates(component, simplified, set(refs.fields.get("kTGH", {}))):
+                raise ValueError("reviewed partition key violates D1")
+            if source_component(key, retained) != component:
+                raise ValueError("reviewed partition lacks an attested path")
+    return records
+
+
 def family_mappings(refs: References, authored: set[str], choices: dict[str, str] | None = None, *,
                     details: dict | None = None
                     ) -> tuple[dict[str, tuple[str, str]], dict[str, list[str]], dict[str, list[tuple[str, str]]]]:
@@ -497,7 +678,10 @@ def family_mappings(refs: References, authored: set[str], choices: dict[str, str
 
     Returns each joined member's target and relation path, blocking issues, and the
     partial links the guard rejects, which join nothing."""
-    choices = {**retained_mapping_choices(refs), **(choices or {})}
+    partitions = reviewed_families(refs, authored)
+    partition_choices = {ch: p["key"] for record in partitions for p in record["partitions"] for ch in p["members"]}
+    choices = {**partition_choices, **retained_mapping_choices(refs), **(choices or {})}
+    excluded = {relation_key(r): r for record in partitions for r in record["excluded_relations"]}
     graph = defaultdict(dict)
     simplified = set()
     general = set(refs.fields.get("kTGH", {}))
@@ -542,14 +726,17 @@ def family_mappings(refs: References, authored: set[str], choices: dict[str, str
 
     for field in DIRECT_FIELDS:
         for ch, target in unihan_links(refs.fields, field):
-            if frozenset((ch, target)) in EXCLUDED_PAIRS:
+            if ("unihan", field, ch, target, None) in excluded:
                 rejected[ch].append((target, "policy-excluded:" + field))
                 continue
             edge(ch, target, "unihan:" + field)
             if field == "kSimplifiedVariant":
                 simplified.add(target)
-    for ch, target in links(refs.opencc.items()):
-        if frozenset((ch, target)) in EXCLUDED_PAIRS:
+    for relation in family_relations(refs):
+        if relation["source"] != "opencc":
+            continue
+        ch, target = relation["from"], relation["to"]
+        if relation_key(relation) in excluded:
             rejected[ch].append((target, "policy-excluded:opencc:TSCharacters"))
             continue
         edge(ch, target, "opencc:TSCharacters")
@@ -566,7 +753,7 @@ def family_mappings(refs: References, authored: set[str], choices: dict[str, str
     partial = defaultdict(dict)
     for field in PARTIAL_FIELDS:
         for ch, target in unihan_links(refs.fields, field):
-            if frozenset((ch, target)) in EXCLUDED_PAIRS:
+            if ("unihan", field, ch, target, None) in excluded:
                 rejected[ch].append((target, "policy-excluded:" + field))
                 continue
             if target in graph.get(ch, {}):
@@ -692,7 +879,7 @@ def read_decisions(path: pathlib.Path, members: list[str]):
         if kind in {"family-target", "variant-guard"}:
             ideograph(ours)
             choices, value = mappings, ours
-        elif kind == "provenance":
+        elif kind in {"provenance", "reading-order"}:
             value = ours.split()
             if not value or len(value) != len(set(value)) or any(reading(r) != r for r in value):
                 raise ValueError("decision readings must be distinct NFC pinyin")
@@ -956,6 +1143,34 @@ def write_assembly(out: pathlib.Path, tier: str, members: list[str], refs: Refer
         f"{tier}-findings.tsv": common + "# columns: ideograph\tkind\tours\treference\n"
         + "".join("\t".join(row) + "\n" for row in findings),
     }
+    details = {}
+    mappings, _, _ = family_mappings(refs, authored, mapping_choices, details=details)
+    source_order = []
+    class_defaults = []
+    for ch, text, target in rows:
+        ours = target or ch
+        ordered = refs.opencc.get(ch, ())
+        if ordered and ordered[0] != ours:
+            automatic = opencc_informational(ch, ours, refs, authored, (mappings, details))
+            source_order.append((ch, ours, "/".join(ordered), "informational-d1" if automatic else "individual"))
+        decision = cns_class_default(ch, refs)
+        attested = refs.attestations(ch)
+        if (decision and len(attested) > 1 and all(sources == {"cns"} for sources in attested.values())
+                and not predictions.rows.get(ch) and ch not in (reading_choices or {})):
+            class_defaults.append((ch, text, decision.get("class", "fixture-class"), decision["basis"]))
+    files[f"{tier}-opencc-order.tsv"] = header("fold-han-opencc-order/1", refs, predictions, authored) \
+        + "# columns: ideograph\tours\topencc_listing\tdisposition\n" \
+        + "".join("\t".join(row) + "\n" for row in source_order)
+    files[f"{tier}-reviewed-defaults.tsv"] = header("fold-han-reviewed-defaults/1", refs, predictions, authored) \
+        + "# columns: ideograph\treadings\tclass\tbasis\n" \
+        + "".join("\t".join(row) + "\n" for row in class_defaults)
+    families = reviewed_families(refs, authored)
+    files[f"{tier}-family-exclusions.json"] = json.dumps({
+        "schema": "fold-han-family-exclusions/1", "references": refs.pins,
+        "typed_members_sha256": authored_pin(set(typed_members(refs, authored)))["sha256"],
+        "families": [{"family_id": record["family_id"], "excluded_relations": record["excluded_relations"]}
+                     for record in families],
+    }, ensure_ascii=False, indent=2) + "\n"
     if impact:
         changes, pulled, report = impact
         files.update({
@@ -1116,7 +1331,8 @@ def read_references(args) -> References:
     for name, path in zip(("unihan", "cns-properties", "cns-mappings", "opencc"), (unihan, *cns, opencc)):
         if digest(path) != pins[name]["sha256"]:
             raise ValueError(f"{name}: reference sha256 mismatch")
-    return References(data.unihan_fields(unihan, *FIELDS), data.cns_readings(cns), data.opencc_characters(opencc), pins)
+    return References(data.unihan_fields(unihan, *FIELDS), data.cns_readings(cns), data.opencc_characters(opencc), pins,
+                      archives=dict(zip(("unihan", "cns-properties", "cns-mappings", "opencc"), (unihan, *cns, opencc))))
 
 
 def main(argv: list[str] | None = None) -> int:
