@@ -1,11 +1,14 @@
 #pragma once
 
 #include <QByteArray>
+#include <QJsonArray>
 #include <QString>
 #include <QVector>
 
 #include <functional>
 #include <optional>
+
+class QObject;
 
 // Manual "takeover" of a sound card from the system audio server so a
 // bit-perfect / direct ALSA stream can open it exclusively.
@@ -44,11 +47,14 @@ struct DeviceState {
 
 // How this namespace reaches PipeWire: a graph snapshot (pw-dump JSON) and a
 // card profile switch (wpctl set-profile). Replaceable so tests run against
-// fixtures and never switch a real card.
+// fixtures and never switch a real card. dumpAsync answers once through its
+// callback without blocking, unless the context object is destroyed first;
+// tooling without it reads the graph with dump and answers at once.
 struct Tooling {
     std::function<bool()> available;
     std::function<std::optional<QByteArray>()> dump;
     std::function<bool(int pwId, int profileIndex, QString *error)> setProfile;
+    std::function<void(QObject *context, std::function<void(std::optional<QByteArray>)> done)> dumpAsync = {};
 };
 // Install |tooling|; returns what it replaces.
 Tooling setTooling(Tooling tooling);
@@ -56,8 +62,21 @@ Tooling setTooling(Tooling tooling);
 // Whether the PipeWire tooling (pw-dump + wpctl) is present on this system.
 bool toolingAvailable();
 
+// One reading of PipeWire's graph, so several questions share one query.
+// Empty when the graph could not be read.
+struct Snapshot {
+    QJsonArray objects;
+};
+
+// Reads the graph and blocks until it is read.
+Snapshot snapshot();
+// Reads the graph without blocking the caller's thread and passes it to
+// |done|, unless |context| is destroyed first.
+void readSnapshot(QObject *context, std::function<void(const Snapshot &)> done);
+
 // Snapshot of every ALSA card PipeWire currently knows about.
 QVector<DeviceState> enumerate();
+QVector<DeviceState> enumerate(const Snapshot &graph);
 
 // Look up the card backing a "hw:N" device string (as stored in a bit-perfect
 // PlaybackProfile). Returns nullopt if no PipeWire card maps to it.
@@ -73,6 +92,7 @@ std::optional<DeviceState> findByStableId(const QString &stableId);
 // card can take over that number. A selection without one (typed by hand, or
 // saved before ids were recorded) is looked up by its hw path.
 std::optional<DeviceState> findSelected(const QString &stableId, const QString &hwPath);
+std::optional<DeviceState> findSelected(const Snapshot &graph, const QString &stableId, const QString &hwPath);
 
 // What a direct profile may open now.
 struct DirectTarget {
@@ -106,6 +126,7 @@ QString sinkNodeName(const QString &hwPath);
 // node exists. A restored profile creates a new node id, so callers can tell a
 // stale pre-release node from the sink that replaced it.
 int sinkNodeId(const QString &hwPath);
+int sinkNodeId(const Snapshot &graph, const QString &hwPath);
 
 // Whether PipeWire has (re)created an Audio/Sink node for the card behind
 // "hw:N". After release() the profile flips instantly but PipeWire needs a
@@ -113,5 +134,6 @@ int sinkNodeId(const QString &hwPath);
 // this is the real "the card is usable again" signal to wait on before routing
 // shared playback back to it. False if the card/tooling is absent.
 bool sinkNodeReady(const QString &hwPath);
+bool sinkNodeReady(const Snapshot &graph, const QString &hwPath);
 
 } // namespace AudioDeviceControl

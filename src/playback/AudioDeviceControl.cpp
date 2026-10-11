@@ -4,8 +4,10 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QPointer>
 #include <QProcess>
 #include <QStandardPaths>
+#include <QTimer>
 
 #include <utility>
 
@@ -123,6 +125,51 @@ std::optional<DeviceState> parseDevice(const QJsonObject &obj)
     return dev;
 }
 
+// pw-dump without waiting for it: the answer arrives through |done| once the
+// process exits, fails or times out.
+void dumpWithoutBlocking(QObject *context, std::function<void(std::optional<QByteArray>)> done)
+{
+    const QString program = QStringLiteral("pw-dump");
+    if (QStandardPaths::findExecutable(program).isEmpty()) {
+        done(std::nullopt);
+        return;
+    }
+    auto *proc = new QProcess(context);
+    auto *timeout = new QTimer(proc);
+    timeout->setSingleShot(true);
+    auto answer = std::make_shared<std::function<void(std::optional<QByteArray>)>>(std::move(done));
+    const auto finish = [proc, answer](std::optional<QByteArray> out) {
+        if (!*answer)
+            return;
+        const auto callback = std::exchange(*answer, {});
+        if (proc->state() == QProcess::NotRunning) {
+            proc->deleteLater();
+        } else {
+            // A killed pw-dump is reaped before its QProcess goes.
+            QObject::connect(proc, &QProcess::finished, proc, &QObject::deleteLater);
+        }
+        callback(std::move(out));
+    };
+    QObject::connect(proc, &QProcess::finished, proc, [proc, finish](int exitCode, QProcess::ExitStatus status) {
+        if (status != QProcess::NormalExit || exitCode != 0) {
+            finish(std::nullopt);
+            return;
+        }
+        finish(proc->readAllStandardOutput());
+    });
+    QObject::connect(proc, &QProcess::errorOccurred, proc, [proc, finish](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) {
+            finish(std::nullopt);
+        }
+    });
+    QObject::connect(timeout, &QTimer::timeout, proc, [proc, finish]() {
+        proc->kill();
+        finish(std::nullopt);
+    });
+    proc->start(program, {});
+    timeout->start(kProcessTimeoutMs);
+}
+
 Tooling systemTooling()
 {
     return {
@@ -141,6 +188,7 @@ Tooling systemTooling()
                        {QStringLiteral("set-profile"), QString::number(pwId), QString::number(profileIndex)},
                        nullptr, error);
         },
+        dumpWithoutBlocking,
     };
 }
 
@@ -150,13 +198,12 @@ Tooling &tooling()
     return current;
 }
 
-QJsonArray dumpObjects()
+Snapshot parseSnapshot(const std::optional<QByteArray> &out)
 {
-    const std::optional<QByteArray> out = tooling().dump();
     if (!out)
         return {};
     const QJsonDocument doc = QJsonDocument::fromJson(*out);
-    return doc.isArray() ? doc.array() : QJsonArray();
+    return {doc.isArray() ? doc.array() : QJsonArray()};
 }
 
 bool setProfile(const DeviceState &dev, int profileIndex, QString *error)
@@ -174,11 +221,11 @@ struct SinkNode {
     QString name;
 };
 
-std::optional<SinkNode> findSinkNode(const QString &hwPath)
+std::optional<SinkNode> findSinkNode(const Snapshot &graph, const QString &hwPath)
 {
     if (hwPath.isEmpty())
         return std::nullopt;
-    const QJsonArray arr = dumpObjects();
+    const QJsonArray &arr = graph.objects;
 
     int deviceId = -1;
     for (const QJsonValue &value : arr) {
@@ -217,41 +264,69 @@ bool toolingAvailable()
     return tooling().available();
 }
 
-QVector<DeviceState> enumerate()
+Snapshot snapshot()
+{
+    return parseSnapshot(tooling().dump());
+}
+
+void readSnapshot(QObject *context, std::function<void(const Snapshot &)> done)
+{
+    const Tooling &current = tooling();
+    if (!current.dumpAsync) {
+        done(snapshot());
+        return;
+    }
+    const QPointer<QObject> guard(context);
+    current.dumpAsync(context, [guard, done = std::move(done)](std::optional<QByteArray> out) {
+        if (guard) {
+            done(parseSnapshot(out));
+        }
+    });
+}
+
+QVector<DeviceState> enumerate(const Snapshot &graph)
 {
     QVector<DeviceState> devices;
-    for (const QJsonValue &value : dumpObjects()) {
+    for (const QJsonValue &value : graph.objects) {
         if (auto dev = parseDevice(value.toObject()))
             devices.append(*dev);
     }
     return devices;
 }
 
+QVector<DeviceState> enumerate()
+{
+    return enumerate(snapshot());
+}
+
 std::optional<DeviceState> findByHwPath(const QString &hwPath)
 {
     if (hwPath.isEmpty())
         return std::nullopt;
-    for (const DeviceState &dev : enumerate()) {
-        if (dev.hwPath == hwPath)
-            return dev;
-    }
-    return std::nullopt;
+    return findSelected(snapshot(), QString(), hwPath);
 }
 
 std::optional<DeviceState> findByStableId(const QString &stableId)
 {
     if (stableId.isEmpty())
         return std::nullopt;
-    for (const DeviceState &dev : enumerate()) {
-        if (dev.stableId == stableId)
-            return dev;
-    }
-    return std::nullopt;
+    return findSelected(snapshot(), stableId, QString());
 }
 
 std::optional<DeviceState> findSelected(const QString &stableId, const QString &hwPath)
 {
     return stableId.isEmpty() ? findByHwPath(hwPath) : findByStableId(stableId);
+}
+
+std::optional<DeviceState> findSelected(const Snapshot &graph, const QString &stableId, const QString &hwPath)
+{
+    if (stableId.isEmpty() && hwPath.isEmpty())
+        return std::nullopt;
+    for (const DeviceState &dev : enumerate(graph)) {
+        if (stableId.isEmpty() ? dev.hwPath == hwPath : dev.stableId == stableId)
+            return dev;
+    }
+    return std::nullopt;
 }
 
 DirectTarget resolveDirect(const QString &stableId, const QString &savedDevice)
@@ -292,19 +367,32 @@ bool release(const DeviceState &dev, int restoreProfileIndex, QString *error)
 
 QString sinkNodeName(const QString &hwPath)
 {
-    const auto sink = findSinkNode(hwPath);
+    if (hwPath.isEmpty())
+        return {};
+    const auto sink = findSinkNode(snapshot(), hwPath);
     return sink ? sink->name : QString();
 }
 
 int sinkNodeId(const QString &hwPath)
 {
-    const auto sink = findSinkNode(hwPath);
+    return hwPath.isEmpty() ? -1 : sinkNodeId(snapshot(), hwPath);
+}
+
+int sinkNodeId(const Snapshot &graph, const QString &hwPath)
+{
+    const auto sink = findSinkNode(graph, hwPath);
     return sink ? sink->id : -1;
 }
 
 bool sinkNodeReady(const QString &hwPath)
 {
-    return !sinkNodeName(hwPath).isEmpty();
+    return !hwPath.isEmpty() && sinkNodeReady(snapshot(), hwPath);
+}
+
+bool sinkNodeReady(const Snapshot &graph, const QString &hwPath)
+{
+    const auto sink = findSinkNode(graph, hwPath);
+    return sink && !sink->name.isEmpty();
 }
 
 } // namespace AudioDeviceControl

@@ -44,6 +44,7 @@
 #include <QDataStream>
 #include <algorithm>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -2313,6 +2314,7 @@ print(json.dumps({"protocol_version": 1, "request_id": request["request_id"], "e
 
     void overlappingProfileTransitionsIgnoreStopAfterTrigger()
     {
+        FakeAudioGraph graph;
         QTemporaryDir audioRoot;
         QVERIFY(audioRoot.isValid());
         QFile audioFile(audioRoot.filePath(QStringLiteral("profile-transition.wav")));
@@ -2423,6 +2425,59 @@ print(json.dumps({"protocol_version": 1, "request_id": request["request_id"], "e
         window.applyProfileTransition(window.m_playbackProfile, window.m_playbackProfile.toSharedMode());
         QVERIFY2(graph.profileSwitches.isEmpty(), "card B was switched");
         window.m_playback->stop();
+    }
+
+    // Waiting for a card to change hands reads PipeWire without blocking the
+    // window: the wait returns at once, finishes once the graph shows the
+    // card's new sink, and a newer output choice ends it unfinished.
+    void deviceOwnershipWaitDoesNotBlockTheWindow()
+    {
+        FakeAudioGraph graph;
+        graph.cards = {{42, 3, QStringLiteral("alsa_card.a"), QStringLiteral("Card A"), true, false}};
+        graph.readDelayMs = 300;
+        AppCore core;
+        MainWindow window(&core);
+
+        int finished = 0;
+        QElapsedTimer clock;
+        clock.start();
+        window.waitForDeviceOwnership(QStringLiteral("hw:3"), QStringLiteral("alsa_card.a"), /*wantHeld=*/true,
+                                      /*previousSinkNodeId=*/-1, [&finished]() { ++finished; });
+        QVERIFY(clock.elapsed() < 200);
+        QCOMPARE(finished, 0);
+        QTRY_VERIFY(graph.dumps >= 1);
+        QCOMPARE(finished, 0);
+        graph.cards[0].hasSink = true;
+        QTRY_COMPARE_WITH_TIMEOUT(finished, 1, 5000);
+
+        graph.cards[0].hasSink = false;
+        window.waitForDeviceOwnership(QStringLiteral("hw:3"), QStringLiteral("alsa_card.a"), /*wantHeld=*/true,
+                                      /*previousSinkNodeId=*/-1, [&finished]() { ++finished; });
+        ++window.m_outputTransitionGeneration;
+        graph.cards[0].hasSink = true;
+        const int readsBefore = graph.dumps;
+        QTest::qWait(1800);
+        QCOMPARE(finished, 1);
+        QVERIFY(graph.dumps <= readsBefore + 1);
+    }
+
+    // The DSD takeover countdown names the device it looked up when the
+    // question opened instead of asking PipeWire again every second.
+    void dsdPromptLooksUpItsDeviceOnce()
+    {
+        FakeAudioGraph graph;
+        graph.cards = {{42, 3, QStringLiteral("alsa_card.a"), QStringLiteral("Card A")}};
+        AppCore core;
+        MainWindow window(&core);
+        window.m_playbackProfile = directProfile(QStringLiteral("alsa_card.a"), QStringLiteral("hw:3"));
+        window.showDsdTakeoverPrompt(Track{}, QStringLiteral("hw:3"));
+        const int reads = graph.dumps;
+        for (int tick = 0; tick < 3; ++tick) {
+            window.updateDsdTakeoverPromptText();
+        }
+        QCOMPARE(graph.dumps, reads);
+        QVERIFY(window.statusBar()->currentMessage().startsWith(QStringLiteral("DSD needs Card A.")));
+        window.resolveDsdTakeoverPrompt(false);
     }
 
     // The same card reconnected under another number is found again on the

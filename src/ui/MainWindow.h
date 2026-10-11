@@ -512,6 +512,8 @@ private:
     bool m_dsdTakeoverPromptActive = false;
     int m_dsdTakeoverSecondsRemaining = 0;
     QString m_pendingDsdTakeoverDevice;
+    // The prompt's device label, looked up once when the prompt opens.
+    QString m_pendingDsdTakeoverName;
     QString m_takenOverDsdDevice;
     QString m_takenOverDsdDeviceId;
     int m_takenOverDsdRestoreProfile = -1;

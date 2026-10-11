@@ -9,6 +9,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QThread>
+#include <QTimer>
 #include <QVector>
 
 struct FakeCard {
@@ -27,12 +29,27 @@ public:
         m_previous = AudioDeviceControl::setTooling({
             [] { return true; },
             [this]() -> std::optional<QByteArray> {
+                if (readDelayMs > 0) {
+                    QThread::msleep(readDelayMs);
+                }
                 ++dumps;
                 return QJsonDocument(snapshot()).toJson(QJsonDocument::Compact);
             },
             [this](int pwId, int profileIndex, QString *) {
                 profileSwitches.append({pwId, profileIndex});
                 return true;
+            },
+            [this](QObject *context, std::function<void(std::optional<QByteArray>)> done) {
+                if (readDelayMs < 0) {
+                    ++dumps;
+                    done(QJsonDocument(snapshot()).toJson(QJsonDocument::Compact));
+                    return;
+                }
+                // The graph as it is when the delayed answer arrives.
+                QTimer::singleShot(readDelayMs, context, [this, done = std::move(done)]() {
+                    ++dumps;
+                    done(QJsonDocument(snapshot()).toJson(QJsonDocument::Compact));
+                });
             },
         });
     }
@@ -90,6 +107,14 @@ public:
     QVector<FakeCard> cards;
     QVector<QPair<int, int>> profileSwitches;  // {PipeWire id, profile index}
     int dumps = 0;
+    // How long PipeWire takes to answer: a blocking read waits this many
+    // milliseconds and a non-blocking one answers that much later. Negative
+    // answers at once.
+    int readDelayMs = -1;
+
+    // The tooling this fixture stands in for: the system's, outside other
+    // fixtures.
+    const AudioDeviceControl::Tooling &replaced() const { return m_previous; }
 
 private:
     AudioDeviceControl::Tooling m_previous;

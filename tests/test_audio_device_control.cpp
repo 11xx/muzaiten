@@ -1,6 +1,10 @@
 #include "AudioDeviceFixtures.h"
 
+#include <QElapsedTimer>
+#include <QFile>
+#include <QProcess>
 #include <QFileSystemWatcher>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QtTest/QtTest>
 
@@ -48,6 +52,85 @@ private slots:
         QCOMPARE(target.hwPath, QStringLiteral("hw:CARD=Example,DEV=0"));
         QCOMPARE(AudioDeviceControl::resolveDirect(QString(), QString()).status, Status::Unavailable);
         QCOMPARE(graph.dumps, 0);
+    }
+
+    // One snapshot answers several questions, and a read that has not
+    // answered never holds up its caller.
+    void snapshotReadsAnswerLater()
+    {
+        FakeAudioGraph graph;
+        graph.cards = {{42, 3, QStringLiteral("alsa_card.a"), QStringLiteral("Card A")}};
+        graph.readDelayMs = 100;
+        QObject context;
+        std::optional<AudioDeviceControl::Snapshot> answer;
+        AudioDeviceControl::readSnapshot(&context, [&answer](const AudioDeviceControl::Snapshot &graph) {
+            answer = graph;
+        });
+        QVERIFY(!answer);
+        QTRY_VERIFY(answer.has_value());
+        QCOMPARE(graph.dumps, 1);
+        const auto card = AudioDeviceControl::findSelected(*answer, QStringLiteral("alsa_card.a"), QString());
+        QVERIFY(card.has_value());
+        QCOMPARE(card->hwPath, QStringLiteral("hw:3"));
+        QCOMPARE(AudioDeviceControl::sinkNodeId(*answer, QStringLiteral("hw:3")), 1042);
+        QVERIFY(AudioDeviceControl::sinkNodeReady(*answer, QStringLiteral("hw:3")));
+        QCOMPARE(graph.dumps, 1);
+
+        // No answer reaches a caller that is gone.
+        auto *gone = new QObject;
+        bool answered = false;
+        AudioDeviceControl::readSnapshot(gone, [&answered](const AudioDeviceControl::Snapshot &) { answered = true; });
+        delete gone;
+        QTest::qWait(250);
+        QVERIFY(!answered);
+    }
+
+    // The installed reader runs pw-dump without waiting for it, and a pw-dump
+    // that hangs answers with an empty graph once its time is up.
+    void systemReadDoesNotWaitForPwDump()
+    {
+        QTemporaryDir bin;
+        QVERIFY(bin.isValid());
+        const auto writeTool = [&bin](const QByteArray &script) {
+            QFile tool(bin.filePath(QStringLiteral("pw-dump")));
+            QVERIFY(tool.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            tool.write(script);
+            tool.close();
+            tool.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        };
+        const QByteArray path = qgetenv("PATH");
+        qputenv("PATH", QFile::encodeName(bin.path()) + ':' + path);
+        const auto restorePath = qScopeGuard([&path]() { qputenv("PATH", path); });
+
+        FakeAudioGraph fixture;
+        fixture.cards = {{42, 3, QStringLiteral("alsa_card.a"), QStringLiteral("Card A")}};
+        const QByteArray graphJson = QJsonDocument(fixture.snapshot()).toJson(QJsonDocument::Compact);
+        QVERIFY(fixture.replaced().dumpAsync);
+
+        writeTool("#!/bin/sh\nsleep 0.3\ncat <<'JSON'\n" + graphJson + "\nJSON\n");
+        QObject context;
+        std::optional<AudioDeviceControl::Snapshot> answer;
+        QElapsedTimer clock;
+        clock.start();
+        fixture.replaced().dumpAsync(&context, [&answer](std::optional<QByteArray> out) {
+            answer = AudioDeviceControl::Snapshot{out ? QJsonDocument::fromJson(*out).array() : QJsonArray()};
+        });
+        QVERIFY(clock.elapsed() < 200);
+        QVERIFY(!answer);
+        QTRY_VERIFY_WITH_TIMEOUT(answer.has_value(), 5000);
+        QVERIFY(AudioDeviceControl::findSelected(*answer, QStringLiteral("alsa_card.a"), QString()).has_value());
+
+        writeTool("#!/bin/sh\nexec sleep 30\n");
+        answer.reset();
+        clock.restart();
+        fixture.replaced().dumpAsync(&context, [&answer](std::optional<QByteArray> out) {
+            answer = AudioDeviceControl::Snapshot{out ? QJsonDocument::fromJson(*out).array() : QJsonArray()};
+        });
+        QVERIFY(clock.elapsed() < 200);
+        QTRY_VERIFY_WITH_TIMEOUT(answer.has_value(), 6000);
+        QVERIFY(answer->objects.isEmpty());
+        // The killed pw-dump is reaped and its process object released.
+        QTRY_VERIFY(context.findChildren<QProcess *>().isEmpty());
     }
 
     void takeoverAndReleaseSwitchOnlyTheGivenCard()

@@ -9,6 +9,10 @@
   in the background, Cancel closes it without waiting, and the decade-shares
   toggle switches between results from that one reading instead of reading
   the library again.
+- The window stays responsive while an output switch or device takeover waits
+  for the sound card to change hands. Each check reads PipeWire's graph
+  without blocking the window, and the DSD takeover countdown looks its device
+  up once instead of every second.
 
 ## [2026.10.11]
 

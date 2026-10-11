@@ -140,6 +140,58 @@ Q_LOGGING_CATEGORY(uiLog, "muzaiten.ui")
 
 namespace {
 
+// Checks that an output device changed hands about once a second, reading
+// PipeWire's graph without blocking the window, until the check holds or
+// eleven checks have failed; either way |done| runs. It stops without running
+// |done| as soon as |current| reports a newer output choice.
+class DeviceOwnershipWait final : public QObject {
+public:
+    DeviceOwnershipWait(std::function<bool(const AudioDeviceControl::Snapshot &)> ready,
+                        std::function<bool()> current, std::function<void()> done, QObject *parent)
+        : QObject(parent)
+        , m_ready(std::move(ready))
+        , m_current(std::move(current))
+        , m_done(std::move(done))
+        , m_next(new QTimer(this))
+    {
+        m_next->setSingleShot(true);
+        m_next->setInterval(1000);
+        connect(m_next, &QTimer::timeout, this, &DeviceOwnershipWait::check);
+    }
+
+    void check()
+    {
+        if (!m_current()) {
+            deleteLater();
+            return;
+        }
+        AudioDeviceControl::readSnapshot(this, [this](const AudioDeviceControl::Snapshot &graph) {
+            checked(graph);
+        });
+    }
+
+private:
+    void checked(const AudioDeviceControl::Snapshot &graph)
+    {
+        if (!m_current()) {
+            deleteLater();
+            return;
+        }
+        if (m_ready(graph) || --m_checksLeft <= 0) {
+            deleteLater();
+            m_done();
+            return;
+        }
+        m_next->start();
+    }
+
+    std::function<bool(const AudioDeviceControl::Snapshot &)> m_ready;
+    std::function<bool()> m_current;
+    std::function<void()> m_done;
+    QTimer *m_next = nullptr;
+    int m_checksLeft = 11;
+};
+
 // Album titles are joined into one key string (for persistence and change
 // detection) and split back. Use the ASCII Unit Separator (0x1F), which cannot
 // occur in a real tag value, so a title that itself contains a newline still
@@ -3935,13 +3987,8 @@ void MainWindow::waitForDeviceOwnership(const QString &hw, const QString &stable
                                         int previousSinkNodeId, std::function<void()> done)
 {
     const quint64 transition = m_outputTransitionGeneration;
-    done = [this, transition, done = std::move(done)]() {
-        if (transition == m_outputTransitionGeneration) {
-            done();
-        }
-    };
-    const auto ready = [hw, stableId, wantHeld, previousSinkNodeId]() {
-        const auto dev = AudioDeviceControl::findSelected(stableId, hw);
+    const auto ready = [hw, stableId, wantHeld, previousSinkNodeId](const AudioDeviceControl::Snapshot &graph) {
+        const auto dev = AudioDeviceControl::findSelected(graph, stableId, hw);
         if (wantHeld) {
             // An identified card that is gone will not bring a sink back, and
             // its old number may already belong to another card.
@@ -3952,33 +3999,21 @@ void MainWindow::waitForDeviceOwnership(const QString &hw, const QString &stable
             // but the sink node (and any loopbacks re-linking off it) lag a few
             // seconds. Wait for the node so shared playback isn't rebuilt onto a
             // not-yet-present device and left silent.
-            const int sinkNodeId = AudioDeviceControl::sinkNodeId(dev ? dev->hwPath : hw);
+            const int sinkNodeId = AudioDeviceControl::sinkNodeId(graph, dev ? dev->hwPath : hw);
             return sinkNodeId >= 0 && (previousSinkNodeId < 0 || sinkNodeId != previousSinkNodeId);
         }
         // A profile can report Off before the old Audio/Sink is actually gone.
         // Wait for both conditions before opening the ALSA device directly. A
         // card that is gone leaves nothing to wait for; a direct open checks
         // its identity itself and waits.
-        return !dev || (!dev->heldByPipeWire() && !AudioDeviceControl::sinkNodeReady(dev->hwPath));
+        return !dev || (!dev->heldByPipeWire() && !AudioDeviceControl::sinkNodeReady(graph, dev->hwPath));
     };
-    if (ready()) {
-        done();
-        return;
-    }
-    // Poll once a second; the card usually changes hands within 2–5 s. Give up
-    // after ~10 s and apply anyway (best effort — a stuck device then surfaces
-    // its own error/takeover affordance rather than hanging the switch).
-    auto *timer = new QTimer(this);
-    timer->setInterval(1000);
-    auto ticksLeft = std::make_shared<int>(10);
-    connect(timer, &QTimer::timeout, this, [timer, ready, done, ticksLeft]() {
-        if (ready() || --(*ticksLeft) <= 0) {
-            timer->stop();
-            timer->deleteLater();
-            done();
-        }
-    });
-    timer->start();
+    // The card usually changes hands within 2–5 s. After ~10 s the change is
+    // applied anyway (best effort: a stuck device then surfaces its own
+    // error/takeover affordance rather than hanging the switch).
+    auto *wait = new DeviceOwnershipWait(
+        ready, [this, transition]() { return transition == m_outputTransitionGeneration; }, std::move(done), this);
+    wait->check();
 }
 
 QString MainWindow::releaseDeviceForProfileSwitch(const PlaybackProfile &previous,
@@ -4118,6 +4153,8 @@ void MainWindow::showDsdTakeoverPrompt(const Track &track, const QString &device
     }
     m_dsdTakeoverPromptActive = true;
     m_pendingDsdTakeoverDevice = device;
+    const auto dev = AudioDeviceControl::findSelected(m_playbackProfile.deviceId, device);
+    m_pendingDsdTakeoverName = dev ? dev->description : device;
     m_dsdTakeoverSecondsRemaining = 10;
     updateDsdTakeoverPromptText();
     m_dsdTakeoverPromptTimer->start();
@@ -4128,10 +4165,8 @@ void MainWindow::updateDsdTakeoverPromptText()
     if (!m_dsdTakeoverPromptActive) {
         return;
     }
-    const auto dev = AudioDeviceControl::findSelected(m_playbackProfile.deviceId, m_pendingDsdTakeoverDevice);
-    const QString name = dev ? dev->description : m_pendingDsdTakeoverDevice;
     const QString text = QStringLiteral("DSD needs %1. Take over for bit-perfect playback? Skipping in %2s")
-                             .arg(name)
+                             .arg(m_pendingDsdTakeoverName)
                              .arg(m_dsdTakeoverSecondsRemaining);
     statusBar()->showMessage(text);
     m_takeOverDeviceButton->setText(QStringLiteral("Take over DSD (%1s)").arg(m_dsdTakeoverSecondsRemaining));
