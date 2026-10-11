@@ -1,7 +1,7 @@
 # schema: fold-han-provenance/1
 # references: {"cns-mappings":{"revision":"2026-08-05","sha256":"4502fcf7b433d679dee51127298929543ec7f4aa99be93cd219df1552bc3d2bf","source":"https://www.cns11643.gov.tw/opendata/MapingTables.zip"},"cns-properties":{"revision":"2026-08-05","sha256":"3d56ef14cc8099893245dac58fe4718d2fa64812b9159352a98a4588ad3efa5c","source":"https://www.cns11643.gov.tw/opendata/Properties.zip"},"opencc":{"revision":"025f371dc76b598d77384fbdab90c937471844d8","sha256":"737c21c66f55a419dd6956cb3089476cdefc5a36877452631617696df1e5d925","source":"https://raw.githubusercontent.com/BYVoid/OpenCC/025f371dc76b598d77384fbdab90c937471844d8/data/dictionary/TSCharacters.txt"},"schema":"fold-han-references/1","unihan":{"revision":"18.0.0","sha256":"4c93ea9c1f636451729a840978f1667a53886af37ba854fdcce109721c63d43e","source":"https://www.unicode.org/Public/18.0.0/ucd/Unihan.zip"}}
 # inputs: []
-# authored: {"revision":"ddd7125ff57bc64ccd34675f174095850de56b1b49509b18648971e83fcc954f","sha256":"ddd7125ff57bc64ccd34675f174095850de56b1b49509b18648971e83fcc954f","source":"preceding-authored-tier-membership"}
+# authored: {"revision":"e807d57c90550440bd51f56aaa60a6eaeef467f717456fb50b6a67c9e179cb65","sha256":"e807d57c90550440bd51f56aaa60a6eaeef467f717456fb50b6a67c9e179cb65","source":"preceding-authored-tier-membership"}
 # Source attributions and license texts: NOTICE.
 # columns: ideograph	value	basis	attested_by	tone_from	rank	batch
 𬳴	pēng	single	unihan	unihan	1	-

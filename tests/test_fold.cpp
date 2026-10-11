@@ -287,10 +287,10 @@ private slots:
     {
         // Traditional forms outside the BMP fold onto their simplified form
         // like BMP ones do (𡑍 onto 𫭼, 𨧀 onto 𬭊), and a BMP traditional form
-        // can fold onto an astral simplified one (欓 onto 𣗋).
+        // can fold onto an astral simplified one (訏 onto 𬣙).
         for (const auto &[traditional, simplified] :
              {std::pair(U"\U0002144D", U"\U0002BB7C"), std::pair(U"\U000289C0", U"\U0002CB4A"),
-              std::pair(U"\u6B13", U"\U000235CB")}) {
+              std::pair(U"\u8A0F", U"\U0002C8D9")}) {
             const QString t = QString::fromUcs4(traditional);
             const QString s = QString::fromUcs4(simplified);
             QCOMPARE(Fold::foldText(t), Fold::foldText(s));
@@ -304,7 +304,9 @@ private slots:
              {std::pair(QStringList{QString::fromUtf8("鉅"), QString::fromUtf8("钜"), QString::fromUtf8("巨")},
                         QString::fromUtf8("巨")),
               std::pair(QStringList{QString::fromUtf8("鯰"), QString::fromUtf8("鲶"), QString::fromUtf8("鲇")},
-                        QString::fromUtf8("鲇"))}) {
+                        QString::fromUtf8("鲇")),
+              std::pair(QStringList{QString::fromUtf8("欓"), QString::fromUtf8("𣗋"), QString::fromUtf8("檔"),
+                                    QString::fromUtf8("档")}, QString::fromUtf8("档"))}) {
             for (const QString &spelling : spellings) QCOMPARE(Fold::foldText(spelling), terminal);
         }
 

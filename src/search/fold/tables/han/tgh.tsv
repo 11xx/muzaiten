@@ -2,11 +2,1247 @@
 # references: {"cns-mappings":{"revision":"2026-08-05","sha256":"4502fcf7b433d679dee51127298929543ec7f4aa99be93cd219df1552bc3d2bf","source":"https://www.cns11643.gov.tw/opendata/MapingTables.zip"},"cns-properties":{"revision":"2026-08-05","sha256":"3d56ef14cc8099893245dac58fe4718d2fa64812b9159352a98a4588ad3efa5c","source":"https://www.cns11643.gov.tw/opendata/Properties.zip"},"opencc":{"revision":"025f371dc76b598d77384fbdab90c937471844d8","sha256":"737c21c66f55a419dd6956cb3089476cdefc5a36877452631617696df1e5d925","source":"https://raw.githubusercontent.com/BYVoid/OpenCC/025f371dc76b598d77384fbdab90c937471844d8/data/dictionary/TSCharacters.txt"},"schema":"fold-han-references/1","unihan":{"revision":"18.0.0","sha256":"4c93ea9c1f636451729a840978f1667a53886af37ba854fdcce109721c63d43e","source":"https://www.unicode.org/Public/18.0.0/ucd/Unihan.zip"}}
 # inputs: []
 # authored: {"revision":"3620de9cd85ce90d4336e8cdf83368904c676390a10c62e82057e83570fdf642","sha256":"3620de9cd85ce90d4336e8cdf83368904c676390a10c62e82057e83570fdf642","source":"preceding-authored-tier-membership"}
+# reading-rules: {"cns-mou3/1":{"counts":{"exclude":3860,"keep":22,"quarantine":130},"pinned_counts":{"exclude":3860,"keep":22,"quarantine":130},"properties_sha256":"3d56ef14cc8099893245dac58fe4718d2fa64812b9159352a98a4588ad3efa5c"}}
+# Python Unicode data: 16.0.0.
+# source-evidence: {"file":"tgh-source-evidence.json","sha256":"71bccde02165253b6d30516bef45c2d38353326f0937baf1ec972387eacc1c23"}
 # Source attributions and license texts: NOTICE.
+# Simplified mappings attested by OpenCC are selected and transformed from OpenCC TSCharacters.txt.
 # partial
 # Mainland readings precede Taiwan-only readings; unresolved order choices require reviewed rows.
+# reviewed CNS-only class default: CNS listing order
 # Readings marked single are transcribed from the named source; see NOTICE.
-# counts: {"agreed":2,"single":2}
+# counts: {"agreed":1174,"single":745}
 # columns: ideograph	readings	simplified
+㑇	zhòu zhū	
+㑊	yì	
+㕮	fǔ fù	
+㘎	hǎn	
+㙍	duō duó	
+㙘	yāo	
+㙦	xié	
+㛃	jié	
+㛚	tǒng yǒng	
+㛹	pián	
+㟃	sī	
+㠇	jiù	
+㠓	méng	
+㤘	zhòu chǎo	
+㥄	líng léng	
+㧐	sǒng	
+㧑	huī wéi	
+㧟	kuǎi	
+㫰	làng lǎng	
+㬊	huǎn huàn	
+㬎	xiǎn	
+㬚	chè	
+㭎	gāng	
+㭕	qū	
+㮾	lǎng	
+㰀	lí	
+㳇	fù wù	
+㳘	chōng	
+㳚	xù	
+㴔	jí xī yì sè xì	
+㵐	jué què	
+㶲	yòng	
+㸆	kào kǎo	
+㸌	huò	
+㺄	yǔ yú	
+㻬	tū tú	
+㽏	gàn	
+㿠	huàng	
+䁖	lōu lóu lǘ	
+䂮	lüè	
+䃅	dī	
+䃎	zhà zhǎ	
+䅟	cǎn shān cān	
+䌹	jiǒng jiōng	
+䎃	rǎn	
+䎖	zēng	
+䏝	zhuān	
+䏡	shì	
+䏲	tī dié	
+䐃	jùn zhūn jǔn	
+䓖	qióng	
+䓛	qū gū gǔ	
+䓫	qí	
+䓬	zhuó	
+䗖	dì	
+䗛	xiū	
+䗪	zhè	
+䗴	tíng	
+䜣	xīn xī xín	欣
+䝙	chū	
+䢺	chū	
+䢼	gōng	
+䣘	táng	
+䥽	pō	
+䦃	zhuō zhuó	
+䲟	yìn	
+䲠	chūn	
+䲢	téng	
+䴓	shī	
+䴔	jiāo xiāo	
+䴕	liè	
+䴖	jīng qīng	
+䴗	jú	
+䴘	tī sī	
+䴙	pì bì	
+䶮	yǎn	
+丏	miǎn	
+乸	nǎ ná	
+亸	duǒ	
+亹	wěi mén	
+伈	xǐn lǐn	
+伣	qiàn xiàn	
+伭	xián	
+伾	pī	
+佁	yǐ ǎi sì chì	
+佖	bì	
+佸	huó	
+佽	cì	
+侂	tuō	
+侴	chǒu hào	
+侹	tǐng	
+俍	liáng lǎng	
+俙	xī	
+俫	lái	徕
+倓	tán dàn tàn	
+倕	chuí zhuì	
+倴	bèn bēn	
+偁	chēng	
+偓	wò	
+偡	zhàn	
+偰	xiè	
+傃	sù	
+傉	nù rù	
+傒	xī xì	
+傕	jué què	
+僔	zǔn cuán	
+僰	bó	
+儦	biāo	
+儴	ráng xiāng	
+冔	xǔ	
+冮	gāng	
+凓	lì	
+凘	sī	
+刬	chàn chǎn chān	铲
+剅	lóu dōu	
+剕	fèi	
+剟	duō chì duó	
+劄	zhá zhā	札
+勔	miǎn mǐn	
+勚	yì	
+匜	yí	
+匼	kē ǎn ē	
+卬	áng yǎng	
+厾	dū dǔ diū	
+叆	ài yǐ	
+叇	dài	
+叕	zhuó yǐ lì jué	
+叚	xiá jiǎ duàn jià	假
+呇	mèn qǐ	
+呣	ḿ móu m̀ m̄	
+咇	bì bié bǐ	
+咉	yāng yǎng	
+咍	hāi tāi	
+咡	èr ér	
+咺	xuān xuǎn	
+哃	tóng	
+哱	bō pò bèi bā bó	
+唝	hǒng gòng gǒng	
+啫	zhě shì	
+啰	luō luó luo	
+啴	chǎn tān	
+喤	huáng	
+嗐	hài	
+嗞	zī	
+嘚	dē dé dāi dēi	
+嘡	tāng	
+噀	xùn sùn	
+噇	chuáng	
+嚄	huō huò ǒ wò	
+嚚	yín	
+嚭	pǐ	
+囷	qūn jūn	
+圌	chuí chuán	
+圐	kū	
+圙	lüè tuán chán	
+圢	tǐng	
+圫	tuō yù zhūn ào	
+圲	qiān	
+坉	tún dùn	
+坋	fèn bèn	
+坒	bì	
+坥	qū jù	
+坬	guà wā	
+坽	líng	
+垍	jì jī	
+垎	hè	
+垏	lǜ lù	
+垕	hòu	
+垙	guāng	
+垚	yáo	
+垞	chá	
+垟	yáng	
+垯	da dá	
+垱	dàng	
+垵	ān ǎn	埯
+垺	fú fū fóu pēi póu	
+垾	hàn àn	
+垿	xù	
+埌	làng	
+埗	bù	
+埪	kōng	
+埫	tǎng chǒng shǎng	
+埵	duǒ	
+堃	kūn	坤
+堌	gù	
+堎	lèng líng	
+堐	yá ái	
+堨	è yè ài	
+堲	jí cí	
+堼	hèng fēng	
+堾	chūn chuǎn chǔn	
+塅	duàn	
+塆	wān	
+塝	bàng	
+塱	lǎng	
+墈	kàn	
+墐	jìn qín jǐn	
+墕	yān yàn yǎn	
+墘	qián	
+墡	shàn	
+墣	pú	
+壸	kǔn	
+奓	zhā shē chǐ zhà	
+奡	ào xiào	
+妘	yún	
+妧	yuán wàn	
+妭	bá bō bó	
+姈	líng	
+姞	jí	
+姤	gòu	
+姱	kuā hù	
+姽	guǐ wá	
+娀	sōng	
+婌	shú shǔ	
+婍	qǐ	
+婘	quán juàn	
+婞	xìng	
+婠	wān guàn	
+婤	zhōu chōu	
+婫	kūn hùn gūn	
+婳	huà	
+婻	nàn	
+婼	ruò chuò ér	
+媂	dì tí	
+媄	měi	
+媆	ruǎn nèn nùn	
+媓	huáng	
+媖	yīng	
+媞	shì tí zhī dài	
+媭	xū	
+媱	yáo	
+嫕	yì	
+嫚	mān màn yuān	
+嫪	lào láo	
+嫭	hù	
+嫽	liáo liǎo liào lǎo	
+嬛	xuān huán qióng xuán yuān	
+嬥	tiǎo diào	
+嬿	yàn	
+孖	zī mā	
+宧	yí	
+寁	zǎn	
+尪	wāng	
+屃	xì	
+屼	wù	
+屾	shēn	
+岊	jié	
+岞	zuò zé zuó	
+岠	jù	
+峂	tóng	
+峃	xué	
+峗	wéi wěi	
+峘	huán hū	
+峛	liè lǐ	
+峣	yáo	
+峧	jiāo	
+峱	náo	
+峿	wú yǔ	
+崀	làng lǎng láng	
+崄	xiǎn yǎn	
+崌	jū	
+崒	zú cuì	
+崡	hán	
+崶	fēng	
+崿	è	
+嵁	kān zhàn	
+嵅	hán gān gàn	
+嵖	chá cuó	
+嵚	qīn	
+嵲	niè	
+嶅	áo ào	
+嶍	xí	
+嶒	céng zhēng	
+嶓	bō	
+嶟	zūn	
+嶦	shàn zhān	
+嶲	xī suǐ	
+巇	xī	
+帡	píng	
+帨	shuì	
+幖	biāo	
+幪	méng měng	
+庤	zhì	
+庱	chěng	
+庼	qǐng qīng qìng	
+廆	wěi huì guī	
+廋	sōu	
+廙	yì	
+弆	jǔ qǔ gǔ	
+弇	yǎn yān nán	
+弢	tāo	
+弨	chāo	
+弶	jiàng	
+彟	yuē	
+徛	jì	
+忞	mín wěn	
+忳	tún zhūn dùn	
+忺	xiān	
+恓	xī qī xù	
+恔	jiǎo xiào	
+悆	yù shū	
+悈	jiè kè	
+悢	liàng lǎng	
+惎	jì	
+惔	tán dàn	
+惙	chuò chuì	
+惛	hūn mèn hǔn	
+愐	miǎn	
+愔	yīn	
+愭	qí	
+慆	tāo	
+慬	qín jìn jǐn	
+慭	yìn	
+憕	chéng zhèng dèng	
+憭	liǎo liáo	
+戣	kuí	
+戭	yǎn yǒu yǐn	
+扂	diàn	
+扅	yí	
+扆	yǐ	
+扊	yǎn	
+扺	zhǐ qí	
+扽	dèn dùn	
+拃	zhǎ zhǎn zhà zhá	
+拤	qiá nòng lòng kǎ	
+挓	zhā	
+挦	xián	
+捯	dáo dǎo	
+捽	zuó cù sū zùn zú	
+掞	yàn shàn yǎn	
+揕	zhèn zhēn	
+揳	xiē xiè xié jiá	
+搒	bàng péng bēng bǎng bāng bèng	
+摏	chōng	
+摛	chī	
+摴	chū chī shū	
+摽	biào biāo piāo pāo piǎo	
+擿	tī zhì zhāi tì zhí	
+攽	bān bīn	
+敩	xiào xué	
+斝	jiǎ	
+斠	jiào	
+斶	chù	
+旐	zhào	
+旞	suì	
+旵	chǎn	
+旸	yáng	
+昄	bǎn	
+昈	hù	
+昒	hū	
+昡	xuàn	
+昣	zhěn	
+昪	biàn	
+昫	xù xiǒng xǔ	
+昳	dié yì diè	
+昽	lóng	
+晊	zhì zhǐ	
+晐	gāi	
+晪	tiǎn	
+晱	shǎn	
+暅	gèng xuǎn xuān yuán	
+暕	jiǎn lán	
+暵	hàn	
+暶	xuán	
+暿	xī xǐ	
+曈	tóng	
+曌	zhào	
+朓	tiǎo tiào yóu	
+朳	bā	
+杄	qiān	
+杕	dì duò	
+杧	máng	
+枍	yì	
+枲	xǐ	
+柈	bàn pán pàn	
+柖	sháo shào	
+柷	zhù chù	
+栐	yǒng	
+栟	bēn bīng píng	
+栻	shì	
+桯	tīng yíng	
 桲	bó po	
+桹	láng	
+梌	tú chá tū	
+梣	chén cén qín	
+梴	chān	
+梽	zhì	
+梾	lái	
+梿	lián	
+棁	zhuō tuō ruì zhuó	
+棐	fěi féi	
+棓	bèi bàng pǒu péi bēi	
+棤	cuò xí	
+棪	yǎn yàn	
+棫	yù	
+棬	quān juàn quán	
+棽	shēn chēn	
+椆	chóu zhòu diāo	
+椑	bēi pí bì pái	
+椓	zhuó	
+椸	yí	
+楒	sī	
+楩	pián	
+榃	tán lín lǐn	
+榅	wēn yùn wù	
+榖	gǔ	
+榰	zhī	
+槚	jiǎ	
+槜	zuì zhì	
+槱	yǒu chǎo	
+橑	liáo lǎo	
+橞	huì	
+檞	jiě xiè	
+櫆	kuí	
+欂	bó	
+欻	xū chuā hū xù	
+歅	yīn	
+殣	jìn jǐn	
+毌	guàn	
+毐	ǎi	
+氿	jiǔ guǐ qiú	
+汈	diāo	
+汋	zhuó yuè què shuò	
+汧	qiān yán	
+汫	jǐng jìng qìng	
+沄	yún	
+沨	fēng	
+泃	jū gōu jù	
+泇	jiā	
+泚	cǐ zǐ	
+洈	wéi	
+洓	qì zì sè suǒ	
+洘	kǎo kào	
+洢	yī	
+洣	mǐ	
+洨	xiáo	
+洭	kuāng	
+洴	píng pēng	
+洺	míng	
+洿	wū hù	
+浉	shī	
+浐	chǎn	
+浕	jìn	
+浛	hán hàn gān	
+浟	yóu dí	
+浡	bó	
+浭	gēng	
+浰	liàn lì	
+浲	féng hóng běng péng	
+涄	pīng pīn	
+涐	é	
+涘	sì	
+涢	yún yǔn	
+涴	yuān wò wǎn	
+淜	péng píng pēng	
+淟	tiǎn	
+淯	yù	
+淴	hū	
+渰	yǎn	
+湉	tián	
+湑	xù xǔ xū	
+湝	jiē xié	
+湴	bàn pán	
+溁	yíng	
+溇	lóu	
+溍	jìn	
+溚	dá tǎ dā	
+溞	sāo	
+溠	zhà zhā	
+溦	wēi méi	
+溵	yīn	
+溹	suǒ suò sè sù	
+滃	wēng wěng	
+滆	gé hé	
+滍	zhì zhǐ	
+滘	jiào	
+滧	xiào yáo	
+滪	yù	
+滫	xiǔ	
+漈	jì	
+漋	lóng	
+漖	jiào	
+漦	chí tāi lí	
+漴	chóng zhuàng chuáng shuāng	
+漷	huǒ kuò huò	
+漹	yān	
+漻	liáo xiào liú	
+漼	cuǐ cuī	
+潏	yù jué shù	
+潖	pá	
+潩	yì	
+潵	sǎ sàn sǎn	
+澛	lǔ	
+澥	xiè	
+澭	yōng yǒng	
+澼	pì	
+澽	jù	
+濋	chǔ	
+瀌	biāo	
+瀍	chán	
+瀔	gǔ	
+瀱	jì	
+瀼	ráng nǎng ràng	
+灈	qú	
+炆	wén	
+炌	kài gāi	
+炟	dá	
+炣	kě	
+烔	tóng dòng	
+烜	xuǎn xuān huǐ	
+烠	huí huǐ ǎi	
+烶	tǐng	
+烺	lǎng	
+烻	shān yàn	
+焆	juān yè yuè yuān guì jué quē	
+焗	jú	
+煁	chén	
+煃	kuǐ	
+煋	xīng	
+煓	tuān	
+煟	wèi wù	
+煴	yūn yùn wěn yún	
+熇	hè xiāo kǎo kào hù	
+熛	biāo	
+熜	cōng zǒng	
+熥	tēng tōng	
+熻	xī	
+燊	shēn	
+燋	jiāo qiáo jué zhuó	
+燏	yù	
+燚	yì yī	
+爇	ruò rè	
+爔	xī	
+爚	yuè yào	
+爟	guàn	
+牁	kē gē	
+牂	zāng	
+牚	chèng chēng	
+牤	māng	
+牥	fāng	
+牻	máng	
+犨	chōu	
+狉	pī	
+狝	xiǎn mí	
+猄	jīng	
+猇	xiāo	
+猰	yà jiá qiè	
+猺	yáo	
+獴	měng méng	
+玃	jué	
+玒	hóng gōng	
+玓	dì	
+玕	gān	
+玙	yú	
+玚	yáng chàng	
+玞	fū	
+玠	jiè	
+玡	yá yà	
+玤	bàng	
+玦	jué	
+玱	qiāng	
+玶	píng	
+玼	cǐ cī cuō	
+玿	sháo	
+珅	shēn	
+珇	zǔ jù	
+珋	liǔ	
+珒	jīn	
+珕	lì	
+珛	xiù	
+珢	yín kèn gèn	
+珫	chōng	
+珰	dāng	
+珵	chéng tǐng	
+珺	jùn	
+琀	hán hàn	
+琄	xuàn quǎn	
+琈	fú fū	
+琎	jìn jīn	
+琔	diàn	
+琟	wéi yù	
+琤	chēng	
+琭	lù	
+瑂	méi	
+瑅	tí	
+瑆	xīng	
+瑑	zhuàn	
+瑓	liàn	
+瑔	quán	
+瑖	duàn	
+瑝	huáng	
+瑧	zhēn jīn	
+瑬	liú	
+瑱	tiàn zhèn	
+璆	qiú	
+璈	áo	
+璒	dēng	
+璠	fán	
+璬	jiǎo	
+璮	tǎn	
+璱	sè	
+瓀	ruǎn	
+瓻	chī	
+甗	yǎn	
+甡	shēn	
+甪	lù	
+畖	wā	
+畬	yú shē	
+疁	liú	
+疍	dàn	
+疐	zhì dì	
+疭	zòng	
+痓	chì	
+瘆	shèn	
+癗	lěi	
+癿	bié qié	
+皕	bì	
+皛	xiǎo jiǎo pò jiǒng	
+皞	hào	
+皦	jiǎo	
+皭	jiào	
+盉	hé	
+盦	ān	
+盷	tián mín xián xuán	
+眊	mào mèi	
+眬	lóng	
+睄	shào qiáo xiāo	
+睎	xī	
+瞫	shěn	
+矞	yù xù jué	
+矰	zēng	
+矻	kū qià kù	
+砄	jué	
+砆	fū	
+砫	zhù zhǔ	
+砮	nǔ nú	
+砵	bō è	
+硁	kēng	
+硊	huì wěi guì kuì	
+硍	yín xiàn kèn kēng yǐn	
+硔	gǒng hóng	
+硙	wèi wéi	
+硚	qiáo	
+碃	qìng	
+碈	hūn mín wén	
+碏	què xī	
+碨	wèi wěi wēi	
+碶	qì	
+磏	qiān lián	
+磜	qì qī qiè	
+磡	kàn	
+磹	tán diàn	
+礌	léi lèi lěi	
+礵	shuāng	
+祃	mà	
+祊	bēng fāng	
+祋	duì shū	
+祎	yī	
+祏	shí	
+祲	jìn jīn	
+祼	guàn	
+祾	líng léng	
+禋	yīn	
+禒	xiǎn	
+禔	zhī tí	
+禘	dì	
+禛	zhēn	
+禤	xuān	
+秾	nóng	
+稌	tú shǔ	
+稑	lù	
+穄	jì	
+穙	pú	
+穜	tóng zhòng zhǒng	
+穟	suì	
+窅	yǎo	
+窊	wā	
+窎	diào	
+窣	sū sù	
+窸	xī	
+竑	hóng	
+竘	qǔ kǒu jǔ	
+竫	jìng	
+笯	nú	
+筀	guì	
+筜	dāng	
+筤	láng làng	
+筦	guǎn	管
+筶	gào gǎo	
+筼	yún xūn	
+箓	lù	
+箖	lín lǐn	
+篯	jiān jiǎn	
+簃	yí	
+簉	zào chòu	
+簕	lè	
+簝	liáo	
+簠	fǔ	
+簰	pái	
+粿	guǒ huà	
+糵	niè	
+絜	jié xié qià jiá qì	洁
+縠	hú	
+繄	yī yì	
+纮	hóng	
+纴	rèn	
+纻	zhù	
+纼	zhèn	
+绖	dié	
+绤	xì	
+绹	táo	
+缐	xiàn	
+缞	cuī suī	
+罶	liǔ	
+罽	jì	
+羑	yǒu	
+羓	bā	
+羕	yàng	
+羖	gǔ	
+羱	yuán	
+翀	chōng	
+翂	fēn	
+翃	hóng	
+翈	xiá	
+翙	huì	
+翚	huī	
+翛	xiāo shū shù	
+翯	hè hào	
+翷	lín	
+翾	xuān	
+耇	gǒu	
+耏	nài ér	
+耤	jí jiè	
+耰	yōu	
+肸	xī bì xì	
+胈	bá	
+胠	qū	
+胣	chǐ yǐ	
+脟	liè luán pāo luǎn	
+脿	biǎo biāo biào	
+腒	jū	
+腘	guó	
+腨	shuàn chuàn	
+腯	tú dùn	
+膙	jiǎng	
+臜	zā	
+舠	dāo	
+舥	pā	
+舲	líng	
+艎	huáng	
+芃	péng	
+芠	wén	
+苉	pǐ	
+茀	fú bó fèi bèi bì	
+茋	dǐ zhǐ	
+茓	xué	
+茝	chǎi zhǐ	
+茽	zhòng	
+荁	huán	
+荄	gāi	
+荓	píng pēng	
+荖	lǎo chā péi chà chāi chài cī cuō	
+荙	dá	
+莙	jūn jùn	
+莝	cuò	
+莿	cì	
+菂	dì dī	
+菍	niè rěn niǎn shěn cōng	
+菼	tǎn	
+萚	tuò zé	
+萣	dìng	
+萳	nán nǎn	
+萹	biān biǎn pián piān	
+葖	tū tú	
+葰	jùn suī suǒ	
+葴	zhēn qián	
+蒨	qiàn	
+蒱	pú	
+蓇	gū gǔ	
+蓏	luǒ	
+蓢	lǎng	
+蔃	qiáng jiàng	
+蔈	piào biāo piǎo biào	
+蔊	hǎn hàn	
+蕰	wēn yùn yǔn	
+薁	ào yù	
+薢	xiè jiē	
+薳	wěi yuǎn	䓕
+薸	piáo piāo	
+薿	nǐ	
+藟	lěi	
+藠	jiào xiào	
+藦	mó mò	
+藨	biāo pāo	
+蘘	ráng xiāng nāng náng	
+虒	sī xī tí zhì	
+虓	xiāo	
+虤	yán	
+虷	hán gān	
+虸	zǐ	
+蚄	fāng bàng	
+蚆	bā pā	
+蚲	píng	
+蛃	bǐng	
+蜎	yuān xuān	
+蜐	jié	
+蝘	yǎn	
+蝲	là	
+螠	yì	
+螣	téng tè	
+螱	wèi	
+蟏	xiāo	
+蟫	yín xún tán	
+蠋	zhú	
+衃	pēi fǒu fóu	
+衎	kàn kǎn	
+衠	zhūn	
+袆	huī yī	
+袪	qū	
+袯	bó bō	
+裈	kūn	
+裛	yì	
+褟	tā	
+褯	jiè	
+襕	lán	
+襚	suì	
+襜	chān chàn dān	裣
+襫	shì	
+觃	yàn	
+觟	huà xiè	
+觭	jī qǐ qí	
+觱	bì	
+觿	xī wéi	
+訄	qiú kāo	
+訚	yín	
+詟	zhé	
+讱	rèn	
+讻	xiōng	
+诇	xiòng	
+诐	bì	
+谞	xū	
+谼	hóng	
+豨	xī	
+豮	fén	
+貆	huán huān xuān	
+赑	bì	
+赒	zhōu	
+赗	fèng	
+赟	yūn bīn	
+赪	chēng	
+趯	tì yuè yào yuē	
+跐	cī cǐ zǐ cǎi	
+跱	zhì	
+跶	da dá	
+踒	wō wēi ruí	
+踦	yǐ jǐ qī jī yì qí	
+踶	dì zhì tí chí shì	
+蹅	chǎ zhā	
+蹚	tāng tàng chēng	
+蹜	sù	
+蹢	dí zhí	
+蹽	liāo	
+蹾	dūn	
+轪	dài	
+辀	zhōu	
+辌	liáng	
+辒	wēn yūn	
+逴	chuō chuò	
+遆	tí	
+遹	yù	
+邘	yú	
+邠	bīn	
+邲	bì biàn	
+邽	guī	
+邿	shī	
+郈	hòu	
+郚	wú yú	
+郪	qī	
+郿	méi	
+鄀	ruò	
+鄃	shū yú	
+鄅	yǔ	
+鄌	táng	
+鄑	zī jìn	
+鄚	mào mò	
+鄜	fū lù	
+鄠	hù	
+鄫	zēng céng	
+酂	zàn cuó	
+酅	xī	
+酦	pō fā	
+酺	pú	
+醨	lí	
+醾	mí	
+鋆	yún jūn	
+钖	yáng	
+钘	xíng jiān	
+铏	xíng	
+铚	zhì	
+铻	wú yǔ yú	
+锜	qí yǐ	
+锧	zhì	
+锳	yīng	
+锽	huáng	
+镃	zī	
+镈	bó	
+镋	tǎng	
+镕	róng	
+镚	bèng	
+镠	liú liù	
+镮	huán xuàn	
+镴	là	
+镵	chán	
+闿	kǎi	
+阇	dū shé	
+阘	tà dá	
+陎	shū	
+陑	ér	
+隃	shù yú yáo	
+隩	ào yù	
+隺	hè hú què	
+雱	pāng páng fāng	
+霅	zhà zhá shà sà yì	
+霨	wèi	
+靬	qián jiān kān hàn	
+靰	wù	
+靸	sǎ tā	
+靽	bàn	
+靿	yào	
+鞡	la lā	
+鞧	qiū yóu	
+鞬	jiān jiàn	
+鞮	dī	
+韂	chàn	
+韨	fú	
+颋	tǐng	
+颎	jiǒng	
+颙	yóng yú	
+飐	zhǎn	
+飔	sī	
+飗	liú	
+饳	duò	
+饸	hé jiá	
 饹	gē le	
+饻	xī	
+馃	guǒ	
+馉	gǔ	
+馌	yè	
+馞	bó pò	
+馧	yūn wò wēn	
+驲	rì	
+骃	yīn	
+骉	biāo piāo	
+骍	xīng	
+骎	qīn	
+骕	sù	
+骙	kuí jué	
+骦	shuāng	
+髃	yú ǒu	
+髎	liáo	
+髽	zhuā	
+鬒	zhěn	
+鬶	guī	
+鬷	zōng zěng	
+魆	xū xù	
+魋	tuí chuí	
+鱽	dāo	
+鱾	jǐ	
+鲀	tún	
+鲃	bā bà	
+鲉	yóu	
+鲊	zhǎ zhà	
+鲌	bó bà	
+鲏	pí pī pì	
+鲖	tóng	
+鲗	zéi	
+鲘	hòu	
+鲙	kuài	
+鲝	zhǎ	
+鲪	jūn	
+鲬	yǒng	
+鲯	qí	
+鲹	shēn sāo	
+鲾	bī	
+鲿	cháng	
+鳀	tí	
+鳁	wēn	
+鳂	wēi	
+鳈	quán	
+鳉	jiāng	
+鳑	páng fáng	
+鳒	jiān qiàn	
+鳚	wèi	
+鳛	xí	
+鳠	hù	
+鳡	gǎn	
+鳣	zhān shān	
+鳤	guǎn	
+鸤	shī	
+鸧	cāng qiāng	
+鸮	xiāo	枭
+鸰	líng	
+鸻	héng	
+鸼	zhōu diǎo	
+鹀	wú	
+鹍	kūn	
+鹐	qiān	
+鹒	gēng	
+鹔	sù	
+鹖	hé hè	
+鹙	qiū	
+鹝	yì	
+鹟	wēng	
+鹠	liú	
+鹡	jí	
+鹢	yì	
+鹮	huán	
+鹯	zhān	
+鹲	méng máng	
+鹴	shuāng	
+麀	yōu	
+麖	jīng	
+黇	tiān	
+黡	yǎn	
+鼒	zī	
+鼩	qú	
+鼫	shí	
+鼱	jīng	
+齁	hōu kù	
+齇	zhā	
+齉	nàng	
+龁	hé	
+龂	yín yǐn	
+龢	hé	和
+鿍	gàng	
+鿎	tǎ dá	
+鿏	mài	
+𠅤	xí sī	
+𠙶	ǒu	
+𠳐	bāng	
+𡎚	piǎn biǎn	
+𡐓	kāng	
+𣗋	dǎng	档
+𣲗	wéi	
+𣲘	wǔ	
+𣸣	fén	
+𤧛	dì	
+𤩽	huán xiàn	
+𤫉	xiè	
+𥔲	è	
+𥕢	cáo yǎo	
+𥖨	zào	
+𥻗	chá	
+𦈡	xū rú	
+𦒍	tóng	
+𦙶	gǔ gōng	
+𦝼	lǘ lóu	
+𦭜	zhī	
+𦰡	nà nuó	
+𧿹	mǔ	
+𨐈	guāng	
+𨙸	qí zhī	
+𨚕	biàn	
+𨟠	quān què jué	
+𨭉	bān	
+𨱇	qiú	
+𨱏	dā	
+𨱑	huáng	
+𨱔	zūn	
+𨺙	nì	
+𩽾	ān	
+𩾃	miǎn	
+𩾌	kāng	
+𪟝	jì jī	绩
+𪣻	lóu	
+𪤗	liào liáo	
+𪨰	qū	
+𪨶	shē fàn	
+𪩘	yǎn	
+𪾢	xiàn	
+𫄧	yán	
+𫄨	chī	
+𫄷	yì	
+𫄸	xūn	
+𫇭	wěi	
+𫌀	jī	
+𫍣	tóng dòng	
+𫍯	xián	
+𫍲	xiǎo	
+𫍽	xuān xuàn	
+𫐄	yuè	
+𫐐	ní	
+𫐓	róu	
+𫑡	méng měng mǐng	
+𫓧	fū	
+𫓯	jī	
+𫓶	xuān	
+𫓹	jī	
+𫔍	fán	
+𫔎	jué	
+𫔶	niè	
+𫖮	yǐ	
+𫖯	fǔ tiào	俯
+𫖳	yūn jūn	
+𫗧	sù	
+𫗴	zhān	
+𫘜	wén yù	
+𫘝	jué kuài	
+𫘦	táo	
+𫘧	lù	
+𫘨	tí	
+𫘪	yuán	
+𫘬	xí xī	
+𫚕	shī	
+𫚖	cǐ jì	
+𫚭	liè là	
+𫛭	kuáng	
+𫞩	mén	
+𫟅	liáng	
+𫟦	suì	
+𫟹	hóng	
+𫟼	dá	
+𫠆	kuǐ	
+𫠊	xuán	
+𫠜	ní	
+𫢸	dàn	
+𫫇	è	恶
+𫭟	ōu qū	
+𫭢	lǔn	
+𫭼	láo	
+𫮃	shàn	
+𫰛	xíng	
+𫵷	lì	
+𫶇	dié	
+𫷷	xīn	
+𫸩	kōu	
+𬀩	wěi	
+𬀪	xiàn	
+𬂩	jiā	
+𬃊	zhì	
+𬇕	wàn	
+𬇙	bèi	
+𬇹	guó	
+𬉼	ǒu	
+𬊈	xún	
+𬊤	chǎn	
+𬌗	hé	
+𬍛	lì	
+𬍡	dàng	
+𬍤	xún	
+𬒈	què	
+𬒔	gěng	
+𬒗	lán	
+𬕂	lǒng	杠
+𬘓	xún	
+𬘘	dǎn	
+𬘡	yīn	
+𬘩	tīng	
+𬘫	huán	
+𬘬	qiàn	
+𬘭	chēn lín	
+𬘯	zhǔn	
+𬙂	yǎn	
+𬙊	mò	
+𬙋	xiāng	
+𬜬	màn	
+𬜯	liǎng	
+𬞟	pín	苹
+𬟁	yì	
+𬟽	dōng	
+𬣙	xū	
+𬣞	zhǔ	
+𬣡	jiàn	
+𬣳	hěn	
+𬤇	yīn	
+𬤊	shì	
+𬤝	huì	
+𬨂	qí	
+𬨎	yóu	
+𬩽	xún	
+𬪩	nóng	
+𬬩	yì	
+𬬭	lún	
+𬬮	chǎng	
+𬬱	jīn	
+𬬸	shù	
+𬬹	shén	
+𬬻	lú	炉
+𬬿	zhāo	
+𬭁	mǔ	
+𬭊	dù	
+𬭎	hóng	
+𬭚	chún duì	
+𬭛	bō	
+𬭤	hóu	
+𬭩	wēng	
+𬭬	huì	
+𬭯	piě	
+𬭳	xǐ	
+𬭶	hēi	
+𬭸	lín	
+𬭼	suì	
+𬮱	yīn	
+𬮿	gài	
+𬯀	jī	跻
+𬯎	tuí	
+𬱖	dí	
+𬱟	wěi	
+𬳵	pī	
+𬳶	jiōng	
+𬳽	shēn	
+𬳿	tú	
+𬴂	fēi	
+𬴃	huō	
+𬴊	lín	
+𬶋	jū	
+𬶍	tuó	
+𬶏	wéi	
+𬶐	zhào	
+𬶟	là	
+𬶠	liàn	
+𬶨	jì	
+𬶭	jì	
+𬶮	xǐ	
+𬷕	bǔ	
+𬸘	yǎn	
+𬸚	yuè	
+𬸣	xiān	
+𬸦	zhuó	
+𬸪	fán	
+𬹼	xiè	
+𬺈	yǐ	
+𬺓	chǔ	
