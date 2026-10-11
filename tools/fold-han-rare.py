@@ -455,7 +455,7 @@ def ordered_readings(ch: str, refs: References, predictions: Predictions,
         last = first + len(block) - 1
         settling = next((label for label, order in orders
                          if len({order.get(value, sys.maxsize) for value in block}) > 1), "reference listing order")
-        if first == 1 and not cns_only:
+        if first == 1 and (not cns_only or any(r.basis == "predicted" for r in records.values())):
             issues.append((" ".join(placed), "evidence-order tie requires a reviewed decision"))
         issues.append((" ".join(placed), f"evidence-order tie at ranks {first}-{last} settled by {settling}"))
     issues.extend((raw, f"unparseable {source} reading") for source, raw in refs.unparseable(ch))

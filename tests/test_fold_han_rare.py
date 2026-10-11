@@ -309,6 +309,13 @@ class FoldHanRareTests(unittest.TestCase):
         self.assertFalse(records)
         self.assertEqual(issues, [("x5", "unparseable kHanyuPinyin reading")])
 
+    def test_predicted_cns_rank_one_tie_requires_an_individual_decision(self):
+        refs = self.refs_for({}, {"𠀀": ["mā", "má"]})
+        refs.cns_default = {"class": "synthetic-cns/1", "basis": "CNS listing order"}
+        records, issues = rare.ordered_readings("𠀀", refs, self.predict("ma"))
+        self.assertEqual([r.value for r in records], ["mā", "má"])
+        self.assertIn(("mā má", "evidence-order tie requires a reviewed decision"), issues)
+
     def test_basis_exact_syllable_agreed_and_single(self):
         rows, records, gaps, findings = rare.assemble(list("𠀀𠀁𠀂"), self.refs, self.predictions, set())
         self.assertEqual(findings, [])
