@@ -42,6 +42,27 @@
 
 namespace {
 
+// Compact key hints in the presets' style: each action's first key, then its
+// glyph, in a fixed reading order.
+QString keyBindingHintText(const KeyBindingMap &bindings)
+{
+    using namespace ExplorerAction;
+    const std::pair<const char *, const char *> entries[] = {
+        {MoveDown, "\u2193"}, {MoveUp, "\u2191"}, {NavigateUp, "\u2190"}, {NavigateIn, "\u2192"},
+        {PlaySelected, "\u25b6"}, {AddToPlaylist, "\u266b"}, {AddToQueue, "+"}, {PlayNext, "\u25b6\u25b6"},
+        {ImportDirectory, " import"}, {FindFile, " find"}, {GoToStart, "\u2691"}, {GoHome, " home"},
+        {Escape, " back"},
+    };
+    QStringList parts;
+    for (const auto &[action, glyph] : entries) {
+        const QList<QKeySequence> keys = keysForAction(bindings, QString::fromLatin1(action));
+        if (!keys.isEmpty()) {
+            parts.push_back(keyText(keys.first()).toLower() + QString::fromUtf8(glyph));
+        }
+    }
+    return parts.join(QLatin1Char(' '));
+}
+
 enum ItemType {
     DirectoryItem = 1, // start at 1 so an unset TypeRole (toInt() == 0) is never a valid type
     TrackItem,
@@ -1005,9 +1026,16 @@ void FileExplorerView::setKeyBindingProfileName(const QString &name)
         return;
     }
     m_keyBindingProfileName = name;
-    m_keyBindings = bindingMapForProfile(name);
+    m_keyBindings = applyKeyBindingOverrides(bindingMapForProfile(name), m_keyBindingOverrides);
     updateHintBar();
     emit keyBindingProfileChanged(name);
+}
+
+void FileExplorerView::setKeyBindingOverrides(const KeyBindingOverrides &overrides)
+{
+    m_keyBindingOverrides = overrides;
+    m_keyBindings = applyKeyBindingOverrides(bindingMapForProfile(m_keyBindingProfileName), m_keyBindingOverrides);
+    updateHintBar();
 }
 
 QString FileExplorerView::keyBindingProfileName() const
@@ -1036,6 +1064,12 @@ bool FileExplorerView::isKeyHintBarVisible() const
 
 void FileExplorerView::updateHintBar()
 {
+    // A preset's hint describes its own keys; once the user has changed any,
+    // the hint is built from the keys in effect.
+    if (!m_keyBindingOverrides.isEmpty()) {
+        m_hintLabel->setText(keyBindingHintText(m_keyBindings));
+        return;
+    }
     for (const KeyBindingProfile &profile : defaultKeyBindingProfiles()) {
         if (profile.name == m_keyBindingProfileName) {
             m_hintLabel->setText(profile.hintText);
@@ -1111,10 +1145,8 @@ bool FileExplorerView::eventFilter(QObject *watched, QEvent *event)
     }
     m_pendingG = false;
 
-    QKeySequence ks(modifiers | key);
-
-    if (m_keyBindings.contains(ks)) {
-        applyKeyAction(m_keyBindings.value(ks));
+    if (const QString action = keyBindingAction(m_keyBindings, keyEvent); !action.isEmpty()) {
+        applyKeyAction(action);
         return true;
     }
 

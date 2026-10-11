@@ -88,6 +88,11 @@ void QueueScreen::focusQueue()
     m_table->navigationWidget()->setFocus(Qt::ShortcutFocusReason);
 }
 
+void QueueScreen::setKeyBindingOverrides(const KeyBindingOverrides &overrides)
+{
+    m_table->setKeyBindingOverrides(overrides);
+}
+
 void QueueScreen::revealCurrentPlaying()
 {
     m_table->revealCurrentPlaying();

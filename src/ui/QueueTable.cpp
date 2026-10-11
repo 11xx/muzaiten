@@ -8,6 +8,7 @@
 #include "ui/OverlayScrollBar.h"
 #include "ui/PanelBorderStyle.h"
 #include "ui/PanelSearchBar.h"
+#include "ui/KeybindCatalog.h"
 #include "ui/QueueKeybindings.h"
 #include "ui/QueueStore.h"
 #include "ui/ResponsiveColumnLayout.h"
@@ -238,13 +239,6 @@ QString trackNumberText(const Track &track)
         return base.left(end);
     }
     return {};
-}
-
-QKeySequence keySequenceForEvent(QKeyEvent *event)
-{
-    const Qt::KeyboardModifiers mods = event->modifiers()
-        & (Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier);
-    return QKeySequence(static_cast<int>(mods) | event->key());
 }
 
 class QueueTableView final : public NavigableTableView {
@@ -1006,7 +1000,13 @@ void QueueTable::setNavigationScrollPadding(int rows)
 void QueueTable::setKeyBindingProfileName(const QString &name)
 {
     m_keyBindingProfileName = name.isEmpty() ? defaultQueueKeyBindingProfileName() : name;
-    m_keyBindings = queueBindingMapForProfile(m_keyBindingProfileName);
+    m_keyBindings = applyKeyBindingOverrides(queueBindingMapForProfile(m_keyBindingProfileName), m_keyBindingOverrides);
+}
+
+void QueueTable::setKeyBindingOverrides(const KeyBindingOverrides &overrides)
+{
+    m_keyBindingOverrides = overrides;
+    m_keyBindings = applyKeyBindingOverrides(queueBindingMapForProfile(m_keyBindingProfileName), m_keyBindingOverrides);
 }
 
 bool QueueTable::eventFilter(QObject *watched, QEvent *event)
@@ -1292,7 +1292,7 @@ bool QueueTable::handleKeyPress(QKeyEvent *event)
         return false;
     }
 
-    QString action = m_keyBindings.value(keySequenceForEvent(event));
+    QString action = keyBindingAction(m_keyBindings, event);
     if (action.isEmpty() && event->modifiers() == Qt::ControlModifier && event->key() == Qt::Key_V) {
         action = QString::fromLatin1(QueueAction::PageDown);
     }

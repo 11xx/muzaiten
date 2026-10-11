@@ -514,6 +514,33 @@ private slots:
         QCOMPARE(table.currentRow(), 1);
     }
 
+    void customKeysReplaceAnActionsPresetKeys()
+    {
+        QueueStore store;
+        store.setTracks(tracksNamed({"a", "b", "c"}));
+        QueueTable table(QueueTablePreset::FullScreen);
+        table.setQueueStore(&store);
+        applyMovesLikePlayerCore(table, store);
+        table.setKeyBindingOverrides({{QString::fromLatin1(QueueAction::MoveItemDown),
+                                       {QKeySequence(Qt::ControlModifier | Qt::Key_J)}}});
+        auto *view = table.findChild<QTableView *>();
+        QVERIFY(view != nullptr);
+
+        table.setCurrentRow(0);
+        QTest::keyClick(view, Qt::Key_N, Qt::ShiftModifier);
+        QCOMPARE(titles(store), QStringLiteral("abc"));
+        QTest::keyClick(view, Qt::Key_J, Qt::ControlModifier);
+        QCOMPARE(titles(store), QStringLiteral("bac"));
+
+        // The preset's other keys keep working, and a profile change keeps the
+        // user's keys.
+        table.setKeyBindingProfileName(defaultQueueKeyBindingProfileName());
+        QTest::keyClick(view, Qt::Key_J, Qt::ControlModifier);
+        QCOMPARE(titles(store), QStringLiteral("bca"));
+        QTest::keyClick(view, Qt::Key_P, Qt::ShiftModifier);
+        QCOMPARE(titles(store), QStringLiteral("bac"));
+    }
+
     void followingThePlayingRowKeepsAVisibleRowInPlace()
     {
         QueueStore store;

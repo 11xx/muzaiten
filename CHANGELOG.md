@@ -16,6 +16,8 @@
 
 ### Fixed
 
+- The file explorer's `!` (play next) and `~` (home folder) keys work. A
+  symbol typed with Shift never matched its binding.
 - Clicking the player bar's buttons or seek bar, or the status-bar buttons, no
   longer takes keyboard focus from the current view, so its keys keep working
   without pressing Tab.

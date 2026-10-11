@@ -14,17 +14,6 @@
 
 #include <algorithm>
 
-namespace {
-
-QKeySequence keySequenceForEvent(QKeyEvent *event)
-{
-    const Qt::KeyboardModifiers mods = event->modifiers()
-        & (Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier);
-    return QKeySequence(static_cast<int>(mods) | event->key());
-}
-
-} // namespace
-
 PanelSearchController::PanelSearchController(QWidget *parent)
     : QWidget(parent)
     , m_focusOrder(defaultMainPanelFocusOrder())
@@ -94,7 +83,13 @@ void PanelSearchController::replaceTarget(MainPanelTarget target)
 void PanelSearchController::setKeyBindingProfileName(const QString &name)
 {
     m_keyBindingProfileName = name.isEmpty() ? defaultMainPanelKeyBindingProfileName() : name;
-    m_keyBindings = mainPanelBindingMapForProfile(m_keyBindingProfileName);
+    m_keyBindings = applyKeyBindingOverrides(mainPanelBindingMapForProfile(m_keyBindingProfileName), m_keyBindingOverrides);
+}
+
+void PanelSearchController::setKeyBindingOverrides(const KeyBindingOverrides &overrides)
+{
+    m_keyBindingOverrides = overrides;
+    m_keyBindings = applyKeyBindingOverrides(mainPanelBindingMapForProfile(m_keyBindingProfileName), m_keyBindingOverrides);
 }
 
 void PanelSearchController::setFocusOrder(const QVector<MainPanelId> &order)
@@ -600,7 +595,7 @@ bool PanelSearchController::handleAlbumGridKey(QKeyEvent *event, const QString &
 bool PanelSearchController::handlePanelKey(QKeyEvent *event, MainPanelId panel)
 {
     Q_UNUSED(panel)
-    QString action = m_keyBindings.value(keySequenceForEvent(event));
+    QString action = keyBindingAction(m_keyBindings, event);
     if (action.isEmpty() && event->modifiers() == Qt::ControlModifier && event->key() == Qt::Key_V) {
         action = QString::fromLatin1(MainPanelAction::PageDown);
     }
@@ -681,7 +676,7 @@ bool PanelSearchController::handleSearchKey(QKeyEvent *event)
         confirmSearch();
         return true;
     }
-    const QString action = m_keyBindings.value(keySequenceForEvent(event));
+    const QString action = keyBindingAction(m_keyBindings, event);
     if (action == QString::fromLatin1(MainPanelAction::Escape)) {
         escapeSearch();
         return true;

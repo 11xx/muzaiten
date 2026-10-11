@@ -3,6 +3,7 @@
 #include "core/Track.h"
 #include "search/SearchMatcher.h"
 #include "ui/KeyBindingTypes.h"
+#include "ui/KeybindCatalog.h"
 #include "ui/PanelBorderStyle.h"
 
 #include <QWidget>
@@ -56,6 +57,7 @@ public:
     void setNavigationScrollPadding(int rows);
     void setKeyBindingProfileName(const QString &name);
     QString keyBindingProfileName() const { return m_keyBindingProfileName; }
+    void setKeyBindingOverrides(const KeyBindingOverrides &overrides);
     void setTableBorders(PanelBorderEdges edges);
     void setTableTopBorderVisible(bool visible);
     // Gates the "Unlink queue from playlist" context-menu entry, shown only while
@@ -107,6 +109,7 @@ private:
     QueueStore *m_store = nullptr;
     KeyBindingMap m_keyBindings;
     QString m_keyBindingProfileName;
+    KeyBindingOverrides m_keyBindingOverrides;
     QTableView *m_view = nullptr;
     QAbstractTableModel *m_model = nullptr;
     QStyledItemDelegate *m_itemDelegate = nullptr;

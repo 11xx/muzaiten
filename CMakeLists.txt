@@ -193,6 +193,7 @@ set(MUZAITEN_SOURCES
     src/ui/DenseTableDelegate.cpp
     src/ui/FileExplorerView.cpp
     src/ui/FileExplorerKeybindings.cpp
+    src/ui/KeybindCatalog.cpp
     src/ui/IdleReleaseController.cpp
     src/ui/KeybindingsDialog.cpp
     src/ui/TasteProfileDialog.cpp
@@ -563,6 +564,7 @@ set(MUZAITEN_UI_SUPPORT_SOURCES
     src/ui/ConditionEditor.cpp
     src/ui/DenseTableDelegate.cpp
     src/ui/FileExplorerKeybindings.cpp
+    src/ui/KeybindCatalog.cpp
     src/ui/IdleReleaseController.cpp
     src/ui/MainPanelKeybindings.cpp
     src/ui/MenuHighlightStyle.cpp

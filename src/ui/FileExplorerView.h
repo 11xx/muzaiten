@@ -4,6 +4,7 @@
 #include "core/Track.h"
 #include "search/SearchMatcher.h"
 #include "ui/FileExplorerKeybindings.h"
+#include "ui/KeybindCatalog.h"
 #include "ui/IdleReleaseController.h"
 
 #include <QHash>
@@ -41,6 +42,7 @@ public:
     void setLibraryEntries(const QStringList &directories, const QVector<Track> &tracks);
 
     void setKeyBindingProfileName(const QString &name);
+    void setKeyBindingOverrides(const KeyBindingOverrides &overrides);
     QString keyBindingProfileName() const;
     void setKeyHintBarVisible(bool visible);
     bool isKeyHintBarVisible() const;
@@ -139,6 +141,7 @@ private:
     QString m_currentDirectory;
     KeyBindingMap m_keyBindings;
     QString m_keyBindingProfileName;
+    KeyBindingOverrides m_keyBindingOverrides;
     bool m_pendingG = false;
     bool m_showUnsupported = false;
     QString m_startDirectory;

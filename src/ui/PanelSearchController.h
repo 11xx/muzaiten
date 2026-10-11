@@ -1,6 +1,7 @@
 #pragma once
 
 #include "search/SearchMatcher.h"
+#include "ui/KeybindCatalog.h"
 #include "ui/MainPanelKeybindings.h"
 
 #include <QHash>
@@ -56,6 +57,7 @@ public:
     void registerTarget(MainPanelTarget target);
     void replaceTarget(MainPanelTarget target);
     void setKeyBindingProfileName(const QString &name);
+    void setKeyBindingOverrides(const KeyBindingOverrides &overrides);
     QString keyBindingProfileName() const { return m_keyBindingProfileName; }
     void setFocusOrder(const QVector<MainPanelId> &order);
     QVector<MainPanelId> focusOrder() const { return m_focusOrder; }
@@ -121,6 +123,7 @@ private:
     QVector<MainPanelId> m_focusOrder;
     KeyBindingMap m_keyBindings;
     QString m_keyBindingProfileName;
+    KeyBindingOverrides m_keyBindingOverrides;
     MainPanelId m_activePanel = MainPanelId::Artists;
     bool m_hasActivePanel = false;
     bool m_mainViewActive = false;

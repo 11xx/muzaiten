@@ -3,6 +3,7 @@
 #include <QWidget>
 
 #include "core/Track.h"
+#include "ui/KeybindCatalog.h"
 
 #include <functional>
 
@@ -24,6 +25,7 @@ public:
     void setNavigationScrollPadding(int rows);
     void setKeyBindingProfileName(const QString &name);
     QString keyBindingProfileName() const;
+    void setKeyBindingOverrides(const KeyBindingOverrides &overrides);
     void focusQueue();
     void revealCurrentPlaying();
     void followCurrentPlaying();
