@@ -4,16 +4,16 @@
     "unihan": {
       "pins": {
         "unihan": {
-          "revision": "16.0.0",
-          "sha256": "b8f000df69de7828d21326a2ffea462b04bc7560022989f7cc704f10521ef3e0",
-          "source": "https://www.unicode.org/Public/16.0.0/ucd/Unihan.zip"
+          "source": "https://www.unicode.org/Public/18.0.0/ucd/Unihan.zip",
+          "revision": "18.0.0",
+          "sha256": "4c93ea9c1f636451729a840978f1667a53886af37ba854fdcce109721c63d43e"
         }
       },
       "license": "Unicode-3.0",
       "attribution": {
         "title": "Unicode Han Database (Unihan)",
-        "version": "16.0.0",
-        "copyright": "© 2024 Unicode®, Inc.",
+        "version": "18.0.0",
+        "copyright": "© 2026 Unicode®, Inc.",
         "trademark": "Unicode and the Unicode Logo are registered trademarks of Unicode, Inc. in the U.S. and other countries.",
         "terms_url": "https://www.unicode.org/terms_of_use.html"
       },

@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 import pathlib
 import shutil
 import subprocess
@@ -22,7 +23,7 @@ spec.loader.exec_module(notice)
 
 class HanNoticeTests(unittest.TestCase):
     def setUp(self):
-        build = ROOT / "build"
+        build = pathlib.Path(os.environ.get("TMPDIR", ROOT / "build"))
         build.mkdir(exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(prefix="han-notices-", dir=build)
         self.addCleanup(self.temporary.cleanup)
@@ -59,6 +60,15 @@ class HanNoticeTests(unittest.TestCase):
         self.notice.write_text(notice.render_notice(self.registry, self.scopes))
         self.check()
 
+    def test_mixed_generated_and_authored_notice_scopes(self):
+        self.scopes["unihan"] += ["unihan/han_pinyin.tsv", "unihan/han_simplified.tsv"]
+        self.notice.write_text(notice.render_notice(self.registry, self.scopes))
+        self.check()
+        self.scopes["unihan"].append("../han_pinyin.tsv")
+        self.notice.write_text(notice.render_notice(self.registry, self.scopes))
+        with self.assertRaisesRegex(ValueError, "invalid NOTICE table scope"):
+            self.check()
+
     def test_unknown_pin_and_missing_cns_component_block(self):
         self.pins["unihan"] = {**self.pins["unihan"], "sha256": "0" * 64}
         with self.assertRaisesRegex(ValueError, "source terms unresolved"):
@@ -86,7 +96,7 @@ class HanNoticeTests(unittest.TestCase):
     def test_render_drift_and_icu_copyright_substitution(self):
         original = self.notice.read_text()
         for text in (original.replace("數位發展部", "agency omitted"),
-                     original.replace("© 2024 Unicode®, Inc.", "Copyright © 2016-2025 Unicode, Inc.")):
+                     original.replace("© 2026 Unicode®, Inc.", "Copyright © 2016-2025 Unicode, Inc.")):
             self.notice.write_text(text)
             with self.assertRaisesRegex(ValueError, "differs from source terms"):
                 self.check()
@@ -147,15 +157,36 @@ class HanNoticeTests(unittest.TestCase):
 
     def test_actual_inventory_and_legacy_unicode_copy(self):
         scopes = notice.check_source(self.registry)
-        self.assertEqual(scopes["unihan"], ["unihan/han_pinyin.tsv", "unihan/han_simplified.tsv"])
-        self.assertEqual(scopes["cns"], [])
-        self.assertEqual(scopes["opencc"], [])
+        partial = sorted(["tgh.tsv", "big5-2.tsv", "core.tsv", "uro.tsv", "extb.tsv", "extc.tsv"])
+        self.assertEqual(scopes["unihan"], sorted(partial + ["unihan/han_pinyin.tsv", "unihan/han_simplified.tsv"]))
+        self.assertEqual(scopes["cns"], partial)
+        self.assertEqual(scopes["opencc"], partial)
+
+    def test_unihan18_terms_bind_generator_pin_and_archive_notice(self):
+        spec = importlib.util.spec_from_file_location("notice_fixture_data", ROOT / "tools/fold-han-data.py")
+        data = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(data)
+        source = self.registry["sources"]["unihan"]
+        self.assertEqual(source["pins"]["unihan"], {
+            "revision": "18.0.0",
+            "sha256": "4c93ea9c1f636451729a840978f1667a53886af37ba854fdcce109721c63d43e",
+            "source": "https://www.unicode.org/Public/18.0.0/ucd/Unihan.zip",
+        })
+        self.assertEqual(source["pins"]["unihan"], {"revision": data.UNIHAN_VERSION,
+                         "sha256": data.UNIHAN_SHA256, "source": data.UNIHAN_URL})
+        self.assertEqual(source["attribution"]["version"], "18.0.0")
+        self.assertEqual(source["attribution"]["copyright"], "© 2026 Unicode®, Inc.")
+        self.pins["unihan"] = {"revision": "16.0.0",
+            "sha256": "b8f000df69de7828d21326a2ffea462b04bc7560022989f7cc704f10521ef3e0",
+            "source": "https://www.unicode.org/Public/16.0.0/ucd/Unihan.zip"}
+        with self.assertRaisesRegex(ValueError, "source terms unresolved"):
+            self.check()
 
     def test_shipped_notice_scopes_match_source_inventory(self):
         text = (notice.HAN / "NOTICE").read_text(encoding="utf-8")
         scopes = notice.notice_scopes(text, self.registry)
         self.assertEqual(scopes, notice.scope_inventory(self.registry))
-        self.assertEqual(scopes["unihan"], ["unihan/han_pinyin.tsv", "unihan/han_simplified.tsv"])
+        self.assertLessEqual({"unihan/han_pinyin.tsv", "unihan/han_simplified.tsv"}, set(scopes["unihan"]))
 
     def test_mixed_inventory_attributes_each_table_to_listed_sources(self):
         self.scopes = {

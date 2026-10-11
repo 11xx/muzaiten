@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>org.11xx.muzaiten</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>Unlicense AND Unicode-3.0</project_license>
+  <project_license>Unlicense AND Unicode-3.0 AND OGDL-Taiwan-1.0 AND Apache-2.0</project_license>
   <name>muzaiten</name>
   <summary>Native music player for local libraries</summary>
 

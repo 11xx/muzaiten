@@ -2800,3 +2800,7 @@
 迲	default	-	qù	Korean-only use; no established Mandarin reading.
 饍	simplified	膳	𳋱	Retain the essential-table policy mapping 饍→膳; the pinned sources do not establish an admissible joining path.
 篒	default	-	yì	Korean-only use; no established Mandarin reading.
+𧭈	family-target	𫍾	family-target:unresolved=𧭈 𫍾 𲂇	Retain the established native pair 𧭈→𫍾 in its unresolved astral family; OpenCC attests this second candidate after the source itself, and Unihan names 𲂇.
+𧭈	opencc	𫍾	𧭈/𫍾	Retain the established native pair 𧭈→𫍾 in its unresolved astral family; OpenCC attests this second candidate after the source itself, and Unihan names 𲂇.
+𨰥	family-target	𫔕	family-target:unresolved=𨰥 𫔕 𲈐	Retain the established native pair 𨰥→𫔕 in its unresolved astral family; OpenCC attests this second candidate after the source itself, and Unihan names 𲈐.
+𨰥	opencc	𫔕	𨰥/𫔕	Retain the established native pair 𨰥→𫔕 in its unresolved astral family; OpenCC attests this second candidate after the source itself, and Unihan names 𲈐.

@@ -5,10 +5,9 @@
 ### Distribution
 
 - Source and binary packages include scoped Han attributions and exact Unicode
-  and OpenCC license copies. Unihan attribution uses its pinned archive notice
-  instead of ICU's copyright line. Package labels identify the authored and
-  Unihan-derived components actually included; reference terms do not claim
-  CNS/OpenCC rare data is shipped.
+  and OpenCC license copies. Unihan attribution retains its exact 18.0.0 archive
+  copyright notice. Package labels include Unicode-3.0, OGDL-Taiwan-1.0 and
+  Apache-2.0 for the generated and partial rare tables actually included.
 
 ### Developer tooling
 
@@ -53,6 +52,13 @@
   version as `muzaiten --version` and exit 0. They answer locally, before any
   socket connection or state, configuration or database access, so they work
   with no running app and create no files.
+- Search tables include 34 selected rare Han ideographs with every exactly
+  attested reading and per-value source provenance, alongside regenerated
+  Unihan 18 tables. Reviewed native pairs 𧭈/𫍾 and 𨰥/𫔕 retain their aliases.
+  匙 uses `chí shi` while 钥匙 retains `shi`; Japanese-only 蟐 and 笹 have no
+  Mandarin reading. 線→线 keeps 缐 separate, and 麪 retains 面. These files
+  provide partial coverage of six rare sets.
+
 - Opt-in local aggregate taste-profile export/import in `Radio > Taste profiles…`
   and `muzaitenctl radio-taste`, with exact previews, five-track support floors,
   strict versioned JSON, explicit replacement and atomic writes (exclusive

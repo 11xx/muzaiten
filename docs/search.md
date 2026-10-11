@@ -94,6 +94,15 @@ The authored files proceed through `tgh`, `big5-2`, `core`, `uro`, `exta`,
 coverage with a `# complete` header line; a file without it may still be
 partial while its set is being authored.
 
+Six partial rare files contain 34 selected ideographs with every exactly attested
+reading under each character and per-value provenance. Essential-table policies
+remain separate: 匙 has `chí shi`, with `shi` in 钥匙; Japanese-only 蟐 and 笹
+have no Mandarin reading. The native pairs 𧭈/𫍾 and 𨰥/𫔕 retain reviewed
+continuity despite competing Unihan variants. 線 folds to 线 while 缐 keeps its
+written key; the graph excludes their exact relation and records that evidence.
+麪 retains the reviewed common form 面. Essential mappings for 餽, 関, 顕, 賛,
+闘, 錬, 鑵, 鴈 and 饍 are explicit policies rather than guarded source joins.
+
 Rare tables carrying source-pin headers require exact entries in
 `tools/fold-han-source-terms.json`, scoped NOTICE attribution and complete
 license copies. The CNS pronunciation and code-mapping route is
