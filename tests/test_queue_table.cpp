@@ -593,6 +593,19 @@ private slots:
         QTest::keyClick(view, Qt::Key_Slash);
         QTest::keyClicks(edit, QStringLiteral("1x"));
         QCOMPARE(edit->text(), QStringLiteral("1x"));
+        QTest::keyClick(edit, Qt::Key_Escape);
+        QTest::keyClick(edit, Qt::Key_Escape);
+        QVERIFY(!bar->isSearchVisible());
+
+        // Return given to a search command runs it instead of confirming.
+        table.setKeyBindingOverrides({{QString::fromLatin1(QueueAction::SearchNext), {QKeySequence(Qt::Key_Return)}}});
+        table.setCurrentRow(0);
+        QTest::keyClick(view, Qt::Key_Slash);
+        QTest::keyClicks(edit, QStringLiteral("1"));
+        const int firstMatch = table.currentRow();
+        QTest::keyClick(edit, Qt::Key_Return);
+        QVERIFY(bar->isSearchVisible());
+        QVERIFY(table.currentRow() != firstMatch);
     }
 
     void followingThePlayingRowKeepsAVisibleRowInPlace()

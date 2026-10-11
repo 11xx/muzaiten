@@ -120,10 +120,14 @@ private slots:
         QVERIFY(!parsed.contains(QStringLiteral("clear_queue")));
         QVERIFY(keyBindingOverridesFromJson(QStringLiteral("[1,2]"), scope).isEmpty());
 
-        // A preset's two-key binding kept beside an added key survives storage.
+        // A preset's two-key binding kept beside an added key survives storage;
+        // one with a window key in either stroke does not.
         const KeyBindingScope &explorerScope = *keyBindingScope(explorer);
         const KeyBindingOverrides chord{{QString::fromLatin1(ExplorerAction::ScrollToTop), {key("G, G"), key("Home")}}};
         QCOMPARE(keyBindingOverridesFromJson(keyBindingOverridesToJson(chord), explorerScope), chord);
+        const KeyBindingOverrides windowChords = keyBindingOverridesFromJson(
+            QStringLiteral(R"({"add_to_queue":["1, J","G, 2","G, J"]})"), explorerScope);
+        QCOMPARE(windowChords.value(QString::fromLatin1(ExplorerAction::AddToQueue)), QList<QKeySequence>{key("G, J")});
     }
 
     void shiftedSymbolsMatchTheirBinding()

@@ -64,7 +64,8 @@ ResolvedKeyBindings resolveKeyBindings(const KeyBindingMap &preset, const KeyBin
 bool isTextKey(const QKeySequence &key);
 
 QString keyBindingOverridesToJson(const KeyBindingOverrides &overrides);
-// Unknown actions, malformed keys and keys reserved by the window are dropped.
+// Unknown actions, malformed keys and keys with a stroke reserved by the window
+// are dropped.
 KeyBindingOverrides keyBindingOverridesFromJson(const QString &json, const KeyBindingScope &scope);
 
 // One key as screens match it: symbol keys reached with Shift (!, ~, ?) match

@@ -270,8 +270,12 @@ KeyBindingOverrides keyBindingOverridesFromJson(const QString &json, const KeyBi
                 || parsed.toString(QKeySequence::PortableText).compare(text, Qt::CaseInsensitive) != 0) {
                 continue;
             }
+            bool reserved = false;
+            for (int stroke = 0; stroke < parsed.count(); ++stroke) {
+                reserved = reserved || !reservedWindowKeyUse(QKeySequence(parsed[stroke])).isEmpty();
+            }
             const QKeySequence key = normalizedKey(parsed);
-            if (reservedWindowKeyUse(key).isEmpty() && !keys.contains(key)) {
+            if (!reserved && !keys.contains(key)) {
                 keys.push_back(key);
             }
         }

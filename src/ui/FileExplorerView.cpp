@@ -63,6 +63,27 @@ QString keyBindingHintText(const KeyBindingMap &bindings)
     return parts.join(QLatin1Char(' '));
 }
 
+bool isModifierKey(int key)
+{
+    switch (key) {
+    case Qt::Key_Shift:
+    case Qt::Key_Control:
+    case Qt::Key_Meta:
+    case Qt::Key_Alt:
+    case Qt::Key_AltGr:
+    case Qt::Key_Super_L:
+    case Qt::Key_Super_R:
+    case Qt::Key_Hyper_L:
+    case Qt::Key_Hyper_R:
+    case Qt::Key_CapsLock:
+    case Qt::Key_NumLock:
+    case Qt::Key_ScrollLock:
+        return true;
+    default:
+        return false;
+    }
+}
+
 enum ItemType {
     DirectoryItem = 1, // start at 1 so an unset TypeRole (toInt() == 0) is never a valid type
     TrackItem,
@@ -1110,12 +1131,18 @@ bool FileExplorerView::eventFilter(QObject *watched, QEvent *event)
         return QWidget::eventFilter(watched, event);
     }
 
+    if (watched == m_tree && event->type() == QEvent::FocusOut) {
+        m_pendingChord = QKeySequence();
+    }
     if (watched != m_tree || event->type() != QEvent::KeyPress) {
         return QWidget::eventFilter(watched, event);
     }
 
     auto *keyEvent = static_cast<QKeyEvent *>(event);
     const int key = keyEvent->key();
+    if (isModifierKey(key)) {
+        return false;
+    }
     const auto modifiers = keyEvent->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier | Qt::ShiftModifier);
     const QKeySequence pressed = keySequenceForEvent(keyEvent);
 

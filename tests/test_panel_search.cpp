@@ -197,6 +197,27 @@ private slots:
         QTest::keyClicks(edit, QStringLiteral("ax"));
         QCOMPARE(edit->text(), QStringLiteral("ax"));
     }
+
+    // Return given to Close search clears the query instead of confirming it.
+    void returnRunsAnEditedSearchCommand()
+    {
+        FakePanel panel{{QStringLiteral("Axe"), QStringLiteral("Box")}, 0};
+        QWidget focusWidget;
+        PanelSearchController controller;
+        QLineEdit *edit = controller.findChild<QLineEdit *>();
+        QVERIFY(edit != nullptr);
+        controller.registerTarget(panel.makeTarget(&focusWidget));
+        controller.setActivePanel(MainPanelId::Artists, false);
+        controller.activateForMainView();
+        controller.setKeyBindingOverrides(
+            {{QString::fromLatin1(MainPanelAction::Escape), {QKeySequence(Qt::Key_Return)}}});
+
+        QTest::keyClick(&focusWidget, Qt::Key_Slash);
+        QTest::keyClicks(edit, QStringLiteral("box"));
+        QTest::keyClick(edit, Qt::Key_Return);
+        QVERIFY(controller.isVisible());
+        QVERIFY(edit->text().isEmpty());
+    }
 };
 
 QTEST_MAIN(TestPanelSearch)

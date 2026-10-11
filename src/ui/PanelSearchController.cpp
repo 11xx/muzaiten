@@ -684,11 +684,6 @@ bool PanelSearchController::handlePanelKey(QKeyEvent *event, MainPanelId panel)
 
 bool PanelSearchController::handleSearchKey(QKeyEvent *event)
 {
-    if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
-        && (event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) == 0) {
-        confirmSearch();
-        return true;
-    }
     const QKeySequence pressed = keySequenceForEvent(event);
     const QString action = isTextKey(pressed) ? QString() : m_keyBindings.value(pressed);
     if (action == QString::fromLatin1(MainPanelAction::Escape)) {
@@ -701,6 +696,11 @@ bool PanelSearchController::handleSearchKey(QKeyEvent *event)
     }
     if (action == QString::fromLatin1(MainPanelAction::SearchPrevious)) {
         cycleMatch(-1);
+        return true;
+    }
+    if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
+        && (event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) == 0) {
+        confirmSearch();
         return true;
     }
     if (event->modifiers() == Qt::ControlModifier && event->key() == Qt::Key_F) {

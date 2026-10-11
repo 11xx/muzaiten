@@ -225,10 +225,6 @@ bool PanelSearchBar::handleEditKey(QKeyEvent *event)
     const bool hasCtrlAltMeta =
         (mods & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) != 0;
 
-    if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) && !hasCtrlAltMeta) {
-        confirm();
-        return true;
-    }
     const QKeySequence pressed = keySequenceForEvent(event);
     if (m_escapeKeys.contains(pressed)) {
         escape();
@@ -240,6 +236,10 @@ bool PanelSearchBar::handleEditKey(QKeyEvent *event)
     }
     if (m_previousKeys.contains(pressed)) {
         cycle(-1);
+        return true;
+    }
+    if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) && !hasCtrlAltMeta) {
+        confirm();
         return true;
     }
     if (mods == Qt::ControlModifier && event->key() == Qt::Key_F) {

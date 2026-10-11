@@ -4273,6 +4273,25 @@ print(json.dumps({"protocol_version": 1, "request_id": request["request_id"], "e
         QTest::keyClick(tree, Qt::Key_G);
         QTest::keyClick(tree, Qt::Key_G);
         QCOMPARE(tree->currentItem(), tree->topLevelItem(0));
+
+        // Losing focus drops a half-typed chord.
+        QTest::keyClick(tree, Qt::Key_G, Qt::ShiftModifier);
+        QTest::keyClick(tree, Qt::Key_G);
+        QFocusEvent focusOut(QEvent::FocusOut, Qt::ActiveWindowFocusReason);
+        QCoreApplication::sendEvent(tree, &focusOut);
+        QTest::keyClick(tree, Qt::Key_G);
+        QCOMPARE(tree->currentItem(), tree->topLevelItem(2));
+
+        // A modifier pressed between a chord's keys does not break it.
+        view.setKeyBindingOverrides(keyBindingOverridesFromJson(QStringLiteral(R"({"add_to_queue":["G, Ctrl+J"]})"),
+                                                                *keyBindingScope(QString::fromLatin1(KeyBindingScopeId::Explorer))));
+        tree->setCurrentItem(tree->topLevelItem(0));
+        adds.clear();
+        QTest::keyClick(tree, Qt::Key_G);
+        QTest::keyPress(tree, Qt::Key_Control);
+        QTest::keyClick(tree, Qt::Key_J, Qt::ControlModifier);
+        QTest::keyRelease(tree, Qt::Key_Control, Qt::ControlModifier);
+        QCOMPARE(adds.count(), 1);
     }
 
     void savedQueueKeysApplyWhenTheQueueScreenIsBuilt()
