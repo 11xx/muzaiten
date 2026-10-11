@@ -2,35 +2,6 @@
 
 ## [Unreleased]
 
-### Added
-
-- `Settings > Keybinds…` changes keys. On the Queue, Library and File
-  explorer screens, give an action other keys, add keys to actions that have
-  none by default, remove keys, and reset an action or a whole screen to its
-  preset. A key another action uses asks before it moves, window keys are
-  refused with the reason, and **Find a key…** shows what a pressed key does.
-  A key given to an action wins over the screen's own use of it, and a removed
-  key does nothing. Changed keys are saved with the app's settings, and the
-  file explorer's key hints follow them.
-- `Shift+N` / `Shift+P` move the selected queue rows one place down or up, in
-  the queue view and the library's queue sidebar. A contiguous selection moves
-  as a block and stays selected; otherwise the cursor row moves.
-
-### Changed
-
-- Playing a track keeps the queue where it is: the cursor moves to the playing
-  row and the queue scrolls only when that row is off screen. `1` and `o` in
-  the queue view still center the playing row, also with the `#` column hidden.
-
-### Fixed
-
-- The file explorer's `!` (play next) and `~` (home folder) keys work. A
-  symbol typed with Shift never matched its binding.
-- The file explorer's vim-style `G` goes to the bottom of the list.
-- Clicking the player bar's buttons or seek bar, or the status-bar buttons, no
-  longer takes keyboard focus from the current view, so its keys keep working
-  without pressing Tab.
-
 ## [2026.10.11]
 
 ### Distribution
@@ -207,6 +178,17 @@
   (`∶`, `⁄`, `’`, `×`, CJK brackets) folds onto ASCII, styled Unicode letters
   (`𝓗𝓮𝓵𝓵𝓸`, `🅲🅻🅴🅰🅽`) read as plain letters, and digits of every script
   read as `0`-`9`.
+- `Settings > Keybinds…` changes keys. On the Queue, Library and File
+  explorer screens, give an action other keys, add keys to actions that have
+  none by default, remove keys, and reset an action or a whole screen to its
+  preset. A key another action uses asks before it moves, window keys are
+  refused with the reason, and **Find a key…** shows what a pressed key does.
+  A key given to an action wins over the screen's own use of it, and a removed
+  key does nothing. Changed keys are saved with the app's settings, and the
+  file explorer's key hints follow them.
+- `Shift+N` / `Shift+P` move the selected queue rows one place down or up, in
+  the queue view and the library's queue sidebar. A contiguous selection moves
+  as a block and stays selected; otherwise the cursor row moves.
 
 ### Changed
 
@@ -258,6 +240,9 @@
   in current use, most common first: modern readings replace dated dictionary
   defaults (`fo` finds `佛`, `shei` finds `誰`), and Japanese shinjitai fold
   like their Chinese counterparts (`楽` matches `乐` and `樂`).
+- Playing a track keeps the queue where it is: the cursor moves to the playing
+  row and the queue scrolls only when that row is off screen. `1` and `o` in
+  the queue view still center the playing row, also with the `#` column hidden.
 
 ### Fixed
 
@@ -403,6 +388,12 @@
   sort name no longer stops an anchored term from matching. Invisible
   direction marks and word joiners in tags no longer split a match. The search
   cache rebuilds once.
+- The file explorer's `!` (play next) and `~` (home folder) keys work. A
+  symbol typed with Shift never matched its binding.
+- The file explorer's vim-style `G` goes to the bottom of the list.
+- Clicking the player bar's buttons or seek bar, or the status-bar buttons, no
+  longer takes keyboard focus from the current view, so its keys keep working
+  without pressing Tab.
 
 ## [2026.9.11]
 
