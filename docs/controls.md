@@ -3,7 +3,8 @@
 ## Global
 
 - `1` — queue view (press again to reveal the currently playing row)
-- `2` — library panels view (artist sidebar, album grid, track table)
+- `2` — library panels view (artist sidebar, album grid, track table); press
+  again to switch to the music explorer
 - `3` — toggle between the library explorer and free-roam file explorer
 - `4` — library search view ([search.md](search.md) has the full key
   table and query syntax)
@@ -14,7 +15,8 @@
 - `Ctrl+scroll` over the queue, search results, or file explorers —
   adjust row height
 
-Keybindings are customizable at `Settings > Keybinds…`.
+`Settings > Keybinds…` lists the keys and selects queue, library-panel, and
+file-explorer key profiles. Global, search, and playlist keys are fixed.
 
 The player bar carries the current track's album art on every view except the
 library ones, where the right sidebar shows it at full width. Right-click the
@@ -93,8 +95,8 @@ and are not restored after restart.
   `Drift with what plays` for new seeded and artist sessions.
 - `Radio > Customization…` / `Radio > Genre curation…` — engine tuning
   ([radio.md](radio.md)).
-- `Settings > Track information panel…` — fields shown in the right-side
-  info pane. `Settings > Album art resolution…` — cached artwork size.
+- `View > Track information panel…` — fields shown in the right-side
+  info pane. `View > Album art resolution…` — cached artwork size.
 Both scrobbling entries open one window with two tabs, `Scrobblers` and
 `Listening history`; the entry you use decides which tab it opens on.
 
@@ -181,13 +183,16 @@ playback pauses. Choosing another output meanwhile continues the held track
 there, at its position, playing or paused as it was. A missing output stays
 selected in the dialog, marked `(unavailable)`; a fallback never replaces it.
 
-Moving muzaiten's stream to another output in a mixer takes effect at once
-for every stream that follows, including the next track and a sample-rate
-change, and a second later becomes the new choice, saved as if picked in the
-dialog, also while muzaiten plays from the tray without its window. A move the sound server made because the output the stream was on
-disappeared is a fallback and never becomes the choice. Both transports
-see where the stream is linked: PulseAudio reports it, and with the PipeWire
-transport muzaiten follows its own stream's links in the PipeWire graph. A
+With a chosen output, moving muzaiten's stream to another output in a mixer
+takes effect at once for every stream that follows, including the next track
+and a sample-rate change. A second later it becomes the new choice, saved as
+if picked in the dialog, also while muzaiten plays from the tray without its
+window. With `System managed`, the session manager remembers mixer moves;
+muzaiten keeps that setting. A move the sound server made because the output
+the stream was on disappeared is a fallback and never becomes the choice.
+Both transports see where the stream is linked: PulseAudio reports it, and
+with the PipeWire transport muzaiten follows its own stream's links in the
+PipeWire graph. A
 build without PipeWire support cannot do the latter, so there Auto uses the
 PulseAudio transport, and an explicit PipeWire choice says in the status line
 that mixer moves are not followed.
@@ -219,10 +224,12 @@ not change the tags or stored metadata.
 
 Selectable keybinding profiles from the explorer context menu:
 
-- **Vim-style**: `j/k/h/l` move, `Space` play, `a` add, `p` play next,
+- **Vim-style**: `j/k/h/l` move, `Space` play, `a` add to playlist,
+  `q` add to queue, `p` play next,
   `i` import, `f` open containing directory, `b` jump to start folder,
   `~` home.
-- **Emacs/Dired-style**: `n/p` move, `Space` play, `s` add, `!` play
+- **Emacs/Dired-style**: `n/p` move, `Space` play, `a` add to playlist,
+  `s` add to queue, `!` play
   next, `i` import, `f` open containing directory, `b` jump to start
   folder, `~` home.
 

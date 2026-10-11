@@ -11,6 +11,9 @@
 
 ### Developer tooling
 
+- A pinned hosted Linux toolchain and portable correctness packet cover local
+  CLI versions, scan read failures, read-only feature diagnostics, and taste
+  seed bounds. Hosted tests run without root and retain their CTest output.
 - A single exact-pin source-term registry generates Han NOTICE statements and
   table scopes. Unknown pins, incomplete CNS agency/year/title/version
   attribution, missing legal texts and inaccurate OpenCC modified-file notices
@@ -34,6 +37,11 @@
   `kTGHZ2013` reading, or its zh-Hans `kMandarin` reading among several;
   conflicting evidence requires an exact reviewed choice. Offline fixtures cover compatibility
   endpoints, malformed reference readings and all cached rare tiers.
+- Rare Han assembly retains held source witnesses and staged rows in its
+  artifacts. Reviewed family partitions require pinned evidence of distinct
+  written use; source order alone cannot justify a split. Reading ranks follow
+  source evidence, including attested exceptional CNS syllables, and outer
+  OpenCC findings are classified before blocking counts are reported.
 - Han generation and checks use pinned Unihan 18.0.0 independently of Python's
   Unicode version, retaining runtime category filtering for keys and mapping
   targets. Unsupported default targets are withheld without choosing another
@@ -62,11 +70,12 @@
 
 - Opt-in local aggregate taste-profile export/import in `Radio > Taste profiles…`
   and `muzaitenctl radio-taste`, with exact previews, five-track support floors,
-  strict versioned JSON, explicit replacement and atomic writes (exclusive
-  creation on drives without hard links). Exports cover playable tracks in
-  library-enabled source directories and leave out tracks marked "Don't learn
-  from this". Imported profiles become named radio seeds with a bounded
-  genre/feature score bias and named pick reasons; stopping radio deactivates a
+  strict versioned JSON and explicit replacement. File publication is atomic
+  where hard links are supported; other drives use exclusive creation.
+  Exports cover playable tracks in library-enabled source directories and leave
+  out tracks marked "Don't learn from this". Imported profiles become named
+  radio seeds with a bounded genre/feature score bias and named pick reasons;
+  stopping radio deactivates a
   seed. Exchange files round shares and quartiles to hundredths or whole BPM and
   omit identifiers, raw counts and listening-history data. No automatic export
   or external sharing is provided. Quantization limits inference without
@@ -76,9 +85,10 @@
   replacement checkbox.
 
 - Local scalar feature-pack export/import through `muzaiten-features pack`,
-  with strict versioned NDJSON, dry-run counts and atomic writes. Each record
-  carries a group representative's own analysis under that file's
-  decoded-audio hash; export skips and counts local rows that fail
+  with strict versioned NDJSON and dry-run counts. Imports use one transaction;
+  file publication is atomic where hard links are supported and uses exclusive
+  creation elsewhere. Each record carries a group representative's own analysis
+  under that file's decoded-audio hash; export skips and counts local rows that fail
   validation. Adoption requires exact representative decoded-audio hashes and
   compatible extractor versions. Import fills missing and stale rows, which
   saves decoding after a DSP-version upgrade, and replaces current rows only
@@ -91,7 +101,8 @@
   `muzaitenctl radio-weights`, preserving scoring weights and session decay
   in versioned JSON. Imports offer a preview and explicit replacement;
   learned and uncertain-origin exports require consent. Profile writes are
-  atomic, and rejected exchange files leave the recipient store unchanged.
+  atomic with hard-link support or `--replace`, and use exclusive creation
+  otherwise. Rejected exchange files leave the recipient store unchanged.
   CLI import refuses a running app so its later profile save cannot discard
   an imported profile.
 - GUI search shows how many matches are hidden by exclusion patterns, including
@@ -102,14 +113,15 @@
   transport from the output. While it is missing, playback waits at its
   position and resumes when it returns, or optionally plays through the
   system output until then; the choice is never replaced by a fallback. A
-  mixer move to another output holds from the very next stream and becomes
+  mixer move off a chosen output holds from the very next stream and becomes
   the new choice, with the PulseAudio and the native PipeWire transport
   alike (the latter needs a build with `libpipewire-0.3`). The dialog,
   the status bar and `muzaitenctl status` report the transport actually in
   use, where playback is going, and any wait or fallback.
-- Search combines every reading of Chinese polyphones across a title: typing
-  `yueqing` finds 乐清, and a title can match different readings in different
-  words without losing its established Japanese readings.
+- Search combines readings of Chinese polyphones across a title, up to 64
+  pinyin variants: `yueqing` finds 乐清, and `changfa` or `zhangfa` finds 长发.
+  A title can match different readings in different words without losing its
+  established Japanese readings; word rows settle their own spans.
 - Search reads about 3,500 Chinese words in context, including traditional
   spellings. 快乐 matches `kuaile` without also matching `kuaiyue`, and 长城
   matches `changcheng` without also matching `zhangcheng`. Words with two
@@ -136,9 +148,6 @@
   Slavic Cyrillic spellings with Ukrainian, Belarusian and Serbian letters read
   their own way, Western Armenian, German-style `ae`/`oe`/`ue`, and ü as `i`
   (`miller` finds `Müller`). Results highlight whichever reading matched.
-- A Chinese character with multiple readings matches a query typed with any
-  of them (`changfa` or `zhangfa` finds `长发`), unless a word reading settles
-  its span (`chongqing` for `重庆`).
 - Search matches Thai and Lao by romanization, read syllable by syllable
   with their leading and unwritten vowels: RTGS (`sawatdi`, `khopkhun`,
   `krungthepmahanakhon`) and the common spelling (`sawasdee`, `khobkhun`,
@@ -167,21 +176,20 @@
 
 ### Changed
 
-- CLI search streams a fresh saved index without retaining every distinct
-  artist and album string in an intern pool for the entire cache read.
+- The terminal fzf picker reads a fresh saved index with less memory, releasing
+  each row's metadata after streaming it to fzf. Query-based terminal searches
+  still load the full index.
 - Fuzzy GUI searches count matches hidden by exclusions without scoring every
   hidden candidate. The hidden-count label keeps its space while a new query
   runs and follows the current palette.
 - GUI search keeps answering queries while a completed index is saved to the
   cache. Superseded or canceled writes are discarded, and source changes during
   persistence trigger a refresh before a complete current cache is published.
-- Streaming search-index builds grow record and mask storage amortized across
-  batches, avoiding repeated copies of the existing index.
-- DSD playback planning survives closing and reopening the window. A track
-  requiring device-takeover approval waits for the first window's prompt at
-  startup and is skipped after the window has been closed to the tray. An
-  output choice stays active for the process if saving it fails, with the
-  error shown in the window.
+- Cold GUI search indexes large libraries faster by avoiding repeated copies of
+  the existing records as new batches arrive.
+- DSD playback planning survives closing and reopening the window. A newly
+  started track requiring device-takeover approval is skipped while the window
+  is closed to the tray; reopening it makes approval available again.
 - Typing a General Standard simplified form such as 𬣙 or 𫐄 finds text
   written with its traditional form (訏, 軏), and the reverse.
 - Fuzzy free-text search matches a file path within one folder name or the
@@ -219,6 +227,9 @@
 
 ### Fixed
 
+- An output choice stays active for the process if saving it fails, with the
+  storage error shown in the status bar. The next launch uses the last saved
+  profile.
 - Starting taste radio from a seed that exceeds 64 KiB only once genre aliases
   are applied now reports that (`radio: taste-seed-too-large`, and a matching
   status-bar message) instead of calling the seed or candidate pool
@@ -264,9 +275,9 @@
   refused seek no longer republishes Playing after its error. An output that
   returns after such a failure does not restart the stopped track.
 
-- A pipeline error while playback resumes from the beginning is reported once and
-  stays the reported state. The abandoned start cannot begin playback or replace
-  that error when its preroll completes afterward; Play starts the track again.
+- After a pipeline error while playback resumes from the beginning, late preroll
+  completion or state reports do not start playback or overwrite that
+  zero-preroll error. Play starts the track again.
 
 - Feature-store writers (`refresh`, `neighbors`, `pack export` and `pack import`)
   share one writer lock per store, keyed by the store's canonical path. A

@@ -58,8 +58,8 @@ tool offers `convert` and `youtube` subcommands.
 Playing a playlist mirrors it into the queue and keeps them linked: edits
 flow both ways, and the track context menus offer "…(don't save to
 playlist)" variants for queueing something transient without touching the
-playlist. `Queue > Detach queue from playlist` breaks the link; saved
-queues are managed from the same view as playlists.
+playlist. Right-click the queue and choose `Detach queue from playlist` to
+break the link; saved queues are managed from the same view as playlists.
 
 ## Saved queues
 

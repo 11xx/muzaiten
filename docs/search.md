@@ -313,6 +313,7 @@ Rapidly superseded queries are coalesced before scanning the index.
 | `Tab` | Mark current row, advance cursor |
 | `Ctrl+Space` | Toggle mark on current row |
 | `Ctrl+A` | Mark all results |
+| `a` (browse mode) | Add selected results to playlist |
 | `Ctrl+F` | Toggle fuzzy mode (default: exact orderless substring) |
 | `Esc` / `Ctrl+G` | Clear the query; press again to leave text-input mode |
 | `/` | Return focus to the search box (from browse mode) |
@@ -339,16 +340,20 @@ running. Terminal search ignores GUI exclusions.
 | `artist:davis` | Match only in artist/album-artist field |
 | `album:blue` | Match only in album title |
 | `title:what` | Match only in track title |
-| `path:/gak` | Match only in file path |
+| `path:/music` | Match only in file path |
 | `ext:flac` | Exact file-extension filter (the name on disk) |
 | `codec:vorbis` | Codec filter; differs from `ext:` for containers, so an `.oga` may be `vorbis`, `opus` or `flac`, and an `.m4a` may be `aac` or `alac` |
 | `khz:>=96` | Sample rate ≥ 96 kHz |
-| `hz:44100` | Sample rate = 44100 Hz |
+| `hz:=44100` | Sample rate = 44100 Hz |
 | `kbps:>320` | Bitrate > 320 kbps |
-| `ch:2` | Stereo (2 channels) |
+| `ch:=2` | Stereo (2 channels) |
 | `rating:>=80` | User rating ≥ 80/100 |
 | `year:>=2000` | Release year ≥ 2000 |
 | `dur:>3:30` | Duration > 3 min 30 sec |
+
+Bare numbers in `year:`, `rating:`, `khz:`, `hz:`, `kbps:` and `ch:` mean
+at least that value; use `=` for equality. A bare `dur:` value means exact
+duration.
 
 The codec is recorded when a file is scanned. A library scanned before codecs
 were read separately from extensions still stores the extension there, so
@@ -417,21 +422,24 @@ muzaitenctl search --cache-info       # JSON decision, source revision and recor
 
 With no query in a terminal (and `fzf` installed) it launches an **fzf
 picker** over the whole library — multi-line rows, romaji matches kanji,
-`Enter` queues the selection and `Alt+Enter` plays it. Piped or without fzf,
-a bare `search` dumps the whole library as TSV. First run builds the cache
+`Enter` queues the selection and `Alt+Enter` plays it. Piped, a bare `search`
+dumps the whole library as TSV. In a terminal without fzf, it reports an error;
+pass a query or pipe the output instead. First run builds the cache
 (a few seconds); later runs reuse a fresh cache. Stale caches are rebuilt for
-normal CLI searches and the picker without requiring `--refresh`. A warm CLI
-cache read emits each row and releases its repeated metadata strings as
-it goes; rebuilding a missing or stale cache holds the records until it has
-written the replacement file.
+normal CLI searches and the picker without requiring `--refresh`. The picker
+streams a fresh cache to fzf and releases each row's metadata as it goes;
+rebuilding a missing or stale cache holds the records until it has written the
+replacement file. Query-based searches and noninteractive dumps load the full
+index in memory.
 
 `--cache-info` resolves the cache without displaying library contents. Its
 `muzaiten-search-cache/1` report includes `reason`, `used_cache`, `rebuilt`,
 `source_revision` and `track_count`. Reasons include `hit`, `content-revision`,
 `database-identity`, `database-path`, `schema-version`, `fold-version`,
-`missing-cache`, `invalid-cache` and `forced-refresh`. An invalid cache detected
-after streaming has already emitted rows fails rather than mixing a second
-database stream into those rows; retry with `--refresh` in that case.
+`missing-cache`, `invalid-cache` and `forced-refresh`. In the picker, an invalid
+cache detected after streaming has already emitted rows fails rather than
+mixing a second database stream into those rows; retry with `--refresh` in
+that case.
 
 For free-text *meaning* search ("melancholic shoegaze") press `Ctrl+S`
 inside the Search view: a semantic search dialog embeds the description

@@ -14,7 +14,8 @@ packaging/
 ├── build-release.sh                 # build + tar a release artifact
 └── aur/
     ├── muzaiten-git/                 # PKGBUILD + .SRCINFO (source/VCS)
-    └── muzaiten-bin/                 # PKGBUILD + .SRCINFO (prebuilt)
+    ├── muzaiten-bin/                 # PKGBUILD + .SRCINFO (prebuilt)
+    └── muzaiten-features-clap/       # PKGBUILD + .SRCINFO (optional provider)
 ```
 
 The desktop entry, icon, and metainfo are installed by the normal CMake
@@ -70,7 +71,7 @@ muzaiten can ship a default Last.fm API key + shared secret so scrobbling works
 out of the box. These are injected **at build time** (`-DMUZAITEN_LASTFM_API_KEY`,
 `-DMUZAITEN_LASTFM_SHARED_SECRET`); they never live in the source tree, and a
 build with no key simply leaves Last.fm inactive until the user supplies their
-own (`Scrobblers > Last.fm API settings…`, or the `LASTFM_API_KEY` /
+own (`History > Scrobblers > Last.fm API settings…`, or the `LASTFM_API_KEY` /
 `LASTFM_SHARED_SECRET` env vars).
 
 **Is it safe / obfuscated enough? Be honest with yourself: no client-side secret
