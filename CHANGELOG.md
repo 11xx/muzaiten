@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [2026.10.11]
+
 ### Distribution
 
 - Source and binary packages include scoped Han attributions and exact Unicode
