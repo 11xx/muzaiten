@@ -126,7 +126,10 @@ std::optional<DeviceState> parseDevice(const QJsonObject &obj)
 }
 
 // pw-dump without waiting for it: the answer arrives through |done| once the
-// process exits, fails or times out.
+// process exits, fails or times out, unless |context| is destroyed first. The
+// process belongs to no caller: destroying a running QProcess waits for it to
+// exit, so a caller that goes away only has it killed, and it is released
+// once it has exited.
 void dumpWithoutBlocking(QObject *context, std::function<void(std::optional<QByteArray>)> done)
 {
     const QString program = QStringLiteral("pw-dump");
@@ -134,38 +137,37 @@ void dumpWithoutBlocking(QObject *context, std::function<void(std::optional<QByt
         done(std::nullopt);
         return;
     }
-    auto *proc = new QProcess(context);
+    auto *proc = new QProcess;
     auto *timeout = new QTimer(proc);
     timeout->setSingleShot(true);
+    const QPointer<QObject> caller(context);
     auto answer = std::make_shared<std::function<void(std::optional<QByteArray>)>>(std::move(done));
-    const auto finish = [proc, answer](std::optional<QByteArray> out) {
-        if (!*answer)
-            return;
+    const auto finish = [answer, caller](std::optional<QByteArray> out) {
         const auto callback = std::exchange(*answer, {});
-        if (proc->state() == QProcess::NotRunning) {
-            proc->deleteLater();
-        } else {
-            // A killed pw-dump is reaped before its QProcess goes.
-            QObject::connect(proc, &QProcess::finished, proc, &QObject::deleteLater);
-        }
-        callback(std::move(out));
+        if (callback && caller)
+            callback(std::move(out));
     };
     QObject::connect(proc, &QProcess::finished, proc, [proc, finish](int exitCode, QProcess::ExitStatus status) {
-        if (status != QProcess::NormalExit || exitCode != 0) {
-            finish(std::nullopt);
-            return;
-        }
-        finish(proc->readAllStandardOutput());
+        finish(status == QProcess::NormalExit && exitCode == 0 ? std::optional(proc->readAllStandardOutput())
+                                                                : std::nullopt);
+        proc->deleteLater();
     });
     QObject::connect(proc, &QProcess::errorOccurred, proc, [proc, finish](QProcess::ProcessError error) {
         if (error == QProcess::FailedToStart) {
             finish(std::nullopt);
+            proc->deleteLater();
         }
     });
     QObject::connect(timeout, &QTimer::timeout, proc, [proc, finish]() {
         proc->kill();
         finish(std::nullopt);
     });
+    if (context != nullptr) {
+        QObject::connect(context, &QObject::destroyed, proc, [proc, answer]() {
+            *answer = {};
+            proc->kill();
+        });
+    }
     proc->start(program, {});
     timeout->start(kProcessTimeoutMs);
 }

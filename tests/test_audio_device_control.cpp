@@ -3,6 +3,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QFileSystemWatcher>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -89,6 +90,7 @@ private slots:
     // that hangs answers with an empty graph once its time is up.
     void systemReadDoesNotWaitForPwDump()
     {
+        QTest::failOnWarning(QRegularExpression(QStringLiteral("Destroyed while process")));
         QTemporaryDir bin;
         QVERIFY(bin.isValid());
         const auto writeTool = [&bin](const QByteArray &script) {
@@ -129,8 +131,34 @@ private slots:
         QVERIFY(clock.elapsed() < 200);
         QTRY_VERIFY_WITH_TIMEOUT(answer.has_value(), 6000);
         QVERIFY(answer->objects.isEmpty());
-        // The killed pw-dump is reaped and its process object released.
-        QTRY_VERIFY(context.findChildren<QProcess *>().isEmpty());
+
+        // A caller that goes away mid-read is not held up by the process and
+        // gets no answer; the process is killed and released after it exits.
+        writeTool("#!/bin/sh\nsleep 1\necho '[]'\n");
+        bool answered = false;
+        auto *leaving = new QObject;
+        fixture.replaced().dumpAsync(leaving, [&answered](std::optional<QByteArray>) { answered = true; });
+        clock.restart();
+        delete leaving;
+        QVERIFY(clock.elapsed() < 200);
+        QTest::qWait(1500);
+        QVERIFY(!answered);
+
+        // A timed-out read whose answer ends its caller: the caller's
+        // destruction does not wait for the killed process either.
+        writeTool("#!/bin/sh\nexec sleep 30\n");
+        auto *ending = new QObject;
+        qint64 deleteMs = -1;
+        fixture.replaced().dumpAsync(ending, [&ending, &deleteMs](std::optional<QByteArray>) {
+            QElapsedTimer deleting;
+            deleting.start();
+            delete ending;
+            ending = nullptr;
+            deleteMs = deleting.elapsed();
+        });
+        QTRY_VERIFY_WITH_TIMEOUT(ending == nullptr, 6000);
+        QVERIFY(deleteMs >= 0 && deleteMs < 200);
+        QTest::qWait(500);
     }
 
     void takeoverAndReleaseSwitchOnlyTheGivenCard()

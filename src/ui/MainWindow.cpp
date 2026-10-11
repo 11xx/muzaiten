@@ -4008,9 +4008,10 @@ void MainWindow::waitForDeviceOwnership(const QString &hw, const QString &stable
         // its identity itself and waits.
         return !dev || (!dev->heldByPipeWire() && !AudioDeviceControl::sinkNodeReady(graph, dev->hwPath));
     };
-    // The card usually changes hands within 2–5 s. After ~10 s the change is
-    // applied anyway (best effort: a stuck device then surfaces its own
-    // error/takeover affordance rather than hanging the switch).
+    // The card usually changes hands within 2–5 s. After eleven checks (about
+    // ten seconds while PipeWire answers promptly) the change is applied anyway
+    // (best effort: a stuck device then surfaces its own error/takeover
+    // affordance rather than hanging the switch).
     auto *wait = new DeviceOwnershipWait(
         ready, [this, transition]() { return transition == m_outputTransitionGeneration; }, std::move(done), this);
     wait->check();
