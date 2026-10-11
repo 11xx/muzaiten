@@ -400,3 +400,11 @@ actual data components. Basis labels describe how a value was obtained; they
 do not decide copyright, database rights, corpus compatibility or a release
 license. Decomposition inputs require their own source-license determination;
 prediction metadata and a blind method do not confer distribution rights.
+
+Partial-link typed membership is the checksum-pinned `fold-han-typed.txt`
+snapshot: the four essential sets plus Unihan 18 `kTGH`, 11,799 members,
+SHA-256 `843a97bc8bcab86a9295a29074cd074863fe877d0f7d4648931d49a9e7674fa7`.
+Rare completion and pulled rows do not extend it. Assembly and audit validate
+`fold-han-reviewed-rules.json` against the reference pins and apply its retained
+mapping choices, including 𧭈→𫍾 and 𨰥→𫔕. Exact family findings remain visible.
+The `authored` header identifies the preceding-table input snapshot separately.

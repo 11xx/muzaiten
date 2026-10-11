@@ -125,6 +125,32 @@ class FoldHanRareTests(unittest.TestCase):
         path = prediction_file(self.root / (batch + ".tsv"), [(ch, text, simple)], batch)
         return rare.read_predictions([path])
 
+    def test_frozen_typed_membership_ignores_later_authored_rows(self):
+        refs = self.refs_for({"kMandarin": {"𠀀": "mù", "木": "mù", "禾": "mù"},
+                              "kSemanticVariant": {"𠀀": "U+6728 U+79BE"}})
+        refs.typed = frozenset("木")
+        first = rare.family_mappings(refs, {"木"})
+        self.assertEqual(first, rare.family_mappings(refs, {"木", "禾", "𠀀"}))
+        self.assertEqual(first[0]["𠀀"][0], "木")
+
+    def test_typed_snapshot_has_exact_ratified_hash(self):
+        refs = rare.References({"kTGH": {}}, {}, {}, rare.shipped_pins())
+        typed = rare.typed_members(refs, set())
+        self.assertEqual(len(typed), 11799)
+        self.assertEqual(rare.authored_pin(set(typed))["sha256"],
+                         "843a97bc8bcab86a9295a29074cd074863fe877d0f7d4648931d49a9e7674fa7")
+        with mock.patch.object(rare, "TYPED_SHA256", "0" * 64):
+            with self.assertRaisesRegex(ValueError, "typed membership"):
+                rare.typed_members(refs, set())
+
+    def test_ratified_mapping_choices_reach_assembly(self):
+        refs = self.refs_for({"kSimplifiedVariant": {"𧭈": "U+32087", "𨰥": "U+32210"}},
+                             opencc={"𧭈": ["𧭈", "𫍾"], "𨰥": ["𨰥", "𫔕"]})
+        refs.retained_mappings = {"𧭈": "𫍾", "𨰥": "𫔕"}
+        rows, _, _, issues = rare.assemble(["𧭈", "𨰥"], refs, rare.Predictions({}, []), set())
+        self.assertEqual([r[2] for r in rows], ["𫍾", "𫔕"])
+        self.assertTrue(all(f[1] == "family-target" for f in issues))
+
     def test_basis_exact_syllable_agreed_and_single(self):
         rows, records, gaps, findings = rare.assemble(list("𠀀𠀁𠀂"), self.refs, self.predictions, set())
         self.assertEqual(findings, [])

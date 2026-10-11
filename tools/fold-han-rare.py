@@ -51,6 +51,8 @@ DIRECT_FIELDS = (*data.VARIANT_FIELDS, "kZVariant")
 PARTIAL_FIELDS = ("kSemanticVariant", "kSpecializedSemanticVariant")
 # These written forms retain separate keys despite their source relations.
 EXCLUDED_PAIRS = {frozenset(("線", "缐"))}
+RULES = pathlib.Path(__file__).with_name("fold-han-reviewed-rules.json")
+TYPED_SHA256 = "843a97bc8bcab86a9295a29074cd074863fe877d0f7d4648931d49a9e7674fa7"
 MAINLAND_FIELDS = ("kHanyuPinyin", "kXHC1983", "kTGHZ2013")
 FIELDS = (*data.READING_FIELDS, *DIRECT_FIELDS, *PARTIAL_FIELDS, "kTGH", "kUnihanCore2020")
 SHA256 = re.compile(r"[a-f0-9]{64}\Z")
@@ -291,6 +293,8 @@ class References:
     cns: dict[str, list[str]]
     opencc: dict[str, list[str]]
     pins: dict
+    typed: frozenset[str] | None = None
+    retained_mappings: dict[str, str] | None = None
 
     def unihan_spellings(self, ch: str, fields: tuple[str, ...]) -> list[str]:
         return [raw for field in fields for raw in data.field_readings(field, self.fields.get(field, {}).get(ch, ""))]
@@ -320,6 +324,36 @@ class References:
         """Return readings from mainland fields and the first kMandarin spelling."""
         raw = self.unihan_spellings(ch, MAINLAND_FIELDS) + self.unihan_spellings(ch, ("kMandarin",))[:1]
         return {value for spelling in raw if (value := reference_reading(spelling))}
+
+
+def reviewed_rules(refs: References) -> dict:
+    rules = json.loads(RULES.read_text(encoding="utf-8"))
+    if rules["schema"] != "fold-han-reviewed-rules/1" or rules["references"] != refs.pins:
+        raise ValueError("reviewed rules reference pins differ")
+    return rules
+
+
+def typed_members(refs: References, authored: set[str]) -> frozenset[str]:
+    if refs.typed is not None:
+        return refs.typed
+    if all(pin["source"].startswith("fixture:") for name, pin in refs.pins.items() if name != "schema"):
+        return frozenset(authored | set(refs.fields.get("kTGH", {})))
+    pin = reviewed_rules(refs)["typed"]
+    path = RULES.with_name(pin["file"])
+    if pin["sha256"] != TYPED_SHA256 or digest(path) != TYPED_SHA256:
+        raise ValueError("frozen typed membership checksum differs")
+    members = path.read_text(encoding="utf-8").splitlines()
+    if len(members) != pin["count"] or members != sorted(set(members)):
+        raise ValueError("invalid frozen typed membership")
+    return frozenset(members)
+
+
+def retained_mapping_choices(refs: References) -> dict[str, str]:
+    if refs.retained_mappings is not None:
+        return refs.retained_mappings
+    if not all(pin["source"].startswith("fixture:") for name, pin in refs.pins.items() if name != "schema"):
+        return reviewed_rules(refs)["retained_mappings"]
+    return {}
 
 
 def classify(ch: str, value: str, lineages: set[str], predictions: Predictions) -> Record:
@@ -377,6 +411,7 @@ def family_mappings(refs: References, authored: set[str], choices: dict[str, str
 
     Returns each joined member's target and relation path, blocking issues, and the
     partial links the guard rejects, which join nothing."""
+    choices = {**retained_mapping_choices(refs), **(choices or {})}
     graph = defaultdict(dict)
     simplified = set()
     general = set(refs.fields.get("kTGH", {}))
@@ -441,7 +476,7 @@ def family_mappings(refs: References, authored: set[str], choices: dict[str, str
         for ch in component:
             family[ch] = min(component), target
 
-    typed = authored | general
+    typed = typed_members(refs, authored)
     partial = defaultdict(dict)
     for field in PARTIAL_FIELDS:
         for ch, target in unihan_links(refs.fields, field):

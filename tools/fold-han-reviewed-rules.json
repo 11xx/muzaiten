@@ -1,0 +1,36 @@
+{
+  "schema": "fold-han-reviewed-rules/1",
+  "references": {
+    "schema": "fold-han-references/1",
+    "unihan": {
+      "source": "https://www.unicode.org/Public/18.0.0/ucd/Unihan.zip",
+      "revision": "18.0.0",
+      "sha256": "4c93ea9c1f636451729a840978f1667a53886af37ba854fdcce109721c63d43e"
+    },
+    "cns-properties": {
+      "source": "https://www.cns11643.gov.tw/opendata/Properties.zip",
+      "revision": "2026-08-05",
+      "sha256": "3d56ef14cc8099893245dac58fe4718d2fa64812b9159352a98a4588ad3efa5c"
+    },
+    "cns-mappings": {
+      "source": "https://www.cns11643.gov.tw/opendata/MapingTables.zip",
+      "revision": "2026-08-05",
+      "sha256": "4502fcf7b433d679dee51127298929543ec7f4aa99be93cd219df1552bc3d2bf"
+    },
+    "opencc": {
+      "source": "https://raw.githubusercontent.com/BYVoid/OpenCC/025f371dc76b598d77384fbdab90c937471844d8/data/dictionary/TSCharacters.txt",
+      "revision": "025f371dc76b598d77384fbdab90c937471844d8",
+      "sha256": "737c21c66f55a419dd6956cb3089476cdefc5a36877452631617696df1e5d925"
+    }
+  },
+  "typed": {
+    "file": "fold-han-typed.txt",
+    "sha256": "843a97bc8bcab86a9295a29074cd074863fe877d0f7d4648931d49a9e7674fa7",
+    "count": 11799,
+    "essential_sha256": "3620de9cd85ce90d4336e8cdf83368904c676390a10c62e82057e83570fdf642"
+  },
+  "retained_mappings": {
+    "𧭈": "𫍾",
+    "𨰥": "𫔕"
+  }
+}
