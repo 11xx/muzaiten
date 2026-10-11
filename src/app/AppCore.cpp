@@ -558,7 +558,7 @@ AppCore::AppCore(PlaybackBackend *backend, QObject *parent)
                 m_backfillStatus.inserted = inserted;
                 m_backfillStatus.totalListens = total;
                 m_backfillStatus.lastMessage = message;
-                qInfo("scrobble-backfill[%s]: done — %s (processed %d, stored %d)",
+                qInfo("scrobble-backfill[%s]: done: %s (processed %d, stored %d)",
                       qPrintable(source), qPrintable(message), processed, inserted);
                 emit backfillStatusChanged();
             });

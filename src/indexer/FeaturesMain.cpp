@@ -3330,6 +3330,7 @@ void printUsage()
         "       muzaiten-features --version\n"
         "\n"
         "refresh [--library PATH] [--features PATH] [--state PATH] [--semantic|--no-semantic] [--provider PATH]\n"
+        "        [--stage identity|features|all]\n"
         "        [--limit N] [--jobs N] [--staging-bytes N] [--semantic-decode-workers N] [--power background|balanced|turbo]\n"
         "        [--json|--progress=jsonl] [--verbose]\n"
         "status [--features PATH] [--state PATH] [--provider PATH] [--json]\n"

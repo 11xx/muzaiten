@@ -3,7 +3,9 @@
 `muzaitenctl` is installed alongside the app. Transport and queue commands
 talk to a running instance over its IPC socket (resolved from the same
 `MUZAITEN_*` environment as the app, so they target the matching instance).
-Every command supports `--json` for machine-readable output.
+Pass `--json` for JSON transport replies and client-side reports. `radio-taste`
+keeps its fixed outputs described below, and `search --clear-cache` reports
+only on stderr.
 `muzaitenctl --version` prints the installed build's version (the same string
 as `muzaiten --version`) and exits without contacting an instance or creating
 state; `muzaiten-features --version` does the same for the analyzer.
@@ -34,8 +36,11 @@ muzaitenctl raise             # show and focus the window
 
 ```sh
 muzaitenctl start-radio <path> | stop-radio
+muzaitenctl start-artist-radio <artist>
+muzaitenctl start-mix rediscovery | deepcuts
+muzaitenctl radio-reasons                        # live pick explanations
 muzaitenctl radio-weights get | set '<json>'      # active profile weights
-muzaitenctl radio-weights save <n> | apply <n> | list | remove <n>
+muzaitenctl radio-weights save <name> | apply <name> | list | remove <name>
 muzaitenctl radio-weights export <file> [--profile <name>] [--allow-learned] [--replace]
 muzaitenctl radio-weights import <file> [--dry-run] [--replace]
 muzaitenctl radio-learn [--dry-run] [--min-samples N]
@@ -44,8 +49,10 @@ muzaitenctl genre-alias set <alias> <canonical> | remove <alias> | list
 muzaitenctl genre-report      # folded genre vocabulary stats
 ```
 
-All of these run client-side, with no running app needed. `radio-weights`
-edits the named profiles in `radio-profiles.json`: `set` changes the active
+Starting and stopping radio, starting a mix, and `radio-reasons` require a
+running app. The tuning, learning, genre, and alias commands run client-side,
+with no running app needed. `radio-weights` edits the named profiles in
+`radio-profiles.json`: `set` changes the active
 profile, `save` snapshots it under a name, `apply` selects a profile, and
 `list` and `remove` manage saved profiles. Changes take effect when muzaiten
 next starts. `radio-learn` is suggestion-only: it saves a
@@ -95,7 +102,8 @@ received and once normalized to the export layout. The seed store holds at most
 32 seeds and 4 MiB; an import that would exceed either limit is refused and
 leaves the store unchanged.
 
-`list` prints one local seed name per line. `remove` deletes a saved seed;
+`list` prints one local seed name per line, including with `--json`.
+`remove` deletes a saved seed and prints nothing on success;
 running/restorable sessions retain their snapshot until stopped. `start-taste-radio`
 selects a saved seed through the running application's local IPC, and
 `stop-radio` deactivates it. It prints `radio: started`,
@@ -166,6 +174,12 @@ Semantic analysis reads `analysis.semantic.enabled` from `state.sqlite` and is
 disabled by default. `--semantic` and `--no-semantic` override one refresh
 without changing the saved setting. Native-only refreshes do not discover or
 start Python. `--provider PATH` overrides provider discovery.
+
+`refresh --stage identity|features|all` selects native analysis phases.
+`identity` computes per-file identity and scalars and groups duplicate copies;
+`features` fills group scalar rows from an existing identity inventory;
+`all` (the default) performs both. `--no-semantic` also skips the optional
+provider phases.
 
 `--power background|balanced|turbo` controls native worker count and process
 priority; `--jobs N` overrides only the worker count. `--verbose` writes
