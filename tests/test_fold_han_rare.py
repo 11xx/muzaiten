@@ -333,6 +333,21 @@ class FoldHanRareTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "substantive source"):
             rare.family_mappings(refs, set())
 
+    def test_ratified_moe_cns_defaults_are_individual_reviewed_rows(self):
+        refs = self.refs_for({}, {"䊷": ["zhǔn", "chún", "zī"], "𠂲": ["kǎo", "zǎo"], "𢤌": ["guā", "guō"]})
+        refs.cns_default = {"class": "synthetic-cns/1", "basis": "CNS listing order", "individual_rows": ["䊷", "𠂲", "𢤌"]}
+        reviewed = ROOT / "tools/fold-han-reviewed.tsv"
+        decisions = rare.data.read_reviewed(reviewed)
+        for ch, order, tier in (("䊷", "zī zhǔn chún", "exta"), ("𠂲", "zǎo kǎo", "extb"), ("𢤌", "guā guō", "extb")):
+            with self.subTest(ch=ch):
+                out = self.root / ch
+                findings = rare.write_assembly(out, tier, [ch], refs, rare.Predictions({}, []), set(), decisions=reviewed)
+                self.assertEqual(rare.table_rows(out / (tier + ".tsv"))[ch][0], order.split())
+                exact = (ch, "provenance", order, "CNS-only default requires a reviewed decision")
+                self.assertIn(exact, findings)
+                self.assertTrue(exact in decisions)
+                self.assertFalse(rare.document(out / (tier + "-reviewed-defaults.tsv"))[1])
+
     def test_basis_exact_syllable_agreed_and_single(self):
         rows, records, gaps, findings = rare.assemble(list("𠀀𠀁𠀂"), self.refs, self.predictions, set())
         self.assertEqual(findings, [])

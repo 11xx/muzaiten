@@ -141,8 +141,9 @@ evidence keys between blocks. Duplicate, missing or unattested readings fail.
 
 The versioned CNS-only class decision in `fold-han-reviewed-rules.json` selects
 CNS listing order when no reading has a prediction or independent preference.
-Its source pins and listing basis are recorded with the proposal. The three
-source-decided defaults 䊷, 𠂲 and 𢤌 require individual reviewed rows. A reorder
+Its source pins and listing basis are recorded with the proposal. The individual
+reviewed rows choose 䊷 zī, 𠂲 zǎo and 𢤌 guā from their own CNS readings, using
+MOE variant-entry evidence for the default choice. The class excludes them. A reorder
 of a CNS-only class row retains its exact default finding for individual review.
 One attested CNS-only reading needs no default choice.
 Different prediction passes produce a blocking disagreement finding; they

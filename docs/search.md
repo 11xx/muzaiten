@@ -92,7 +92,8 @@ order provides no preference. Every other rank follows mainland and evidence
 precedence, then frequency, HDZ order and pinned source listing order.
 Tied blocks are reported at every rank; reviewed orders stay within a block.
 CNS-only defaults without a source preference follow the reviewed CNS listing
-order class, with individual source-decided exceptions. 饹 retains `gē le`;
+order class, with individual reviewed defaults 䊷 zī, 𠂲 zǎo and 𢤌 guā.
+饹 retains `gē le`;
 the 饸饹 word reading covers that compound.
 
 The authored files proceed through `tgh`, `big5-2`, `core`, `uro`, `exta`,
