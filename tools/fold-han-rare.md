@@ -172,7 +172,8 @@ Each record pins the complete source family, its relations and raw witnesses,
 the typed set, the source archives, the partition keys and every excluded edge.
 Assembly and audit reject stale pins or digests, new members, overlapping or
 incomplete partitions, keys outside D1 candidates, unattested paths and
-unexcluded cross-partition relations. A new split needs a written distinction
+unexcluded cross-partition relations. A row choice cannot override a reviewed
+partition key. A new split needs a written distinction
 and exact pinned evidence for distinct use or a written-use restriction;
 readings, membership and OpenCC order cannot establish that distinction.
 

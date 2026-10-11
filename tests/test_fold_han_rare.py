@@ -287,6 +287,28 @@ class FoldHanRareTests(unittest.TestCase):
         self.assertEqual(rare.document(out / "tgh-opencc-order.tsv")[1][0][1], ["叚", "假", "叚/假", "informational-d1"])
         self.assertEqual(rare.document(out / "tgh-reviewed-defaults.tsv")[1][0][1], ["叚", "mā hé", "synthetic-cns/1", "CNS listing order"])
 
+    def test_reviewed_partition_key_cannot_be_overridden_by_row_choices(self):
+        refs = self.refs_for({"kSimplifiedVariant": {"𠀀": "U+6728 U+79BE"}})
+        relations = rare.family_relations(refs)
+        record = {"schema": "fold-han-reviewed-families/1", "family_id": "partition-fixture", "source_pins": refs.pins,
+                  "typed_members_sha256": rare.authored_pin(set())["sha256"], "source_family_members": sorted("𠀀木禾"),
+                  "source_family_relations_sha256": rare.fingerprint(relations),
+                  "source_family_witnesses": [], "source_family_witnesses_sha256": rare.fingerprint([]),
+                  "basis": {"kind": "fixture-policy"}, "distinct_use_evidence": [], "excluded_relations": [],
+                  "partitions": [{"key": "木", "members": sorted("𠀀木禾")}]}
+        refs.reviewed_families = [record]
+        mappings, issues, _ = rare.family_mappings(refs, set())
+        self.assertEqual(mappings["𠀀"][0], "木")
+        self.assertFalse(issues)
+        with self.assertRaisesRegex(ValueError, "reviewed partition key"):
+            rare.family_mappings(refs, set(), {"𠀀": "禾"})
+
+    def test_malformed_hdz_location_retains_an_unparseable_reading_finding(self):
+        refs = self.refs_for({"kHanyuPinyin": {"𠀀": "unknown:x5"}})
+        records, issues = rare.ordered_readings("𠀀", refs, rare.Predictions({}, []))
+        self.assertFalse(records)
+        self.assertEqual(issues, [("x5", "unparseable kHanyuPinyin reading")])
+
     def test_basis_exact_syllable_agreed_and_single(self):
         rows, records, gaps, findings = rare.assemble(list("𠀀𠀁𠀂"), self.refs, self.predictions, set())
         self.assertEqual(findings, [])

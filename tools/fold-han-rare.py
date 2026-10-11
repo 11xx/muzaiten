@@ -377,7 +377,11 @@ def source_orders(ch: str, refs: References) -> list[tuple[str, dict[str, int]]]
             frequency[value] = min(frequency.get(value, 0), -int(count))
     hdz = []
     raw = refs.fields.get("kHanyuPinyin", {}).get(ch, "")
-    entries = sorted(raw.split(), key=lambda entry: tuple(float(n) for n in entry.split(":")[0].split(",") if n))
+    def location(entry: str):
+        positions = entry.split(":")[0].split(",")
+        return tuple(float(n) if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", n) else sys.maxsize for n in positions)
+
+    entries = sorted(raw.split(), key=location)
     for entry in entries:
         hdz.extend(data.field_readings("kHanyuPinyin", entry))
     orders = [("kHanyuPinlu frequency order", frequency)]
@@ -680,6 +684,8 @@ def family_mappings(refs: References, authored: set[str], choices: dict[str, str
     partial links the guard rejects, which join nothing."""
     partitions = reviewed_families(refs, authored)
     partition_choices = {ch: p["key"] for record in partitions for p in record["partitions"] for ch in p["members"]}
+    if any(ch in partition_choices and target != partition_choices[ch] for ch, target in (choices or {}).items()):
+        raise ValueError("row choice conflicts with reviewed partition key")
     choices = {**partition_choices, **retained_mapping_choices(refs), **(choices or {})}
     excluded = {relation_key(r): r for record in partitions for r in record["excluded_relations"]}
     graph = defaultdict(dict)
@@ -790,6 +796,10 @@ def family_mappings(refs: References, authored: set[str], choices: dict[str, str
             candidates = rule or component & simplified or component
             for ch in component:
                 details[ch] = target, candidates
+        if target is None and component <= partition_choices.keys():
+            requested = {partition_choices[ch] for ch in component}
+            if len(requested) == 1:
+                target = next(iter(requested))
         if target is None:
             for ch in component:
                 issues[ch].append("family-target:unresolved=" + " ".join(sorted(rule or component)))
