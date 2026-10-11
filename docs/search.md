@@ -150,7 +150,11 @@ characters do not add independent alternatives. The all-first and all-second
 combinations come first, then other combinations with fewer changed
 positions. A title contributes up to 64 pinyin variants; longer titles
 enumerate whitespace- or slash-separated runs in lockstep when their full
-product exceeds that limit.
+product exceeds that limit. Each such run lists every uniform combination
+right after all-first: for each k, every position takes its k-th reading, or
+its first where it has fewer. A repeated character therefore keeps each of
+its readings: 轧轧轧轧 reads `gagagaga` as well as `yayayaya` and
+`zhazhazhazha`.
 Chinese word lookup folds
 each character to its simplified form first, so a word row also supplies the
 reading for traditional and variant spellings. Japanese seed readings match the written characters. Han runs use forward and backward longest

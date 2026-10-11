@@ -499,18 +499,28 @@ Folded foldPass(const QString &src, const Styles &styles, bool withIndex, std::u
     return {std::move(text), std::move(index)};
 }
 
-QVector<QVector<std::uint8_t>> orderedChoices(const QVector<int> &radices, int limit)
+// Up to `limit` reading choices over `radices`: all-first, then the uniform
+// choices, then the rest by number of changed positions. The k-th uniform
+// choice gives each position its k-th reading, or its first where it has
+// fewer; `everyUniform` lists one for each k below the widest radix, otherwise
+// only all-second.
+QVector<QVector<std::uint8_t>> orderedChoices(const QVector<int> &radices, int limit, bool everyUniform)
 {
-    QVector<QVector<std::uint8_t>> result;
-    QVector<std::uint8_t> choice(radices.size(), 0);
-    result.append(choice);
+    QVector<QVector<std::uint8_t>> result{QVector<std::uint8_t>(radices.size(), 0)};
     if (radices.isEmpty() || limit == 1) return result;
-    std::fill(choice.begin(), choice.end(), 1);
-    result.append(choice);
+    const int uniformCount = everyUniform ? std::ranges::max(radices) - 1 : 1;
+    QVector<QVector<std::uint8_t>> uniform;
+    for (int k = 1; k <= uniformCount; ++k) {
+        QVector<std::uint8_t> choice(radices.size());
+        for (qsizetype at = 0; at < radices.size(); ++at) choice[at] = std::uint8_t(k < radices[at] ? k : 0);
+        uniform.append(choice);
+    }
+    result += uniform.first(std::min(uniform.size(), qsizetype(limit) - 1));
+    QVector<std::uint8_t> choice(radices.size(), 0);
     const auto visit = [&](const auto &self, int at, int remaining) -> void {
         if (result.size() >= limit) return;
         if (at == radices.size()) {
-            if (remaining == 0 && choice != QVector<std::uint8_t>(radices.size(), 1)) result.append(choice);
+            if (remaining == 0 && !uniform.contains(choice)) result.append(choice);
             return;
         }
         if (remaining > 0) {
@@ -538,7 +548,7 @@ void prepareChoices(PinyinPlan &plan)
     }
     plan.capped = plan.product > limit;
     if (!plan.capped) {
-        plan.choices = orderedChoices(plan.radices, int(plan.product));
+        plan.choices = orderedChoices(plan.radices, int(plan.product), false);
         return;
     }
     int runCount = 0;
@@ -552,7 +562,7 @@ void prepareChoices(PinyinPlan &plan)
     QVector<QVector<QVector<std::uint8_t>>> runChoices;
     int variants = 1;
     for (const auto &radices : runRadices) {
-        const auto choices = orderedChoices(radices, 64);
+        const auto choices = orderedChoices(radices, 64, true);
         variants = std::max(variants, int(choices.size()));
         runChoices.append(choices);
     }

@@ -100,6 +100,30 @@ private slots:
         }
     }
 
+    void cappedStringsKeepEveryUniformReading()
+    {
+        const QString four = QString::fromUtf8("轧轧轧轧");
+        const auto count = Fold::census(four);
+        QCOMPARE(count.product, quint64(81));
+        QCOMPARE(count.variants, 64);
+        QVERIFY(count.capped);
+        const QStringList readings{QStringLiteral("ya"), QStringLiteral("zha"), QStringLiteral("ga")};
+        const auto folds = segments(four);
+        QCOMPARE(folds.mid(1, 3), (QStringList{QStringLiteral("yayayaya"), QStringLiteral("zhazhazhazha"),
+                                               QStringLiteral("gagagaga")}));
+        for (int at = 0; at < 4; ++at) {
+            for (const QString &changed : readings.sliced(1)) {
+                QString single;
+                for (int j = 0; j < 4; ++j) single += j == at ? changed : readings.first();
+                QVERIFY2(folds.contains(single), qPrintable(single));
+            }
+        }
+
+        QVERIFY(segments(QString::fromUtf8("轧").repeated(10)).contains(QStringLiteral("ga").repeated(10)));
+        // A position with fewer readings keeps its first in the wider uniform choices.
+        QVERIFY(segments(QString::fromUtf8("轧轧轧轧都")).contains(QStringLiteral("gagagagadou")));
+    }
+
     void mixedHanAndJapaneseReadingsKeepEstablishedFolds()
     {
         const auto folds = segments(QString::fromUtf8("稲垣貴繁/誰その夢"));

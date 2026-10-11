@@ -41,7 +41,10 @@
 // tools/foldgen.py; see docs/search.md.
 // Han pinyin variants form a per-string reading axis beside the romanization
 // style. Word rows suppress character alternatives within their spans; the
-// all-first and all-second choices precede the remaining combinations.
+// all-first and all-second choices precede the remaining combinations. Past
+// 64 combinations, each whitespace- or slash-separated run keeps every
+// uniform choice (each position at its k-th reading, or its first where it
+// has fewer), so a repeated character keeps each of its readings.
 //
 // Folding preserves spaces and punctuation: the matcher relies on word
 // boundaries for its fzf bonuses and on substring semantics.
@@ -56,7 +59,7 @@ namespace Search::Fold {
 // Revision of the fold pipeline. cacheSignature() mixes it with a digest of
 // the compiled tables; the on-disk search cache stores folded norms, so a
 // change to either must invalidate it.
-inline constexpr quint32 kVersion = 8;
+inline constexpr quint32 kVersion = 9;
 
 // Separates the alternative folded forms of one field inside a search norm
 // (the display text's fold, its alternate readings, then a sort name's).

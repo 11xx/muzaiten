@@ -292,6 +292,10 @@
 - Thai `็อ` before a final consonant folds to short `o` in Latin search
   readings, including `ป็อป` (`pop`) and `ล็อก` (`lok`). Native Thai marks
   remain distinct.
+- Chinese titles with more than 64 reading combinations keep every reading of
+  a repeated polyphone: 轧轧轧轧 matches `gagagaga` as well as `yayayaya` and
+  `zhazhazhazha`, where a third or later reading used to appear at only some
+  of the repetitions. The search cache rebuilds once.
 - A saved DSD track requiring device takeover retains its queue position,
   paused state and saved playback position until the first window offers the
   takeover prompt. It does not skip to and play the next track at startup.
