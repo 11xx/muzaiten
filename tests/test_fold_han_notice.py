@@ -23,7 +23,7 @@ spec.loader.exec_module(notice)
 
 # Package component licenses of published releases, keyed by version. muzaiten-bin
 # downloads one of these artifacts rather than building the current source.
-RELEASED_COMPONENT_LICENSES = {"2026.9.11": {"Unlicense", "Unicode-3.0"}}
+RELEASED_COMPONENT_LICENSES = {"2026.9.11": {"Unlicense"}}
 
 
 class HanNoticeTests(unittest.TestCase):
