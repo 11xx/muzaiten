@@ -125,6 +125,33 @@ class FoldHanRareTests(unittest.TestCase):
         path = prediction_file(self.root / (batch + ".tsv"), [(ch, text, simple)], batch)
         return rare.read_predictions([path])
 
+    def test_outer_checker_preserves_informational_opencc_tuples_and_other_findings(self):
+        refs = self.refs_for({}, opencc={"𠀀": ["𠀁", "木"], "𠀂": ["林", "森"], "丁": ["𠀃", "丁"]})
+        table = self.root / "core.tsv"
+        unrelated = (str(table), "-", "𠀀", "family-target", "木", "individual review")
+        for competing in (False, True):
+            with self.subTest(competing=competing):
+                table.write_text("# schema: fold-han-provenance/1\n𠀀\t-\t木\n丁\t-\t\n"
+                                 + ("𠀂\t-\t森\n" if competing else ""))
+                with mock.patch.object(data, "unihan_archive", return_value=object()), \
+                     mock.patch.object(data, "unihan_fields", return_value=refs.fields), \
+                     mock.patch.object(data, "cns_archives", return_value=()), \
+                     mock.patch.object(data, "cns_readings", return_value=refs.cns), \
+                     mock.patch.object(data, "opencc_archive", return_value=object()), \
+                     mock.patch.object(data, "opencc_characters", return_value=refs.opencc), \
+                     mock.patch.object(rare, "shipped_pins", return_value=refs.pins), \
+                     mock.patch.object(rare, "check_provenance", return_value=[unrelated] if competing else []), \
+                     contextlib.redirect_stdout(output := io.StringIO()), \
+                     contextlib.redirect_stderr(summary := io.StringIO()):
+                    self.assertEqual(data.check([table], self.reviewed, authored_dir=self.root), int(competing))
+                lines = output.getvalue().splitlines()
+                self.assertIn(f"# informational: {table}\t2\t𠀀\topencc\t木\t𠀁/木", lines)
+                self.assertIn(f"# informational: {table}\t3\t丁\topencc\t丁\t𠀃/丁", lines)
+                self.assertIn(f"opencc={int(competing)}", summary.getvalue())
+                if competing:
+                    self.assertIn("\t".join(unrelated), lines)
+                    self.assertIn(f"{table}\t4\t𠀂\topencc\t森\t林/森", lines)
+
     def test_frozen_typed_membership_ignores_later_authored_rows(self):
         refs = self.refs_for({"kMandarin": {"𠀀": "mù", "木": "mù", "禾": "mù"},
                               "kSemanticVariant": {"𠀀": "U+6728 U+79BE"}})

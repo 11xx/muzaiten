@@ -439,3 +439,7 @@ OpenCC output as preferred. The checker integration API is
 retains all findings outside the class. `opencc_informational` exposes the same
 predicate for an individual row, and `informational_finding` accepts an exact
 checker tuple. Lower-rank `reading-order` reports are informational too.
+The outer data checker applies the class before counting blocking findings and
+choosing its exit status. It prints each classified original six-column tuple
+with a `# informational: ` prefix; individual findings retain their ordinary
+six-column form.

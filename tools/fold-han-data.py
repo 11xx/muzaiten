@@ -21,6 +21,8 @@ Reviewed rows use `ideograph-or-word<TAB>kind<TAB>ours<TAB>reference<TAB>reason`
 Rare tiers require per-reading and per-mapping provenance and pinned blind
 prediction logs. Marked essential tables use the same audit. Provenance is
 checked by `fold-han-rare.py`; its records are developer inputs, not build data.
+The rare-table audit classifies unique attested D1 OpenCC disagreements before
+blocking counts. Original informational tuples have a `# informational: ` prefix.
 Directory mode requires the four essential tier files and checks each existing
 rare-tier file; explicit FILE arguments select the character files. The checker
 also checks `words.tsv`, whose rows use
@@ -948,6 +950,7 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pa
                              if line and not line.lstrip().startswith("#"))
     authored = authored_ideographs(authored_dir)
     findings: list[tuple[str, str, str, str, str, str]] = []
+    information: list[tuple[str, str, str, str, str, str]] = []
     first_occurrence: dict[str, tuple[str, int]] = {}
 
     def add(path: pathlib.Path, row: int | str, ch: str, kind: str, ours: str, reference: str) -> None:
@@ -962,6 +965,7 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pa
 
         listed: set[str] = set()
         per_file_start = len(findings)
+        audit_context = None
         has_provenance = any(line == "# schema: fold-han-provenance/1" for line in lines)
         if has_provenance or path.name in RARE_FILES:
             if "fold_han_rare" not in sys.modules:
@@ -977,6 +981,7 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pa
                 predictions = rare.read_predictions(prediction_paths)
                 references = rare.References(fields, cns, opencc, rare.shipped_pins())
                 prior_authored = rare.authored_before(authored_dir, path.stem)
+                audit_context = references, prior_authored
                 findings.extend(rare.check_provenance(path, provenance, references, predictions, prior_authored))
             except (OSError, ValueError, TypeError, KeyError) as exc:
                 add(path, "-", "-", "provenance", "invalid predictions", str(exc))
@@ -1148,6 +1153,15 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pa
             finding for finding in findings[per_file_start:]
             if finding[3] == "source-terms" or finding_key(finding) not in reviewed
         ]
+        if audit_context is not None and unsuppressed:
+            try:
+                blocking = rare.blocking_findings(unsuppressed, *audit_context)
+                blocking_set = set(blocking)
+                information.extend(f for f in unsuppressed if f not in blocking_set)
+                unsuppressed = blocking
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                unsuppressed.append((str(path), "-", "-", "provenance", "invalid classification", str(exc)))
+        findings[per_file_start:] = unsuppressed
         counts = Counter(finding[3] for finding in unsuppressed)
         print(
             f"{path}: " + " ".join(f"{kind}={counts[kind]}" for kind in CHECK_KINDS),
@@ -1175,6 +1189,8 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pa
             + f"; CC-CEDICT {date_line}",
             file=sys.stderr,
         )
+    for finding in information:
+        print("# informational: " + "\t".join(clean_tsv(value) for value in finding))
     for finding in unsuppressed:
         print("\t".join(clean_tsv(value) for value in finding))
     return 1 if unsuppressed else 0
