@@ -646,6 +646,111 @@ class FoldHanRareTests(unittest.TestCase):
                 self.assertEqual(status, 2)
                 self.assertFalse(out.exists())
 
+    def test_expected_changes_compare_search_defaults_readings_and_terminal_keys(self):
+        baseline = {"木": (["mu"], "禾"), "禾": (["he"], ""), "火": (["huo"], ""),
+                    "水": (["shui"], "禾"), "𠀀": (["yi"], "禾")}
+        proposed = {"木": (["ma", "mu"], "禾"), "禾": (["he"], ""), "火": (["huo", "he"], "禾"),
+                    "水": (["shui"], ""), "𠀀": (["yi"], "火")}
+        changes = rare.expected_changes(baseline, proposed, sorted(proposed))
+        self.assertIn(("木", "default-changed", "mu", "ma"), changes)
+        self.assertIn(("木", "reading-added", "-", "ma"), changes)
+        self.assertIn(("火", "mapping-added", "火", "禾"), changes)
+        self.assertIn(("水", "mapping-removed", "禾", "水"), changes)
+        self.assertFalse([r for r in changes if r[0] == "𠀀"])
+        proposed["𠀀"] = (["yi"], "水")
+        self.assertIn(("𠀀", "mapping-retargeted", "禾", "水"), rare.expected_changes(baseline, proposed, ["𠀀"]))
+
+    def test_report_baseline_authored_empty_mapping_overrides_generated_data(self):
+        generated = self.root / "generated"
+        generated.mkdir()
+        (generated / "han_pinyin.tsv").write_text("mu\t木\nhe\t禾\n")
+        (generated / "han_simplified.tsv").write_text("禾\t木\n")
+        authored = self.root / "authored"
+        (authored / "tgh.tsv").write_text("木\tmá mù\t\n")
+        state = rare.table_state(authored, generated)
+        self.assertEqual(state["木"], (["ma", "mu"], ""))
+        self.assertEqual(state["禾"], (["he"], ""))
+
+    def test_pull_forward_reaches_a_fixpoint_for_cycles_and_joined_pairs(self):
+        baseline = {"木": (["mu"], "禾"), "禾": (["he"], ""), "𠀀": (["yi"], "木"),
+                    "火": (["huo"], "水"), "水": (["shui"], ""), "𠀁": (["er"], "火")}
+        proposals = {"tgh": {"木": (["mu"], "𠀀"), "火": (["huo"], "")},
+                     "extb": {"𠀀": (["yī"], "禾"), "𠀁": (["èr"], "火"), "水": (["shuǐ"], "火")}}
+        report, pulls = rare.pull_forward(baseline, proposals)
+        self.assertEqual({r[1] for r in pulls["tgh"]}, {"𠀀", "水"})
+        self.assertIn("cycle", next(r[-1] for r in pulls["tgh"] if r[1] == "𠀀"))
+        self.assertEqual(next(r[2] for r in pulls["tgh"] if r[1] == "𠀀"), "yī")
+        self.assertIn("baseline-pair", next(r[-1] for r in pulls["tgh"] if r[1] == "水"))
+        self.assertFalse(pulls["extb"])
+        for step in report["steps"]:
+            self.assertEqual(step["remaining_splits"], [])
+            self.assertEqual(step["cycles"], [])
+        self.assertEqual(report["permanent_splits"], [])
+
+    def test_pull_forward_reports_permanent_losses_and_unfixable_cycles(self):
+        baseline = {"木": ([], "禾"), "禾": ([], "")}
+        proposals = {"tgh": {"木": ([], "")}}
+        report, pulls = rare.pull_forward(baseline, proposals)
+        self.assertEqual(report["permanent_splits"], [["木", "禾"]])
+        self.assertEqual(report["steps"][0]["remaining_splits"], [["木", "禾"]])
+        self.assertFalse(pulls["tgh"])
+        report, _ = rare.pull_forward(baseline, {"tgh": {"禾": ([], "木")}})
+        self.assertEqual(report["final_cycles"], ["木", "禾"])
+
+    def test_pull_forward_repairs_later_intermediates_outside_the_baseline_pair(self):
+        baseline = {"木": ([], "禾"), "禾": ([], ""), "𠀀": ([], "火"), "火": ([], ""),
+                    "𠀁": ([], "水"), "水": ([], "")}
+        proposals = {"tgh": {"木": ([], "𠀀")}, "extb": {"𠀀": ([], "𠀁"), "𠀁": ([], "禾")}}
+        report, pulls = rare.pull_forward(baseline, proposals)
+        self.assertEqual({r[1] for r in pulls["tgh"]}, {"𠀀", "𠀁"})
+        self.assertFalse(report["steps"][0]["unexpected_splits"])
+
+    def test_cli_emits_current_table_impact_and_explicit_unevaluated_closure(self):
+        out = self.root / "impact-cli"
+        generated = self.root / "generated"
+        generated.mkdir()
+        (generated / "han_pinyin.tsv").write_text("he\t𠀀\n")
+        (generated / "han_simplified.tsv").write_text("")
+        with contextlib.redirect_stderr(io.StringIO()):
+            status = rare.main(["assemble", "--tier", "tgh", "--generated", str(generated),
+                                "--output", str(out), *self.args])
+        self.assertEqual(status, 0)
+        changes = [r for _, r in rare.document(out / "tgh-expected-changes.tsv")[1]]
+        self.assertIn(["𠀀", "default-changed", "he", "ba"], changes)
+        self.assertIn(["𠀀", "reading-added", "-", "ba"], changes)
+        report = json.loads((out / "tgh-impact.json").read_text())
+        self.assertEqual(report["status"], "not-evaluated")
+        self.assertEqual(len(report["baseline_sha256"]), 64)
+        self.assertEqual(rare.document(out / "tgh-pull-forward.tsv")[1], [])
+
+    def test_cli_closure_reads_all_home_files_and_preserves_toned_pull_rows(self):
+        refs = self.refs_for({"kTGH": {"𠀀": "1"}, "kMandarin": {"𠀀": "yī", "𠀁": "èr"},
+                              "kTraditionalVariant": {"𠀀": "U+20001"}})
+        horizon = self.root / "horizon"
+        horizon.mkdir()
+        tiers, _ = rare.build_tiers(refs)
+        for name in data.RARE_FILES:
+            tier = pathlib.Path(name).stem
+            (horizon / name).write_text("".join(f"{ch}\t{'yī' if ch == '𠀀' else 'èr'}\t\n" for ch in tiers[tier]))
+        (horizon / "extb.tsv").write_text("𠀁\tèr\t𠀀\n")
+        generated = self.root / "generated"
+        generated.mkdir()
+        (generated / "han_pinyin.tsv").write_text("yi\t𠀀\ner\t𠀁\n")
+        (generated / "han_simplified.tsv").write_text("𠀁\t𠀀\n")
+        out = self.root / "closure-cli"
+        with mock.patch.object(rare, "read_references", return_value=refs), contextlib.redirect_stderr(io.StringIO()):
+            status = rare.main(["assemble", "--tier", "tgh", "--generated", str(generated), "--assembly", str(horizon),
+                                "--authored", str(self.root / "authored"), "--output", str(out)])
+        self.assertEqual(status, 0)
+        pulled = [r for _, r in rare.document(out / "tgh-pull-forward.tsv")[1]]
+        self.assertEqual(pulled, [["extb", "𠀁", "èr", "𠀀", "baseline-pair"]])
+        report = json.loads((out / "tgh-impact.json").read_text())
+        self.assertEqual(report["status"], "evaluated")
+        self.assertFalse(report["steps"][0]["unexpected_splits"])
+        (horizon / "extb.tsv").write_text("")
+        with self.assertRaisesRegex(ValueError, "every buildable tier member"):
+            rare.read_assembly(horizon, refs)
+
     def test_complete_writer_refuses_a_slice(self):
         out = self.root / "incomplete"
         with self.assertRaisesRegex(ValueError, "every tier member"):

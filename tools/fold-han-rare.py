@@ -554,11 +554,12 @@ def member_gap(ch: str) -> tuple[str, str, str, str, str]:
 def read_decisions(path: pathlib.Path, members: list[str]):
     """Extract choices for selected members from exact five-column reviewed rows."""
     mappings, readings, expected = {}, {}, set()
+    selected = set(members)
     for number, columns in document(path)[1]:
         if len(columns) != 5 or not columns[4].strip():
             raise ValueError(f"{path.name}:{number}: expected five reviewed columns with a reason")
         ch, kind, ours, reference, _ = columns
-        if ch not in members:
+        if ch not in selected:
             continue
         if kind in {"family-target", "variant-guard"}:
             ideograph(ours)
@@ -604,11 +605,194 @@ def header(schema: str, refs: References, predictions: Predictions, authored: se
             + f"# authored: {canonical(authored_pin(authored))}\n")
 
 
+def table_rows(path: pathlib.Path) -> dict[str, tuple[list[str], str]]:
+    rows = {}
+    for number, columns in document(path)[1]:
+        if len(columns) != 3:
+            raise ValueError(f"{path.name}:{number}: expected three table columns")
+        ch, text, target = columns
+        ideograph(ch)
+        if target:
+            ideograph(target)
+        if ch in rows:
+            raise ValueError(f"{path.name}:{number}: duplicate table member")
+        values = [] if text == "-" else [reading(r) for r in text.split()]
+        if not text or (text != "-" and not values):
+            raise ValueError(f"{path.name}:{number}: empty table readings")
+        rows[ch] = list(dict.fromkeys(values)), target
+    return rows
+
+
+def table_state(authored: pathlib.Path, generated: pathlib.Path) -> dict[str, tuple[list[str], str]]:
+    """Read effective search rows, including authored overrides of empty mappings."""
+    rows = {}
+    for name in ("han_pinyin.tsv", "han_simplified.tsv"):
+        for number, columns in document(generated / name)[1]:
+            if len(columns) != 2:
+                raise ValueError(f"{name}:{number}: expected two generated columns")
+            value, chars = columns
+            for ch in chars:
+                values, target = rows.get(ch, ([], ""))
+                rows[ch] = ([data.toneless(value)], target) if name == "han_pinyin.tsv" else (values, value)
+    for path in sorted(authored.glob("*.tsv")):
+        if path.name != "words.tsv":
+            for ch, row in table_rows(path).items():
+                values, target = row
+                rows[ch] = list(dict.fromkeys(data.toneless(r) for r in values)), target
+    return rows
+
+
+def terminal_keys(rows: dict[str, tuple[list[str], str]]) -> dict[str, str | None]:
+    """Resolve mapping chains; a cycle and every path into it have no terminal key."""
+    mapping = {ch: target for ch, (_, target) in rows.items() if target}
+    keys = {}
+    for start in sorted(set(rows) | set(mapping.values())):
+        path, visited = [], set()
+        ch = start
+        while ch not in keys and ch not in visited and ch in mapping:
+            visited.add(ch)
+            path.append(ch)
+            ch = mapping[ch]
+        end = keys[ch] if ch in keys else None if ch in visited else ch
+        keys[start] = end
+        for member in path:
+            keys[member] = end
+    return keys
+
+
+def expected_changes(baseline, proposed, members):
+    """Compare toneless readings and terminal keys at the search table boundary."""
+    before, after = terminal_keys(baseline), terminal_keys(proposed)
+    result = []
+    for ch in sorted(members):
+        old = list(dict.fromkeys(data.toneless(r) for r in baseline.get(ch, ([], ""))[0]))
+        new = list(dict.fromkeys(data.toneless(r) for r in proposed.get(ch, ([], ""))[0]))
+        if old and new and old[0] != new[0]:
+            result.append((ch, "default-changed", old[0], new[0]))
+        result.extend((ch, "reading-added", "-", value) for value in sorted(set(new) - set(old)))
+        result.extend((ch, "reading-removed", value, "-") for value in sorted(set(old) - set(new)))
+        old_key, new_key = before.get(ch, ch), after.get(ch, ch)
+        if old_key != new_key:
+            kind = "mapping-added" if old_key == ch else "mapping-removed" if new_key == ch else "mapping-retargeted"
+            result.append((ch, kind, old_key or "cycle", new_key or "cycle"))
+    return result
+
+
+def joined_pairs(rows):
+    keys = terminal_keys(rows)
+    groups = defaultdict(list)
+    for ch, key in sorted(keys.items()):
+        if key is not None:
+            groups[key].append(ch)
+    return {pair for members in groups.values() for pair in itertools.combinations(members, 2)}, sorted(
+        ch for ch, key in keys.items() if key is None)
+
+
+def pull_forward(baseline, proposals):
+    """Carry later rows to preserve final-retained baseline pairs and avoid cycles."""
+    order = [name.removesuffix(".tsv") for name in data.RARE_FILES if name.removesuffix(".tsv") in proposals]
+    if set(order) != set(proposals):
+        raise ValueError("unknown report tier")
+    home, final = {}, dict(baseline)
+    for tier in order:
+        for ch, row in proposals[tier].items():
+            if ch in home:
+                raise ValueError("duplicate assembly member across tiers")
+            home[ch] = tier
+            final[ch] = row
+    base_pairs, base_cycles = joined_pairs(baseline)
+    final_pairs, final_cycles = joined_pairs(final)
+    permanent = base_pairs - final_pairs
+    current, steps, pulls = dict(baseline), [], {}
+    for index, tier in enumerate(order):
+        current.update(proposals[tier])
+        reasons = defaultdict(set)
+        later = set(order[index + 1:])
+
+        def pending_target(start):
+            visited = set()
+            ch = start
+            while ch not in visited:
+                visited.add(ch)
+                target = current.get(ch, ([], ""))[1]
+                if home.get(ch) in later and target != final[ch][1]:
+                    return ch
+                if not target:
+                    break
+                ch = target
+            return None
+
+        while True:
+            pairs, cycles = joined_pairs(current)
+            missing = base_pairs - pairs - permanent
+            needed = defaultdict(set)
+            for a, b in missing:
+                for ch in (a, b):
+                    if (pending := pending_target(ch)) is not None:
+                        needed[pending].add("baseline-pair")
+            for ch in cycles:
+                needed[ch].add("cycle")
+            needed = {ch: why for ch, why in needed.items()
+                      if home.get(ch) in later and current.get(ch, ([], ""))[1] != final[ch][1]}
+            if not needed:
+                break
+            for ch, why in needed.items():
+                current[ch] = final[ch]
+                reasons[ch].update(why)
+        pulls[tier] = [(home[ch], ch, " ".join(final[ch][0]) or "-", final[ch][1], ",".join(sorted(why)))
+                       for ch, why in sorted(reasons.items())]
+        steps.append({"tier": tier, "pulled_forward": len(reasons),
+                      "pulled_from": dict(sorted(Counter(home[ch] for ch in reasons).items())),
+                      "remaining_splits": [list(pair) for pair in sorted(base_pairs - pairs)],
+                      "unexpected_splits": [list(pair) for pair in sorted(missing)], "cycles": cycles})
+    return {"baseline_cycles": base_cycles, "final_cycles": final_cycles,
+            "permanent_splits": [list(pair) for pair in sorted(permanent)], "steps": steps}, pulls
+
+
+def read_assembly(directory: pathlib.Path, refs: References):
+    tiers, _ = build_tiers(refs)
+    proposals = {}
+    for name in data.RARE_FILES:
+        path = directory / name
+        if not path.is_file():
+            path = directory / pathlib.Path(name).stem / name
+        rows = table_rows(path)
+        if set(rows) != set(tiers[path.stem]):
+            raise ValueError(f"{name}: report assembly requires every buildable tier member")
+        proposals[path.stem] = rows
+    return proposals
+
+
+def impact_reports(tier, rows, baseline, proposals=None):
+    """Return reviewable impact artifacts without writing any authored table."""
+    selected = {ch: (text.split() if text != "-" else [], target)
+                for ch, text, target in rows}
+    final = dict(baseline)
+    if proposals is not None:
+        proposals = {name: dict(values) for name, values in proposals.items()}
+        proposals[tier].update(selected)
+        for values in proposals.values():
+            final.update(values)
+        report, pulls = pull_forward(baseline, proposals)
+        report["status"] = "evaluated"
+        pulled = pulls[tier]
+    else:
+        final.update(selected)
+        report, pulled = {"status": "not-evaluated", "reason": "provide --assembly for staged closure"}, []
+    changes = expected_changes(baseline, final, selected)
+    report.update({"schema": "fold-han-assembly-impact/1", "tier": tier,
+                   "expected_changes": dict(sorted(Counter(row[1] for row in changes).items())),
+                   "baseline_sha256": hashlib.sha256(canonical(baseline).encode()).hexdigest(),
+                   "assembly_sha256": hashlib.sha256(canonical(final).encode()).hexdigest()})
+    return changes, pulled, report
+
+
 def write_assembly(out: pathlib.Path, tier: str, members: list[str], refs: References, predictions: Predictions,
                    authored: set[str], *, complete: bool = False,
                    mapping_choices: dict[str, str] | None = None,
                    reading_choices: dict[str, list[str]] | None = None,
-                   decisions: pathlib.Path | None = None):
+                   decisions: pathlib.Path | None = None,
+                   baseline: dict | None = None, report_assembly: dict | None = None):
     tiers, withheld = build_tiers(refs)
     if complete and {ch for ch in members if len(ch) == 1 and data.is_unihan_ideograph(ch)} != set(tiers[tier]):
         raise ValueError("complete assembly requires every tier member")
@@ -623,6 +807,7 @@ def write_assembly(out: pathlib.Path, tier: str, members: list[str], refs: Refer
         raise ValueError("decision does not match an emitted choice finding")
     if complete:
         gaps.extend(member_gap(ch) for ch in withheld[tier] if ch not in members)
+    impact = impact_reports(tier, rows, baseline, report_assembly) if baseline is not None else None
     counts = dict(sorted(Counter(r.basis for r in records if r.rank).items()))
     out.mkdir(parents=True, exist_ok=True)
     common = header(PROVENANCE_SCHEMA, refs, predictions, authored) + "# Source attributions and license texts: NOTICE.\n"
@@ -641,6 +826,17 @@ def write_assembly(out: pathlib.Path, tier: str, members: list[str], refs: Refer
         f"{tier}-findings.tsv": common + "# columns: ideograph\tkind\tours\treference\n"
         + "".join("\t".join(row) + "\n" for row in findings),
     }
+    if impact:
+        changes, pulled, report = impact
+        files.update({
+            f"{tier}-expected-changes.tsv": header("fold-han-expected-changes/1", refs, predictions, authored)
+            + "# columns: ideograph\tkind\tbaseline\tproposed\n"
+            + "".join("\t".join(row) + "\n" for row in changes),
+            f"{tier}-pull-forward.tsv": header("fold-han-pull-forward/1", refs, predictions, authored)
+            + "# columns: file\tideograph\treadings\tsimplified\treason\n"
+            + "".join("\t".join(row) + "\n" for row in pulled),
+            f"{tier}-impact.json": json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        })
     for name, content in files.items():
         (out / name).write_text(content, encoding="utf-8", newline="\n")
     return findings
@@ -795,12 +991,16 @@ def read_references(args) -> References:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    assembly = commands.add_parser("assemble", help="write tier proposals, provenance, gaps and blocking findings")
+    assembly = commands.add_parser("assemble", help="write tier proposals, findings and change/closure reports")
     reference_arguments(assembly)
     assembly.add_argument("--tier", choices=[p.removesuffix(".tsv") for p in data.RARE_FILES], required=True)
     assembly.add_argument("--output", type=pathlib.Path, required=True)
     assembly.add_argument("--members", type=pathlib.Path, help="one selected ideograph per line; write a partial proposal")
     assembly.add_argument("--decisions", type=pathlib.Path, help="five-column reviewed TSV supplying exact mapping and reading choices")
+    assembly.add_argument("--generated", type=pathlib.Path, default=data.DEFAULT_UNIHAN_DIR,
+                          help="current generated Han tables for expected-change reports")
+    assembly.add_argument("--assembly", type=pathlib.Path,
+                          help="full proposed rare tier tables for staged pull-forward and final impact reports")
     check = commands.add_parser("check", help="audit a table and its provenance without word checks")
     reference_arguments(check)
     check.add_argument("--provenance", type=pathlib.Path, required=True)
@@ -818,7 +1018,9 @@ def main(argv: list[str] | None = None) -> int:
             if set(members) - set(tier_members) - set(withheld[args.tier]):
                 raise ValueError("selected member outside tier")
             findings = write_assembly(args.output, args.tier, members, refs, predictions, authored,
-                                      complete=args.members is None, decisions=args.decisions)
+                                      complete=args.members is None, decisions=args.decisions,
+                                      baseline=table_state(args.authored, args.generated),
+                                      report_assembly=read_assembly(args.assembly, refs) if args.assembly else None)
         else:
             findings = check_provenance(args.table, args.provenance, refs, predictions, authored)
             reviewed = data.read_reviewed(args.reviewed)

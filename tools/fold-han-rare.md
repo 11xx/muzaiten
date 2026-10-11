@@ -225,6 +225,61 @@ is written. Decisions preserve their findings in assembly output; the checker
 uses `--reviewed` to discharge their exact keys. A decisions file and explicit
 API choice dictionaries cannot be supplied together.
 
+## Expected changes and staged closure
+
+CLI assembly also writes `<tier>-expected-changes.tsv`,
+`<tier>-pull-forward.tsv` and `<tier>-impact.json`. `--authored` and
+`--generated` supply the current authored and generated tables; the generated
+directory defaults to `src/search/fold/unihan`. An authored row overrides both
+generated readings and mappings, including an empty simplified cell.
+
+The expected-change columns are `ideograph`, `kind`, `baseline`, `proposed`.
+Kinds are `default-changed`, `reading-added`, `reading-removed`,
+`mapping-added`, `mapping-removed`, `mapping-retargeted`. Readings are compared
+as distinct toneless search spellings, and mappings as terminal search keys
+after following every simplification link. The report covers the selected
+members; one `reading-added` entry represents one added search spelling.
+A changed default requires a reading in both states. Mapping cycles use the
+literal `cycle` in place of a terminal key. Removed readings are retained in
+the report so a no-loss claim can be checked.
+
+`--assembly DIR` supplies the full proposed rare-tier horizon. Each table is
+either `DIR/<tier>.tsv` or `DIR/<tier>/<tier>.tsv`; all eight tables must contain
+exactly their buildable tier members. The current proposal overrides its
+selected rows in that horizon. Expected changes then compare the baseline
+with the final horizon, while pull-forward simulates landing every tier in
+file order from the same baseline. Without `--assembly`, expected changes
+compare only the current proposal and closure has status `not-evaluated`.
+
+Pull-forward columns are `file`, `ideograph`, `readings`, `simplified`, `reason`.
+Each entry carries a later row in its home file, with its tone-marked readings
+and target intact. Reasons are `baseline-pair`, `cycle`, or both. Closure
+repeats until every repairable baseline-joined pair remains joined and no
+repairable cycle remains; rows already pulled by an earlier step are retained
+and counted only at that first step. The report supplies proposed rows and
+does not write them into authored files or settle their findings.
+
+The JSON records counts per change kind, input content checksums, baseline and
+final cycles, and each landing step's pull counts, remaining splits, unexpected
+splits and cycles. `permanent_splits` lists baseline pairs the final horizon
+itself splits. These require reviewed decisions outside mechanical closure;
+an empty unexpected-split list alone is insufficient evidence of no loss.
+Cycle lists include mapping sources whose paths enter a cycle. A horizon with
+permanent splits or unrepairable cycles remains explicit in the report, and
+never receives an implicit approval. Report findings do not alter the assembler's
+exit status, which continues to describe its own blocking findings.
+
+```sh
+python3 tools/fold-han-rare.py assemble --tier tgh --decisions reviewed.tsv \
+  --authored current-han --generated current-unihan \
+  --assembly proposals --output reports/tgh
+```
+
+The `write_assembly()` API accepts a `baseline` state and an optional
+`report_assembly` horizon to emit the same artifacts. States map ideographs to
+`(readings, simplified)` pairs; horizon keys are tier names. Supplying neither
+keeps the API focused on the four proposal artifacts.
+
 The default pins come from the shipped checker. Offline fixtures or explicit
 reference snapshots use `--references manifest.json` together with all four
 files: `--unihan`, `--cns-properties`, `--cns-mappings`, `--opencc`. The manifest
