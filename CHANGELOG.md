@@ -2,18 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- `Radio > Taste profiles… > Preview library export…` no longer freezes the
-  window on a large library. The preview opens at once and reads the library
-  in the background, Cancel closes it without waiting, and the decade-shares
-  toggle switches between results from that one reading instead of reading
-  the library again.
-- The window stays responsive while an output switch or device takeover waits
-  for the sound card to change hands. Each check reads PipeWire's graph
-  without blocking the window, and the DSD takeover countdown looks its device
-  up once instead of every second.
-
 ## [2026.10.11]
 
 ### Distribution
@@ -406,6 +394,15 @@
 - Clicking the player bar's buttons or seek bar, or the status-bar buttons, no
   longer takes keyboard focus from the current view, so its keys keep working
   without pressing Tab.
+- `Radio > Taste profiles… > Preview library export…` no longer freezes the
+  window on a large library. The preview opens at once and reads the library
+  in the background, Cancel closes it without waiting, and the decade-shares
+  toggle switches between results from that one reading instead of reading
+  the library again.
+- The window stays responsive while an output switch or device takeover waits
+  for the sound card to change hands. Each check reads PipeWire's graph
+  without blocking the window, and the DSD takeover countdown looks its device
+  up once instead of every second.
 
 ## [2026.9.11]
 
