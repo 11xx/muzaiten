@@ -8,7 +8,7 @@ QVector<KeyBindingProfile> defaultMainPanelKeyBindingProfiles()
 
     KeyBindingProfile profile;
     profile.name = QStringLiteral("dired_hjkl");
-    profile.label = QStringLiteral("Main panels: dired + hjkl");
+    profile.label = QStringLiteral("Dired-style + hjkl arrows");
     profile.hintText = QStringLiteral("j/n↓ k/p↑ N/P move queue item h← l→ q queue / search m mark u unmark Ret play Spc+ M-Spc▶▶");
     profile.bindings = {
         {Qt::Key_J, MoveDown},

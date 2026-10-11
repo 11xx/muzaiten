@@ -6,7 +6,7 @@ QVector<KeyBindingProfile> defaultQueueKeyBindingProfiles()
 
     KeyBindingProfile profile;
     profile.name = QStringLiteral("dired_hjkl");
-    profile.label = QStringLiteral("Queue: dired + hjkl");
+    profile.label = QStringLiteral("Dired-style + hjkl arrows");
     profile.hintText = QStringLiteral("j/n↓ k/p↑ N/P move item C-v/M-v page Ret play d remove c clear x clear-priority f file l library o playing / search Esc/C-g clear");
     profile.bindings = {
         {Qt::Key_J, MoveDown},

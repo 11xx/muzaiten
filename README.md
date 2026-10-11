@@ -153,8 +153,8 @@ ones, and a build tool comparing timestamps sees nothing to redo.
 Views on number keys: `1` queue · `2` library · `3` file explorers ·
 `4` search · `5` playlists. Press `2` again for the music explorer. `o` finds
 the playing track; `r`/`s` cycle repeat/shuffle. Right-click anything — tracks,
-albums, artists, and empty space all have menus. `Settings > Keybinds…` lists
-the keys and selects queue, library-panel, and file-explorer key profiles.
+albums, artists, and empty space all have menus. `Settings > Keybinds…` shows
+every screen's keys and changes those of the queue, library and file explorer.
 Full tour: [docs/controls.md](docs/controls.md).
 
 `muzaitenctl` drives a running instance (transport, queue, rating) and

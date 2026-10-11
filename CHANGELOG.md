@@ -4,6 +4,13 @@
 
 ### Added
 
+- `Settings > Keybinds…` changes keys. On the Queue, Library and File
+  explorer screens, give an action other keys, add keys to actions that have
+  none by default, remove keys, and reset an action or a whole screen to its
+  preset. A key another action uses asks before it moves, window keys are
+  refused with the reason, and **Find a key…** shows what a pressed key does.
+  Changed keys are saved with the app's settings, and the file explorer's key
+  hints follow them.
 - `Shift+N` / `Shift+P` move the selected queue rows one place down or up, in
   the queue view and the library's queue sidebar. A contiguous selection moves
   as a block and stays selected; otherwise the cursor row moves.

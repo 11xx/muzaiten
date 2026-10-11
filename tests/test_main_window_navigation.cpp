@@ -4225,6 +4225,32 @@ print(json.dumps({"protocol_version": 1, "request_id": request["request_id"], "e
         QVERIFY(artistList->hasFocus());
     }
 
+    void savedQueueKeysApplyWhenTheQueueScreenIsBuilt()
+    {
+        AppCore core;
+        MainWindow window(&core);
+        window.m_state->setSetting(QStringLiteral("queueScreen.keyBindingOverrides"),
+                                   QStringLiteral(R"({"move_item_down":["Ctrl+J"]})"));
+        const QVector<Track> tracks = syntheticQueueTracks(3);
+        window.m_player->resetQueue(tracks);
+        window.syncQueueState();
+        window.resize(900, 640);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        window.switchMainView(MainView::Queue);
+        QueueScreen *screen = window.ensureQueueScreen();
+        auto *view = screen->findChild<QTableView *>();
+        QVERIFY(view != nullptr);
+        auto *table = screen->findChild<QueueTable *>();
+        QVERIFY(table != nullptr);
+        table->setCurrentRow(0);
+
+        QTest::keyClick(view, Qt::Key_J, Qt::ControlModifier);
+        QCOMPARE(window.m_player->queue().at(1).path, tracks.at(0).path);
+        QTest::keyClick(view, Qt::Key_N, Qt::ShiftModifier);
+        QCOMPARE(window.m_player->queue().at(1).path, tracks.at(0).path);
+    }
+
     void sidebarQueueShiftNAndShiftPReorderTheQueue()
     {
         AppCore core;

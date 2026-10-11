@@ -38,6 +38,7 @@
 #include "ui/FileExplorerView.h"
 #include "ui/GenreCurationDialog.h"
 #include "ui/IdleReleaseController.h"
+#include "ui/KeybindCatalog.h"
 #include "ui/KeybindingsDialog.h"
 #include "ui/LinkRootsDialog.h"
 #include "ui/ListeningHistoryPanel.h"
@@ -1980,7 +1981,10 @@ void MainWindow::resetViewPreferences()
         QStringLiteral("fileExplorer.sortDescending"),
         QStringLiteral("fileExplorer.sortReverseGroups"),
         QStringLiteral("queueScreen.keyBindingProfile"),
+        QStringLiteral("queueScreen.keyBindingOverrides"),
         QStringLiteral("mainPanel.keyBindingProfile"),
+        QStringLiteral("mainPanel.keyBindingOverrides"),
+        QStringLiteral("fileExplorer.keyBindingOverrides"),
         QStringLiteral("mainPanel.focusOrder"),
         QStringLiteral("mainPanel.activePanel"),
         QStringLiteral("mainPanel.scrollPadding"),
@@ -2016,6 +2020,7 @@ void MainWindow::resetViewPreferences()
         ? QStringLiteral("vim")
         : defaultKeyBindingProfiles().first().name;
     if (m_libraryFileExplorer != nullptr) {
+        m_libraryFileExplorer->setKeyBindingOverrides({});
         m_libraryFileExplorer->setKeyBindingProfileName(explorerProfile);
         m_libraryFileExplorer->setKeyHintBarVisible(false);
         m_libraryFileExplorer->setShowUnsupportedFiles(false);
@@ -2023,6 +2028,7 @@ void MainWindow::resetViewPreferences()
         m_libraryFileExplorer->setSort(MusicSort::SortField::FileName, false, false);
     }
     if (m_freeRoamFileExplorer != nullptr) {
+        m_freeRoamFileExplorer->setKeyBindingOverrides({});
         m_freeRoamFileExplorer->setKeyBindingProfileName(explorerProfile);
         m_freeRoamFileExplorer->setKeyHintBarVisible(false);
         m_freeRoamFileExplorer->setShowUnsupportedFiles(false);
@@ -2033,9 +2039,11 @@ void MainWindow::resetViewPreferences()
 
     if (m_queueScreen != nullptr) {
         m_queueScreen->setKeyBindingProfileName(defaultQueueKeyBindingProfileName());
+        m_queueScreen->setKeyBindingOverrides({});
     }
     if (m_panelSearch != nullptr) {
         m_panelSearch->setKeyBindingProfileName(defaultMainPanelKeyBindingProfileName());
+        m_panelSearch->setKeyBindingOverrides({});
         m_panelSearch->setFocusOrder(defaultMainPanelFocusOrder());
         m_panelSearch->setActivePanel(MainPanelId::Artists, false);
     }
@@ -2092,6 +2100,7 @@ QueueScreen *MainWindow::ensureQueueScreen()
     m_queueScreen->applyViewSettingsJson(m_state->setting(QStringLiteral("queueScreen.view")));
     m_queueScreen->setKeyBindingProfileName(m_state->setting(QStringLiteral("queueScreen.keyBindingProfile"),
                                                              defaultQueueKeyBindingProfileName()));
+    m_queueScreen->setKeyBindingOverrides(savedKeyBindingOverrides(KeyBindingScopeId::Queue));
     const int mainPanelScrollPadding = std::clamp(m_state->setting(QStringLiteral("mainPanel.scrollPadding"),
                                                                    QString::number(TableNavigationScroll::kDefaultPaddingRows)).toInt(),
                                                   0, 20);
@@ -2208,6 +2217,9 @@ void MainWindow::ensureFileExplorers()
     m_libraryFileExplorer->setTrackResolver(trackResolver);
     m_freeRoamFileExplorer->setTrackResolver(trackResolver);
 
+    const KeyBindingOverrides explorerOverrides = savedKeyBindingOverrides(KeyBindingScopeId::Explorer);
+    m_libraryFileExplorer->setKeyBindingOverrides(explorerOverrides);
+    m_freeRoamFileExplorer->setKeyBindingOverrides(explorerOverrides);
     const QString keyProfile = m_state->setting(QStringLiteral("fileExplorer.keyBindingProfile"));
     if (!keyProfile.isEmpty()) {
         m_libraryFileExplorer->setKeyBindingProfileName(keyProfile);
@@ -4573,9 +4585,19 @@ void MainWindow::configurePlaylistMetadataDisplay()
     savePlaylistViewSettings();
 }
 
+KeyBindingOverrides MainWindow::savedKeyBindingOverrides(const char *scopeId) const
+{
+    const KeyBindingScope *scope = keyBindingScope(QString::fromLatin1(scopeId));
+    return scope != nullptr ? keyBindingOverridesFromJson(m_state->setting(scope->settingsKey), *scope)
+                            : KeyBindingOverrides{};
+}
+
 void MainWindow::configureKeybindings()
 {
     KeybindingsDialog dialog(this);
+    for (const KeyBindingScope &scope : editableKeyBindingScopes()) {
+        dialog.setOverrides(scope.id, savedKeyBindingOverrides(scope.id.toLatin1().constData()));
+    }
     if (m_panelSearch != nullptr) {
         dialog.setMainPanelProfileName(m_panelSearch->keyBindingProfileName());
     }
@@ -4597,18 +4619,31 @@ void MainWindow::configureKeybindings()
         return;
     }
 
+    for (const KeyBindingScope &scope : editableKeyBindingScopes()) {
+        const KeyBindingOverrides overrides = dialog.overrides(scope.id);
+        if (overrides.isEmpty()) {
+            m_state->removeSetting(scope.settingsKey);
+        } else {
+            m_state->setSetting(scope.settingsKey, keyBindingOverridesToJson(overrides));
+        }
+    }
+    const KeyBindingOverrides queueOverrides = dialog.overrides(QString::fromLatin1(KeyBindingScopeId::Queue));
+    const KeyBindingOverrides libraryOverrides = dialog.overrides(QString::fromLatin1(KeyBindingScopeId::Library));
+    const KeyBindingOverrides explorerOverrides = dialog.overrides(QString::fromLatin1(KeyBindingScopeId::Explorer));
     if (m_panelSearch != nullptr) {
         m_panelSearch->setKeyBindingProfileName(dialog.mainPanelProfileName());
+        m_panelSearch->setKeyBindingOverrides(libraryOverrides);
         saveMainWindowViewSettings();
     }
-    if (m_libraryFileExplorer != nullptr) {
-        m_libraryFileExplorer->setKeyBindingProfileName(dialog.fileExplorerProfileName());
-    }
-    if (m_freeRoamFileExplorer != nullptr) {
-        m_freeRoamFileExplorer->setKeyBindingProfileName(dialog.fileExplorerProfileName());
+    for (FileExplorerView *explorer : {m_libraryFileExplorer, m_freeRoamFileExplorer}) {
+        if (explorer != nullptr) {
+            explorer->setKeyBindingOverrides(explorerOverrides);
+            explorer->setKeyBindingProfileName(dialog.fileExplorerProfileName());
+        }
     }
     if (m_queueScreen != nullptr) {
         m_queueScreen->setKeyBindingProfileName(dialog.queueProfileName());
+        m_queueScreen->setKeyBindingOverrides(queueOverrides);
     }
     if (m_libraryFileExplorer != nullptr) {
         m_libraryFileExplorer->setKeyHintBarVisible(dialog.fileExplorerKeyHintsVisible());

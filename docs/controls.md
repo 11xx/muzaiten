@@ -15,8 +15,16 @@
 - `Ctrl+scroll` over the queue, search results, or file explorers —
   adjust row height
 
-`Settings > Keybinds…` lists the keys and selects queue, library-panel, and
-file-explorer key profiles. Global, search, and playlist keys are fixed.
+`Settings > Keybinds…` shows every screen's keys. On the Queue, Library and
+File explorer screens it changes them over a chosen preset: select an action,
+then **Add key** and press the key, or click a key to remove it. Actions with
+no key by default can be given one. A key another action already uses asks before
+it moves; the window keys (`1`–`5`, `o`, `r`, `s`) are refused, since the
+window handles them before any screen. **Reset to preset** undoes one action,
+and **Restore the … defaults** a whole screen. **Find a key…** shows what the
+next key you press does on that screen. With changed keys, the file explorer's
+key hints list the keys in effect. Search, playlist and window keys are
+fixed.
 
 The player bar carries the current track's album art on every view except the
 library ones, where the right sidebar shows it at full width. Right-click the

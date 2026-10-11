@@ -13,6 +13,7 @@
 #include "core/ScanRoot.h"
 #include "playback/PlaybackTypes.h"
 #include "ui/AudioAnalysisData.h"
+#include "ui/KeybindCatalog.h"
 #include "scrobble/ScrobbleDestination.h"
 #include "ui/ScrobblingDialog.h"
 
@@ -263,6 +264,8 @@ private:
     void configureSearchRanking();
     void configureMemoryReclaim();
     void configureKeybindings();
+    // The user's saved key changes for one editable screen (KeyBindingScopeId).
+    KeyBindingOverrides savedKeyBindingOverrides(const char *scopeId) const;
     void loadSearchRankingConfig();
     int idleReleaseMs() const;
     int deepReleaseMs() const;

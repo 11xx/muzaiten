@@ -104,6 +104,7 @@ void ViewStatePersistence::loadViewSettings()
     if (m_window.m_panelSearch != nullptr) {
         m_window.m_panelSearch->setKeyBindingProfileName(m_window.m_state->setting(QStringLiteral("mainPanel.keyBindingProfile"),
                                                                  defaultMainPanelKeyBindingProfileName()));
+        m_window.m_panelSearch->setKeyBindingOverrides(m_window.savedKeyBindingOverrides(KeyBindingScopeId::Library));
         const QJsonArray focusOrder = QJsonDocument::fromJson(m_window.m_state->setting(QStringLiteral("mainPanel.focusOrder")).toUtf8()).array();
         m_window.m_panelSearch->setFocusOrder(mainPanelFocusOrderFromJson(focusOrder));
         m_window.m_panelSearch->setActivePanelFromString(m_window.m_state->setting(QStringLiteral("mainPanel.activePanel")));
