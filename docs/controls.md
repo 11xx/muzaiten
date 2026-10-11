@@ -26,7 +26,8 @@ art for **Find in library** and **Open containing directory**.
 
 Playing a track keeps the queue where it is and moves the cursor to the
 playing row, scrolling only when that row is off screen. `1` and `o` in the
-queue view center the playing row.
+queue view center the playing row. The player bar's buttons and sliders
+never take keyboard focus, so the current view keeps its keys after a click.
 
 ## Context menus
 

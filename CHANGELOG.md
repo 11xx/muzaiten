@@ -8,6 +8,12 @@
   row and the queue scrolls only when that row is off screen. `1` and `o` in
   the queue view still center the playing row, also with the `#` column hidden.
 
+### Fixed
+
+- Clicking the player bar's buttons or seek bar, or the status-bar buttons, no
+  longer takes keyboard focus from the current view, so its keys keep working
+  without pressing Tab.
+
 ## [2026.10.11]
 
 ### Distribution

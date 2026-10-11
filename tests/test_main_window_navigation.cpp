@@ -72,6 +72,7 @@
 #include <QSpinBox>
 #include <QSystemTrayIcon>
 #include <QTableView>
+#include <QVBoxLayout>
 #include <QTemporaryDir>
 #include <QTreeWidget>
 #include <QTimer>
@@ -2130,6 +2131,33 @@ print(json.dumps({"protocol_version": 1, "request_id": request["request_id"], "e
 
         QTest::mouseClick(up, Qt::LeftButton);
         QCOMPARE(explorer->currentDirectory(), QDir::cleanPath(browsingRoot.path()));
+    }
+
+    void playerBarControlsLeaveKeyboardFocusInTheView()
+    {
+        QWidget host;
+        auto *layout = new QVBoxLayout(&host);
+        auto *bar = new PlayerBar(&host);
+        auto *view = new QTableView(&host);
+        layout->addWidget(bar);
+        layout->addWidget(view);
+        host.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&host));
+        view->setFocus();
+        QCOMPARE(host.focusWidget(), view);
+
+        bar->m_progress->setRange(0, 100);
+        bar->m_progress->setEnabled(true);
+        for (QWidget *control : {static_cast<QWidget *>(bar->m_previous), static_cast<QWidget *>(bar->m_playPause),
+                                 static_cast<QWidget *>(bar->m_next), static_cast<QWidget *>(bar->m_progress),
+                                 static_cast<QWidget *>(bar->m_repeat), static_cast<QWidget *>(bar->m_shuffle)}) {
+            QTest::mouseClick(control, Qt::LeftButton);
+            QCOMPARE(host.focusWidget(), view);
+        }
+        for (QWidget *control : {static_cast<QWidget *>(bar->m_menuButton), static_cast<QWidget *>(bar->m_menuBar),
+                                 static_cast<QWidget *>(bar->m_volumeButton), static_cast<QWidget *>(bar->m_rating)}) {
+            QCOMPARE(control->focusPolicy(), Qt::NoFocus);
+        }
     }
 
     void playerBarGraysVolumeWhenControlIsDisabled()

@@ -688,12 +688,15 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
     statusBar()->addPermanentWidget(m_radioProgress);
     connect(m_core, &AppCore::radioLoadingChanged, m_radioProgress, &QWidget::setVisible);
     m_radioProgress->setVisible(m_core->radioLoading());
+    // Status-bar buttons act on click without taking keyboard focus from the view.
     m_stopScanButton = new QPushButton(QStringLiteral("Stop scan"), this);
+    m_stopScanButton->setFocusPolicy(Qt::NoFocus);
     m_stopScanButton->setVisible(false);
     m_stopScanButton->setToolTip(QStringLiteral("Cancel the current library scan"));
     statusBar()->addPermanentWidget(m_stopScanButton);
 
     m_takeOverDeviceButton = new QPushButton(QStringLiteral("Take over device"), this);
+    m_takeOverDeviceButton->setFocusPolicy(Qt::NoFocus);
     m_takeOverDeviceButton->setVisible(false);
     m_takeOverDeviceButton->setToolTip(
         QStringLiteral("Free the audio device from PipeWire and retry bit-perfect playback"));
