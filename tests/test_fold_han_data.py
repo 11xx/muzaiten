@@ -295,6 +295,42 @@ class FoldHanDataTests(unittest.TestCase):
             self.assertEqual(held["witness"]["archive_sha256"], hashlib.sha256(archive.read_bytes()).hexdigest())
             self.assertNotIn("lii", checker.pinyin_inventory(fields))
 
+    def test_supported_tiers_and_foldgen_share_unified_membership(self):
+        unsupported = chr(0x2B73E)
+        compatible = chr(0xFA0E)
+        fields = {"kMandarin": {"㐀": "mù", unsupported: "mù", compatible: "mù"}}
+        tiers = checker.tiers(fields, {})
+        self.assertEqual(tiers["exta"], ["㐀"])
+        self.assertNotIn(unsupported, tiers["extc"])
+        self.assertEqual(tiers.unicode_version, checker.unicodedata.unidata_version)
+        for ch in ("㐀", unsupported, compatible, "A", chr(0x323B0)):
+            self.assertEqual(checker.is_unihan_ideograph(ch), foldgen.is_unified_han(ch))
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "fixture.tsv").write_text(f"{compatible}\tmù\t\n")
+            with self.assertRaisesRegex(SystemExit, "one Han ideograph"):
+                foldgen.load_authored_han(root)
+
+    def test_complete_outer_coverage_withholds_unassigned_cns_member(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            table, reviewed = root / "cns.tsv", root / "reviewed.tsv"
+            table.write_text("# complete\n㐀\tmù\t\n")
+            reviewed.write_text("")
+            cns = {"㐀": ["mù"], chr(0x2B73E): ["mù"]}
+            fields = {name: {} for name in (*checker.READING_FIELDS, *checker.VARIANT_FIELDS)}
+            with mock.patch.object(checker, "unihan_archive", return_value=object()), \
+                 mock.patch.object(checker, "unihan_fields", return_value=fields), \
+                 mock.patch.object(checker, "cns_readings", return_value=cns), \
+                 mock.patch.object(checker, "opencc_archive", return_value=root), \
+                 mock.patch.object(checker, "opencc_characters", return_value={}), \
+                 mock.patch.object(sys.modules["fold_han_rare"], "check_provenance", return_value=[]), \
+                 mock.patch.object(sys.modules["fold_han_rare"], "read_predictions", return_value=object()), \
+                 contextlib.redirect_stdout(output := io.StringIO()), \
+                 contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(checker.check([table], reviewed, authored_dir=root), 0, output.getvalue())
+            self.assertNotIn("\tcoverage\t", output.getvalue())
+
     def test_rare_tiers_are_ordered_and_disjoint(self):
         fields = {name: {} for name in (*checker.READING_FIELDS, *checker.VARIANT_FIELDS,
                                         "kZVariant", "kTGH", "kUnihanCore2020")}

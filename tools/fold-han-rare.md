@@ -147,8 +147,13 @@ Direct families join through `kSimplifiedVariant`, `kTraditionalVariant`,
 Relation endpoints are NFC-normalized, which maps compatibility ideographs to
 their unified counterparts. The reference graph includes Unihan 18's Extension J
 even when Python has not assigned its vertices. Output membership uses the
-generator's output blocks and runtime categories independently of the graph.
-Assembly requires category `Lo` in the build Python's Unicode data. A selected
+shared unified-Han predicate in `foldgen.py`, independently of the graph:
+D3 source selection, unified output ranges, and category `Lo` in the exact
+interpreter used for the build. `tiers()` and the data checker's outer coverage
+pass use that predicate too. `HanTiers.unicode_version` records its UCD version;
+assembly headers and the generated C++ tables record the running UCD version.
+The output ranges include Extensions A through I; Extension J requires an
+explicit output-range migration. A selected
 family target outside that boundary is withheld as an `unsupported-target`
 gap naming its relation path; the family and its unresolved decisions remain
 intact. Block-based tier members outside that boundary are recorded as

@@ -121,13 +121,15 @@ and `han_simplified.tsv` from a pinned Unihan release, leaving out the
 authored ideographs (Unicode License v3, see `UNICODE-LICENSE.txt` there).
 The generator and checker pin Unihan 18.0.0 and verify its archive hash,
 independently of Python's Unicode version. Generated keys and mapping targets must lie in the
-tool's ideograph blocks and have category `Lo` in the running Python's Unicode
+shared unified-Han output ranges and have category `Lo` in the build interpreter's Unicode
 database; reference entries for unrecognized characters are excluded from output.
 A default mapping to an unsupported target is withheld without selecting another
 variant; its source relation remains available to the provenance graph.
 Generation is byte-repeatable with the same reference, authored tables and
 runtime categories. The TSV headers record both Unicode versions and the
-source URL and hash. The scoped [Han NOTICE](../src/search/fold/tables/han/NOTICE)
+source URL and hash; generated C++ tables and assembly headers record the build
+UCD version. Authored tier membership, outer coverage checks and foldgen use
+the same output predicate. The scoped [Han NOTICE](../src/search/fold/tables/han/NOTICE)
 retains the exact archive copyright notice; binary installs include it and the
 complete Unicode license under `share/licenses/muzaiten/`.
 The provenance relation graph includes Extension J vertices from the full pinned

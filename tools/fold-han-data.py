@@ -77,11 +77,13 @@ CEDICT_CACHE_FILE = "cedict.zip"
 # Reference downloads, kept apart from the application's own cache directory.
 TOOLS_CACHE = pathlib.Path(os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache") / "muzaiten-tools"
 
-IDEOGRAPH_BLOCKS = [
-    (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0x20000, 0x2A6DF), (0x2A700, 0x2B73F),
-    (0x2B740, 0x2B81F), (0x2B820, 0x2CEAF), (0x2CEB0, 0x2EBEF), (0x2EBF0, 0x2EE5F),
-    (0x30000, 0x3134F), (0x31350, 0x323AF),
-]
+if "foldgen" not in sys.modules:
+    _foldgen_spec = importlib.util.spec_from_file_location("foldgen", ROOT / "tools" / "foldgen.py")
+    _foldgen = importlib.util.module_from_spec(_foldgen_spec)
+    sys.modules["foldgen"] = _foldgen
+    _foldgen_spec.loader.exec_module(_foldgen)
+foldgen = sys.modules["foldgen"]
+IDEOGRAPH_BLOCKS = foldgen.UNIFIED_HAN_RANGES
 # Unihan 18 relations include Extension J; output membership uses IDEOGRAPH_BLOCKS.
 REFERENCE_IDEOGRAPH_BLOCKS = [*IDEOGRAPH_BLOCKS, (0x323B0, 0x3347F)]
 
@@ -483,7 +485,7 @@ def in_reference_ideograph_blocks(ch: str) -> bool:
 
 
 def is_unihan_ideograph(ch: str) -> bool:
-    return in_ideograph_blocks(ch) and unicodedata.category(ch) == "Lo"
+    return foldgen.is_unified_han(ch, IDEOGRAPH_BLOCKS)
 
 
 def authored_ideographs(directory: pathlib.Path) -> set[str]:
@@ -592,11 +594,24 @@ def ks_x1001() -> list[str]:
     return [c for r in range(0xCA, 0xFE) for k in range(0xA1, 0xFF) if (c := _decode(bytes([r, k]), "euc_kr"))]
 
 
-def tiers(fields: dict[str, dict[str, str]] | None = None,
-          cns: dict[str, set[str]] | None = None) -> dict[str, list[str]]:
-    """Return each standard and block's ideographs absent from earlier tiers.
+class HanTiers(dict[str, list[str]]):
+    """Build-supported D3 membership with withheld candidates and its UCD version."""
 
-    Every member lies in `IDEOGRAPH_BLOCKS`; compatibility ideographs belong to no tier."""
+    def __init__(self, selected):
+        super().__init__((tier, [ch for ch in members if is_unihan_ideograph(ch)]) for tier, members in selected.items())
+        self.withheld = {tier: [ch for ch in members if not is_unihan_ideograph(ch)] for tier, members in selected.items()}
+        self.unicode_version = unicodedata.unidata_version
+
+
+def tiers(fields: dict[str, dict[str, str]] | None = None,
+          cns: dict[str, list[str]] | None = None) -> HanTiers:
+    """Return D3 selection intersected with unified output ranges and runtime category Lo."""
+    return HanTiers(tier_selection(fields, cns))
+
+
+def tier_selection(fields: dict[str, dict[str, str]] | None = None,
+                   cns: dict[str, list[str]] | None = None) -> dict[str, list[str]]:
+    """Return D3 source selection before runtime assignment filters output."""
     if fields is None:
         fields = unihan_fields(unihan_archive(None), "kTGH", "kUnihanCore2020",
                                *READING_FIELDS, *VARIANT_FIELDS, "kZVariant")
@@ -647,17 +662,8 @@ def pinyin_base(reading: str) -> str | None:
 
 
 def pinyin_inventory(fields: dict[str, dict[str, str]]) -> set[str]:
-    """Collect Unihan syllable spellings and the admitted exceptional CNS classes."""
-    inventory = {"pia", "yai", "nui", "sei", "gue"}
-    for field in READING_FIELDS:
-        if field == "kSMSZD2003Readings":
-            continue
-        for value in fields.get(field, {}).values():
-            inventory.update(
-                base for reading in field_readings(field, value)
-                if (base := pinyin_base(reading)) is not None
-            )
-    return inventory
+    """Return the pinned Unihan syllable bases plus the admitted CNS exceptions."""
+    return set(MANDARIN_SYLLABLES)
 
 
 def admit_syllable(reading: str) -> str | None:

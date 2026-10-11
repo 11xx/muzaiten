@@ -544,10 +544,9 @@ def assemble(members: list[str], refs: References, predictions: Predictions, aut
 
 
 def build_tiers(refs: References) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
-    """Partition block-based membership into buildable and withheld members."""
+    """Return shared build-supported membership and witnessed unsupported candidates."""
     tiers = data.tiers(refs.fields, refs.cns)
-    return ({tier: [ch for ch in members if data.is_unihan_ideograph(ch)] for tier, members in tiers.items()},
-            {tier: [ch for ch in members if not data.is_unihan_ideograph(ch)] for tier, members in tiers.items()})
+    return tiers, tiers.withheld
 
 
 def member_gap(ch: str) -> tuple[str, str, str, str, str]:
@@ -605,7 +604,8 @@ def authored_pin(authored: set[str]) -> dict:
 
 def header(schema: str, refs: References, predictions: Predictions, authored: set[str]) -> str:
     return (f"# schema: {schema}\n# references: {canonical(refs.pins)}\n# inputs: {canonical(predictions.inputs)}\n"
-            + f"# authored: {canonical(authored_pin(authored))}\n")
+            + f"# authored: {canonical(authored_pin(authored))}\n"
+            + f"# Python Unicode data: {unicodedata.unidata_version}.\n")
 
 
 def table_rows(path: pathlib.Path) -> dict[str, tuple[list[str], str]]:
