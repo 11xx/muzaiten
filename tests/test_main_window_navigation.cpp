@@ -67,6 +67,7 @@
 #include <QSet>
 #include <QStatusBar>
 #include <QSqlDatabase>
+#include <QSqlError>
 #include <QSqlQuery>
 #include <QSpinBox>
 #include <QSystemTrayIcon>
@@ -81,6 +82,7 @@
 #include <QPushButton>
 
 #include "AudioDeviceFixtures.h"
+#include "FingerprintCursorFixture.h"
 #include "SemanticDescendantFixture.h"
 #include "playback/DirectDeviceResolver.h"
 #include "playback/PlaybackProfileJson.h"
@@ -612,8 +614,16 @@ private slots:
         QTRY_COMPARE(Search::IndexCache::read(cache).records.value(0).title, QStringLiteral("Changed"));
     }
 
+    void scanAbortsWhenFingerprintReadFails_data()
+    {
+        QTest::addColumn<bool>("lateFetch");
+        QTest::newRow("prepare-error") << false;
+        QTest::newRow("late-fetch-error") << true;
+    }
+
     void scanAbortsWhenFingerprintReadFails()
     {
+        QFETCH(bool, lateFetch);
         QTemporaryDir music;
         QVERIFY(music.isValid());
         const QString rootA = QDir(music.path()).filePath(QStringLiteral("a"));
@@ -633,6 +643,14 @@ private slots:
         gone.fileSize = 1;
         gone.fileMtime = 1;
         QVERIFY2(database->upsertTrack(gone), qPrintable(database->lastError()));
+        QStringList gonePaths{gone.path};
+        if (lateFetch) {
+            Track late = gone;
+            late.filename = QStringLiteral("late.wav");
+            late.path = QDir(rootA).filePath(late.filename);
+            QVERIFY2(database->upsertTrack(late), qPrintable(database->lastError()));
+            gonePaths.append(late.path);
+        }
         for (const QString &root : {rootA, rootB}) {
             ScanRoot scanRoot;
             scanRoot.name = QFileInfo(root).fileName();
@@ -649,11 +667,13 @@ private slots:
             fixture.setDatabaseName(core.databasePath());
             QVERIFY(fixture.open());
             QSqlQuery query(fixture);
-            // Only the fingerprint SELECT reads this column before the scan pipeline starts.
-            QVERIFY(query.exec(QStringLiteral("ALTER TABLE tracks RENAME COLUMN metadata_scanned TO metadata_scanned_fault")));
-            QVERIFY(!query.exec(QStringLiteral("SELECT path, file_mtime, file_size, metadata_scanned FROM tracks")));
+            if (!lateFetch) {
+                // Only the fingerprint SELECT reads this column before the scan pipeline starts.
+                QVERIFY(query.exec(QStringLiteral("ALTER TABLE tracks RENAME COLUMN metadata_scanned TO metadata_scanned_fault")));
+                QVERIFY(!query.exec(QStringLiteral("SELECT path, file_mtime, file_size, metadata_scanned FROM tracks")));
+            }
             QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM tracks")) && query.next());
-            QCOMPARE(query.value(0).toInt(), 1);
+            QCOMPARE(query.value(0).toInt(), gonePaths.size());
         }
         const auto countTracks = [&fixtureConnection](const QString &where) {
             QSqlQuery query(QSqlDatabase::database(fixtureConnection));
@@ -662,6 +682,35 @@ private slots:
         };
 
         MainWindow window(&core);
+        QSqlDatabase mainConnection;
+        QString expectedError = QStringLiteral("metadata_scanned");
+        if (lateFetch) {
+            for (const QString &name : QSqlDatabase::connectionNames()) {
+                if (name.startsWith(QLatin1String("main-"))) {
+                    const auto connection = QSqlDatabase::database(name);
+                    if (connection.databaseName() == core.databasePath()) mainConnection = connection;
+                }
+            }
+            QVERIFY(mainConnection.isValid());
+            const QString fixtureError = FingerprintCursorFixture::install(mainConnection);
+            QVERIFY2(fixtureError.isEmpty(), qPrintable(fixtureError));
+            QSqlQuery query(mainConnection);
+            QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM tracks")) && query.next());
+            QCOMPARE(query.value(0).toInt(), gonePaths.size());
+            QVERIFY(query.prepare(QStringLiteral(
+                "SELECT path, file_mtime, file_size, metadata_scanned FROM tracks WHERE path = ? OR path LIKE ? ESCAPE '\\'")));
+            query.addBindValue(rootA);
+            query.addBindValue(rootA + QStringLiteral("/%"));
+            QVERIFY(query.exec());
+            QVERIFY(!query.lastError().isValid());
+            QVERIFY(query.next());
+            QCOMPARE(query.value(0).toString(), gone.path);
+            QVERIFY(!query.lastError().isValid());
+            QVERIFY(!query.next());
+            QVERIFY(query.lastError().isValid());
+            QCOMPARE(query.lastError().databaseText(), QStringLiteral("integer overflow"));
+            expectedError = query.lastError().text();
+        }
         QStringList messages;
         connect(window.statusBar(), &QStatusBar::messageChanged, &window, [&messages](const QString &message) {
             if (!message.isEmpty()) messages.append(message);
@@ -693,9 +742,9 @@ private slots:
         const QStringList failures = messages.filter(QStringLiteral("Scan aborted"));
         QCOMPARE(failures.size(), 1);
         QVERIFY(failures.first().contains(rootA));
-        QVERIFY2(failures.first().contains(QStringLiteral("metadata_scanned")), qPrintable(failures.first()));
+        QVERIFY2(failures.first().contains(expectedError), qPrintable(failures.first()));
         QCOMPARE(window.statusBar()->currentMessage(), failures.first());
-        QCOMPARE(countTracks(QStringLiteral("1")), 1);
+        QCOMPARE(countTracks(QStringLiteral("1")), gonePaths.size());
         QCOMPARE(countTracks(QStringLiteral("COALESCE(missing, 0) <> 0")), 0);
         const QVector<ScanRoot> afterFailure = database->scanRoots();
         QCOMPARE(afterFailure.size(), 2);
@@ -704,8 +753,9 @@ private slots:
         QVERIFY(afterFailure.at(1).lastScannedAt.isEmpty());
 
         {
-            QSqlQuery query(QSqlDatabase::database(fixtureConnection));
-            QVERIFY(query.exec(QStringLiteral("ALTER TABLE tracks RENAME COLUMN metadata_scanned_fault TO metadata_scanned")));
+            QSqlQuery query(lateFetch ? mainConnection : QSqlDatabase::database(fixtureConnection));
+            QVERIFY(query.exec(lateFetch ? QStringLiteral("DROP VIEW temp.tracks")
+                                        : QStringLiteral("ALTER TABLE tracks RENAME COLUMN metadata_scanned_fault TO metadata_scanned")));
         }
         messages.clear();
         window.scanSourceRoots(database->enabledScanRoots());
@@ -718,7 +768,7 @@ private slots:
         const qsizetype firstDone = messages.indexOf(QStringLiteral("Source scan complete: %1").arg(rootA));
         QVERIFY(firstDone >= 0);
         QVERIFY(messages.lastIndexOf(QStringLiteral("Source scans complete")) > firstDone);
-        QCOMPARE(database->missingTrackPaths(), QStringList{gone.path});
+        QCOMPARE(database->missingTrackPaths(), gonePaths);
         QCOMPARE(countTracks(QStringLiteral("path LIKE '%/new.wav'")), 2);
         for (const ScanRoot &root : database->scanRoots()) {
             QVERIFY(root.lastError.isEmpty());

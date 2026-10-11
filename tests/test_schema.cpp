@@ -2,8 +2,10 @@
 #include "core/MetadataBlob.h"
 #include "db/Database.h"
 #include "db/Schema.h"
+#include "db/SqlUtil.h"
 #include "search/IndexCache.h"
 #include "search/SearchRecord.h"
+#include "FingerprintCursorFixture.h"
 
 #include <QSqlDatabase>
 #include <QSqlError>
@@ -23,6 +25,8 @@ private slots:
     void missingSearchTriggerInvalidatesIdentity();
     void migratesFreshDatabase();
     void enumeratedPlaceholdersStayIsolatedUntilScanned();
+    void trackFingerprintsRejectsLateFetchError_data();
+    void trackFingerprintsRejectsLateFetchError();
     void guessedPlaceholdersFollowVisibilitySetting();
     void upsertsTrackAndQueriesArtist();
     void repeatedScanSessionsReuseArtistsAndAlbums();
@@ -914,6 +918,99 @@ void SchemaTest::enumeratedPlaceholdersStayIsolatedUntilScanned()
     fingerprints = database.trackFingerprints();
     QVERIFY(!fingerprints.has_value());
     QVERIFY2(fingerprints.error().contains(QStringLiteral("metadata_scanned")), qPrintable(fingerprints.error()));
+}
+
+void SchemaTest::trackFingerprintsRejectsLateFetchError_data()
+{
+    QTest::addColumn<bool>("scoped");
+    QTest::newRow("all-tracks") << false;
+    QTest::newRow("root-prefix") << true;
+}
+
+void SchemaTest::trackFingerprintsRejectsLateFetchError()
+{
+    QFETCH(bool, scoped);
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString connectionName = QStringLiteral("fingerprint-cursor-%1")
+                                       .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    Database database(connectionName);
+    QVERIFY2(database.open(temp.filePath(QStringLiteral("library.sqlite"))), qPrintable(database.lastError()));
+    const QString root = temp.filePath(QStringLiteral("music_%"));
+    const QString prefix = scoped ? root : QString();
+    const auto empty = database.trackFingerprints(prefix);
+    QVERIFY(empty.has_value());
+    QVERIFY(empty->isEmpty());
+
+    Track first = makeTrack(temp, QStringLiteral("first.wav"), 0);
+    first.path = QDir(root).filePath(first.filename);
+    first.parentDir = root;
+    Track late = first;
+    late.filename = QStringLiteral("late.wav");
+    late.path = QDir(root).filePath(late.filename);
+    late.fileMtime = 30;
+    late.fileSize = 40;
+    QVERIFY2(database.upsertTrack(first), qPrintable(database.lastError()));
+    QVERIFY2(database.upsertTrack(late), qPrintable(database.lastError()));
+    const auto complete = database.trackFingerprints(prefix);
+    QVERIFY(complete.has_value());
+    QCOMPARE(complete->size(), 2);
+    for (const Track &track : {first, late}) {
+        QVERIFY(complete->contains(track.path));
+        QCOMPARE(complete->value(track.path).mtime, track.fileMtime);
+        QCOMPARE(complete->value(track.path).size, track.fileSize);
+        QVERIFY(complete->value(track.path).metadataScanned);
+    }
+
+    QSqlDatabase connection = QSqlDatabase::database(connectionName);
+    const QString fixtureError = FingerprintCursorFixture::install(connection);
+    QVERIFY2(fixtureError.isEmpty(), qPrintable(fixtureError));
+    QSqlQuery count(connection);
+    QVERIFY(count.exec(QStringLiteral("SELECT COUNT(*) FROM tracks")));
+    QVERIFY(count.next());
+    QCOMPARE(count.value(0).toInt(), 2);
+    count.finish();
+
+    QSqlQuery query(connection);
+    QVERIFY(query.prepare(scoped
+        ? QStringLiteral("SELECT path, file_mtime, file_size, metadata_scanned FROM tracks WHERE path = ? OR path LIKE ? ESCAPE '\\'")
+        : QStringLiteral("SELECT path, file_mtime, file_size, metadata_scanned FROM tracks")));
+    if (scoped) {
+        query.addBindValue(root);
+        query.addBindValue(SqlUtil::likeEscaped(root) + QStringLiteral("/%"));
+    }
+    QVERIFY(query.exec());
+    QVERIFY(!query.lastError().isValid());
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toString(), first.path);
+    QCOMPARE(query.value(1).toLongLong(), first.fileMtime);
+    QVERIFY(!query.lastError().isValid());
+    QVERIFY(!query.next());
+    const QSqlError terminalError = query.lastError();
+    QVERIFY(terminalError.isValid());
+    QCOMPARE(terminalError.nativeErrorCode(), QStringLiteral("1"));
+    QCOMPARE(terminalError.databaseText(), QStringLiteral("integer overflow"));
+    QCOMPARE(terminalError.driverText(), QStringLiteral("Unable to fetch row"));
+
+    // Scope filters exclude the faulty row before its expression is evaluated.
+    const auto emptyRoot = database.trackFingerprints(temp.filePath(QStringLiteral("elsewhere")));
+    QVERIFY(emptyRoot.has_value());
+    QVERIFY(emptyRoot->isEmpty());
+    const auto firstOnly = database.trackFingerprints(first.path);
+    QVERIFY(firstOnly.has_value());
+    QCOMPARE(firstOnly->size(), 1);
+    QCOMPARE(firstOnly->value(first.path).mtime, first.fileMtime);
+
+    const auto failed = database.trackFingerprints(prefix);
+    QVERIFY2(!failed.has_value(), "A terminal fetch error must not return a partial fingerprint map");
+    QCOMPARE(failed.error(), terminalError.text());
+
+    QSqlQuery restore(connection);
+    QVERIFY(restore.exec(QStringLiteral("DROP VIEW temp.tracks")));
+    const auto recovered = database.trackFingerprints(prefix);
+    QVERIFY(recovered.has_value());
+    QCOMPARE(recovered->size(), complete->size());
+    QCOMPARE(recovered->value(late.path).mtime, late.fileMtime);
 }
 
 void SchemaTest::guessedPlaceholdersFollowVisibilitySetting()

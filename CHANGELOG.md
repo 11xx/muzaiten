@@ -244,6 +244,10 @@
   directory's scan status. The failed read was previously treated as an
   empty directory, so every known file looked new and missing-file
   detection was silently skipped.
+- A database error while fetching later rows of known tracks aborts the scan
+  before enumeration and reports the underlying error. A partial set of
+  fingerprints was previously treated as complete, omitting unread tracks from
+  incremental comparison and missing-file detection.
 - Seed stores holding 31 or 32 near-limit taste profiles stay listable,
   removable and writable. Earlier versions accepted those imports but then could
   not read the store, which grew past its 2 MiB read limit. Reads and writes now

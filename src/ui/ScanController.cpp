@@ -55,9 +55,9 @@ void ScanController::startScan(const QString &rootPath, int scanRootId)
         return;
     }
 
-    // Read the known tracks before committing any scan state. The pipeline takes
-    // an empty map to mean a new root, so a failed read must stop here: passed on,
-    // it would treat every known file as new and skip missing-file detection.
+    // Read every known track before committing scan state. The pipeline treats
+    // paths absent from the map as new and cannot mark those records missing,
+    // so any failed read must stop here.
     const QString cleanRoot = cleanDirectoryPath(rootPath);
     auto fingerprints = m_window.m_database->trackFingerprints(cleanRoot);
     if (!fingerprints) {

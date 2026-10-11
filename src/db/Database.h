@@ -136,8 +136,8 @@ public:
     // path -> {file_mtime, file_size, metadata_scanned} for tracks under
     // rootPrefix, for the incremental-rescan diff. Empty rootPrefix returns all
     // tracks. metadata_scanned lets the diff re-queue enumerated-only placeholders.
-    // A failed read is an error, never an empty map: to the scanner an empty map
-    // means a new root.
+    // A failed read is an error, never an empty or partial map: the scanner
+    // treats paths absent from the map as new files.
     std::expected<QHash<QString, TrackFingerprint>, QString> trackFingerprints(const QString &rootPrefix = {}) const;
     // Paths of enumerated-only placeholder rows (metadata_scanned=0) awaiting a tag
     // read, optionally scoped to one directory and/or capped, for the lazy fill.

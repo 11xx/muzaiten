@@ -1310,6 +1310,9 @@ std::expected<QHash<QString, TrackFingerprint>, QString> Database::trackFingerpr
         fingerprint.metadataScanned = query.value(3).toInt() != 0;
         fingerprints.insert(query.value(0).toString(), fingerprint);
     }
+    if (query.lastError().isValid()) {
+        return std::unexpected(query.lastError().text());
+    }
     return fingerprints;
 }
 
