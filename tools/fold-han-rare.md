@@ -443,3 +443,19 @@ The outer data checker applies the class before counting blocking findings and
 choosing its exit status. It prints each classified original six-column tuple
 with a `# informational: ` prefix; individual findings retain their ordinary
 six-column form.
+
+Assembly headers record `reading-rules`, including the `cns-mou3/1` Properties
+hash and measured/pinned class counts. A `source-evidence` header names and
+hashes `<tier>-source-evidence.json` (`fold-han-source-evidence/1`). That sidecar
+retains every CNS rule row, including codes outside output ranges, plus exact
+CNS and Unihan held witnesses for the selected characters and complete-tier
+withheld members. Archive/member hashes, line numbers, raw source lines,
+phonetic/pinyin/mapping joins and SMS definition indices remain intact.
+
+Held source tokens have gap rows with normalized value `-` and reasons beginning
+`source-exclude`, `source-quarantine` or `source-held`, followed by their source
+and rule. They supply no reading provenance or mapping evidence. Their
+`source-reading` findings are informational; a sole quarantined CNS token has a
+blocking `provenance` finding. Corroboration requires an admitted reading under
+the same character. Historical provenance inputs may omit rule headers; when
+present, the audit checks them against the pinned reader metadata.

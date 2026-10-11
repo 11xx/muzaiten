@@ -1065,7 +1065,9 @@ def check(files: list[pathlib.Path], reviewed_file: pathlib.Path, words_file: pa
             attested_spellings = {form for forms in attested_by_base.values() for form in forms}
 
             for held in sole_quarantined_cns(raw_ch, fields, cns):
-                add(path, row_number, raw_ch, "provenance", held["reading"], "quarantined cns-mou3/1 reading")
+                key = (raw_ch, "provenance", held["reading"], "quarantined cns-mou3/1 reading")
+                if not any(finding_key(f) == key for f in findings[per_file_start:]):
+                    add(path, row_number, *key)
 
             seen_readings = set()
             for reading in readings:

@@ -189,7 +189,7 @@ def document(path: pathlib.Path) -> tuple[dict[str, object], list[tuple[int, lis
                 headers["complete"] = True
                 continue
             key, separator, value = line[2:].partition(": ")
-            if key in {"schema", "metadata", "references", "inputs", "authored", "counts", "columns"} and separator:
+            if key in {"schema", "metadata", "references", "inputs", "authored", "counts", "columns", "reading-rules", "source-evidence"} and separator:
                 if key in headers:
                     raise ValueError(f"{path.name}:{number}: duplicate {key} header")
                 headers[key] = json.loads(value) if key not in {"schema", "columns"} else value
@@ -482,7 +482,7 @@ def informational_finding(finding: tuple, refs: References | None = None,
                           authored: set[str] | None = None, resolution: tuple | None = None) -> bool:
     """Classify information without discharging another kind of finding."""
     kind = finding[-3]
-    if kind in {"reading-order", "opencc-order"}:
+    if kind in {"reading-order", "opencc-order", "source-reading"}:
         return True
     ch, ours, reference = finding[-4], finding[-2], finding[-1]
     return (kind == "opencc" and refs is not None
@@ -821,6 +821,13 @@ def family_mappings(refs: References, authored: set[str], choices: dict[str, str
     return result, dict(issues), dict(rejected)
 
 
+def held_readings(ch: str, refs: References):
+    for row in getattr(refs.cns, "held", {}).get(ch, ()):
+        yield "cns", row
+    for row in getattr(refs.fields, "held", {}).get(ch, ()):
+        yield "unihan:" + row["field"], row
+
+
 def assemble(members: list[str], refs: References, predictions: Predictions, authored: set[str],
              mapping_choices: dict[str, str] | None = None, reading_choices: dict[str, list[str]] | None = None,
              tier: str | None = None):
@@ -835,6 +842,14 @@ def assemble(members: list[str], refs: References, predictions: Predictions, aut
     mappings, family_issues, rejected = family_mappings(refs, authored, mapping_choices)
     rows, records, gaps, findings = [], [], [], []
     for ch in members:
+        quarantined = data.sole_quarantined_cns(ch, refs.fields, refs.cns)
+        for source, row in held_readings(ch, refs):
+            status, raw = row["status"], row["reading"]
+            label = source + (":" + row["rule"] if "rule" in row else "")
+            gaps.append((ch, raw, "-", "-", f"source-{status}:" + label))
+            state = {"exclude": "excluded", "quarantine": "quarantined", "held": "held"}[status]
+            kind = "provenance" if source == "cns" and row in quarantined else "source-reading"
+            findings.append((ch, kind, raw, f"{state} {row.get('rule', source)} reading"))
         if not data.is_unihan_ideograph(ch):
             gaps.append(member_gap(ch))
             continue
@@ -929,6 +944,7 @@ def authored_pin(authored: set[str]) -> dict:
 def header(schema: str, refs: References, predictions: Predictions, authored: set[str]) -> str:
     return (f"# schema: {schema}\n# references: {canonical(refs.pins)}\n# inputs: {canonical(predictions.inputs)}\n"
             + f"# authored: {canonical(authored_pin(authored))}\n"
+            + f"# reading-rules: {canonical(getattr(refs.cns, 'rules', {}))}\n"
             + f"# Python Unicode data: {unicodedata.unidata_version}.\n")
 
 
@@ -1134,12 +1150,26 @@ def write_assembly(out: pathlib.Path, tier: str, members: list[str], refs: Refer
         raise ValueError("decision does not match an emitted choice finding")
     if complete:
         gaps.extend(member_gap(ch) for ch in withheld[tier] if ch not in members)
+        gaps.extend((ch, row["reading"], "-", "-", f"source-{row['status']}:" + source
+                     + (":" + row["rule"] if "rule" in row else ""))
+                    for ch in withheld[tier] if ch not in members for source, row in held_readings(ch, refs))
     impact = impact_reports(tier, rows, baseline, report_assembly) if baseline is not None else None
     counts = dict(sorted(Counter(r.basis for r in records if r.rank).items()))
     out.mkdir(parents=True, exist_ok=True)
-    common = header(PROVENANCE_SCHEMA, refs, predictions, authored) + "# Source attributions and license texts: NOTICE.\n"
+    scope = set(members) | (set(withheld[tier]) if complete else set())
+    evidence_name = f"{tier}-source-evidence.json"
+    evidence = json.dumps({
+        "schema": "fold-han-source-evidence/1", "references": refs.pins,
+        "rules": getattr(refs.cns, "rules", {}), "cns_rule_rows": getattr(refs.cns, "rule_rows", []),
+        "cns_held": {ch: rows for ch, rows in sorted(getattr(refs.cns, "held", {}).items()) if ch in scope},
+        "unihan_held": {ch: rows for ch, rows in sorted(getattr(refs.fields, "held", {}).items()) if ch in scope},
+    }, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+    evidence_header = "# source-evidence: " + canonical({
+        "file": evidence_name, "sha256": hashlib.sha256(evidence.encode("utf-8")).hexdigest()}) + "\n"
+    common = header(PROVENANCE_SCHEMA, refs, predictions, authored) + evidence_header + "# Source attributions and license texts: NOTICE.\n"
     modified = notice_terms.MODIFIED_NOTICE + "\n" if notice_terms.transformed_opencc(records) else ""
     files = {
+        evidence_name: evidence,
         f"{tier}.tsv": common + modified + ("# complete\n" if complete else "# partial\n")
         + "# Mainland readings precede Taiwan-only readings; unresolved order choices require reviewed rows.\n"
         + ("# reviewed CNS-only class default: CNS listing order\n" if any(cns_class_default(ch, refs) for ch in members) else "")
@@ -1148,7 +1178,7 @@ def write_assembly(out: pathlib.Path, tier: str, members: list[str], refs: Refer
         + "".join("\t".join(row) + "\n" for row in rows),
         f"{tier}-provenance.tsv": common + modified + "# columns: " + "\t".join(PROVENANCE_COLUMNS) + "\n"
         + "".join("\t".join(r.columns()) + "\n" for r in records),
-        f"{tier}-gaps.tsv": header("fold-han-gaps/1", refs, predictions, authored)
+        f"{tier}-gaps.tsv": header("fold-han-gaps/1", refs, predictions, authored) + evidence_header
         + "# columns: ideograph\traw\tnormalized\tbatch\treason\n"
         + "".join("\t".join(row) + "\n" for row in gaps),
         f"{tier}-findings.tsv": common + "# columns: ideograph\tkind\tours\treference\n"
@@ -1257,6 +1287,8 @@ def check_provenance(table: pathlib.Path, provenance: pathlib.Path, refs: Refere
                 raise ValueError("provenance source pins or prediction checksums differ")
             if h.get("authored") != authored_pin(authored):
                 raise ValueError("preceding authored membership checksum differs")
+            if "reading-rules" in h and h["reading-rules"] != getattr(refs.cns, "rules", {}):
+                raise ValueError("reading rule metadata differs")
         if headers.get("schema") != PROVENANCE_SCHEMA:
             raise ValueError("missing table provenance schema")
         if headers.get("columns") != "ideograph\treadings\tsimplified":

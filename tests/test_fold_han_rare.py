@@ -152,6 +152,87 @@ class FoldHanRareTests(unittest.TestCase):
                     self.assertIn("\t".join(unrelated), lines)
                     self.assertIn(f"{table}\t4\t𠀂\topencc\t森\t林/森", lines)
 
+    def held_references(self):
+        cns = data.CNSReadings()
+        cns.update({"𠀀": ["hē"], "𠀁": [], "𠀂": []})
+        witness = {"archive": "Properties.zip", "archive_sha256": "1" * 64,
+                   "member": "CNS_phonetic.txt", "member_sha256": "2" * 64,
+                   "line": 7, "raw": "1-1111\tㄇㄡˇ"}
+        cns.rules["cns-mou3/1"] = {"properties_sha256": "1" * 64,
+                                    "counts": {"keep": 0, "exclude": 1, "quarantine": 1},
+                                    "pinned_counts": {"keep": 22, "exclude": 3860, "quarantine": 130}}
+        for ch, status, raw in (("𠀀", "exclude", "mǒu"), ("𠀁", "quarantine", "mǒu"), ("𠀂", "held", "q")):
+            row = {"cns": "1-1111", "reading": raw, "status": status, "phonetic": witness,
+                   "pinyin": {**witness, "member": "CNS_pinyin_2.txt"}, "mapping": {**witness, "member": "Unicode/CNS2UNICODE_Unicode 2.txt"}}
+            if status != "held":
+                row.update(rule="cns-mou3/1", sources=[{**witness, "member": "CNS_source.txt"}])
+                cns.rule_rows.append({k: v for k, v in row.items() if k != "mapping"})
+            cns.held[ch].append(row)
+        cns.rule_rows.append({"cns": "outside-output", "reading": "mǒu", "status": "exclude", "phonetic": witness})
+        fields = data.UnihanFields(rare.FIELDS)
+        fields.held["𠀀"].append({"field": "kSMSZD2003Readings", "group": 2, "reading": "liì",
+                                  "normalized": None, "status": "held", "witness": witness})
+        return rare.References(fields, cns, {}, self.refs.pins)
+
+    def test_writer_retains_reading_rules_and_exact_held_evidence(self):
+        refs = self.held_references()
+        out = self.root / "held"
+        findings = rare.write_assembly(out, "cns", list(refs.cns), refs, rare.Predictions({}, []), set())
+        for name in ("cns.tsv", "cns-provenance.tsv", "cns-gaps.tsv", "cns-findings.tsv"):
+            headers, _ = rare.document(out / name)
+            self.assertEqual(headers["reading-rules"], refs.cns.rules)
+            self.assertEqual(headers["source-evidence"], {"file": "cns-source-evidence.json",
+                                                          "sha256": rare.digest(out / "cns-source-evidence.json")})
+        ledger = json.loads((out / "cns-source-evidence.json").read_text())
+        self.assertEqual(ledger["cns_rule_rows"], refs.cns.rule_rows)
+        self.assertEqual(ledger["cns_held"], refs.cns.held)
+        self.assertEqual(ledger["unihan_held"], refs.fields.held)
+        gaps = [row for _, row in rare.document(out / "cns-gaps.tsv")[1]]
+        self.assertEqual({(r[0], r[1], r[2], r[4]) for r in gaps}, {
+            ("𠀀", "mǒu", "-", "source-exclude:cns:cns-mou3/1"),
+            ("𠀁", "mǒu", "-", "source-quarantine:cns:cns-mou3/1"),
+            ("𠀂", "q", "-", "source-held:cns"),
+            ("𠀀", "liì", "-", "source-held:unihan:kSMSZD2003Readings")})
+        blocking = rare.blocking_findings(findings, refs, set())
+        self.assertEqual(blocking, [("𠀁", "provenance", "mǒu", "quarantined cns-mou3/1 reading")])
+        _, records = rare.read_records(out / "cns-provenance.tsv")
+        self.assertEqual([(r.ch, r.value) for r in records], [("𠀀", "hē")])
+
+    def test_quarantine_is_informational_only_with_own_admitted_reading(self):
+        refs = self.held_references()
+        refs.fields["kMandarin"]["𠀁"] = "mā"
+        rows, records, gaps, findings = rare.assemble(["𠀁"], refs, rare.Predictions({}, []), set())
+        self.assertEqual(rows, [("𠀁", "mā", "")])
+        self.assertEqual(rare.blocking_findings(findings, refs, set()), [])
+        self.assertEqual(findings, [("𠀁", "source-reading", "mǒu", "quarantined cns-mou3/1 reading")])
+        self.assertTrue(gaps)
+
+    def test_provenance_rejects_changed_reading_rule_header(self):
+        out = self.root / "rules"
+        rare.write_assembly(out, "tgh", list("𠀀𠀁𠀂"), self.refs, self.predictions, set())
+        table = out / "tgh.tsv"
+        table.write_text(table.read_text().replace('# reading-rules: {}', '# reading-rules: {"invented": {}}'))
+        findings = rare.check_provenance(table, out / "tgh-provenance.tsv", self.refs, self.predictions, set())
+        self.assertTrue(any("reading rule metadata differs" in f[-1] for f in findings), findings)
+
+    def test_outer_quarantine_blocker_is_not_duplicated_by_provenance_audit(self):
+        refs = self.held_references()
+        table = self.root / "cns.tsv"
+        table.write_text("# schema: fold-han-provenance/1\n𠀁\t-\t\n")
+        blocker = (table.name, "-", "𠀁", "provenance", "mǒu", "quarantined cns-mou3/1 reading")
+        with mock.patch.object(data, "unihan_archive", return_value=object()), \
+             mock.patch.object(data, "unihan_fields", return_value=refs.fields), \
+             mock.patch.object(data, "cns_archives", return_value=()), \
+             mock.patch.object(data, "cns_readings", return_value=refs.cns), \
+             mock.patch.object(data, "opencc_archive", return_value=object()), \
+             mock.patch.object(data, "opencc_characters", return_value={}), \
+             mock.patch.object(rare, "shipped_pins", return_value=refs.pins), \
+             mock.patch.object(rare, "check_provenance", return_value=[blocker]), \
+             contextlib.redirect_stdout(output := io.StringIO()), \
+             contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(data.check([table], self.reviewed, authored_dir=self.root), 1)
+        self.assertEqual(output.getvalue().count("quarantined cns-mou3/1 reading"), 1)
+
     def test_frozen_typed_membership_ignores_later_authored_rows(self):
         refs = self.refs_for({"kMandarin": {"𠀀": "mù", "木": "mù", "禾": "mù"},
                               "kSemanticVariant": {"𠀀": "U+6728 U+79BE"}})
@@ -1469,7 +1550,7 @@ class PinnedReferenceSmokeTests(unittest.TestCase):
                 authored = rare.authored_before(data.DEFAULT_AUTHORED_DIR, name)
                 rows, _, _, findings = rare.assemble(members, self.refs, rare.Predictions({}, []), authored, tier=name)
                 self.assertEqual([row[0] for row in rows], members)
-                self.assertLessEqual({f[1] for f in findings}, {"provenance", "variant-guard", "family-target", "reading-order"})
+                self.assertLessEqual({f[1] for f in findings}, {"provenance", "variant-guard", "family-target", "reading-order", "source-reading"})
                 self.assertFalse([f for f in findings if f[3].startswith("unparseable")])
                 self.assertFalse([f for f in findings if f[1] == "variant-guard"
                                   and not f[3].startswith("variant-guard:tied-lineages=")])
