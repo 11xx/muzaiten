@@ -118,9 +118,11 @@ never count as independent attestation.
 Direct families join through `kSimplifiedVariant`, `kTraditionalVariant`,
 `kZVariant` and OpenCC `TSCharacters`, including self-containing pairs.
 Relation endpoints are NFC-normalized, which maps compatibility ideographs to
-their unified counterparts; a relation naming any other character outside the
-checker's ideograph blocks joins nothing. Tier membership lies within the same
-blocks.
+their unified counterparts. The reference graph includes Unihan 18's Extension J
+even when Python has not assigned its vertices. Output membership uses the
+generator's output blocks and runtime categories independently of the graph.
+The exact 線–缐 pair is excluded from family joins so 缐 retains its written key;
+each excluded source relation remains a `policy-excluded:<relation>` gap record.
 
 The family target comes from the first rule that applies: the family's BMP
 simplified members, otherwise its `kTGH` members, otherwise its BMP members.
@@ -175,12 +177,19 @@ python3 tools/fold-han-rare.py assemble --tier extb \
 python3 tools/fold-han-rare.py check proposals/extb.tsv \
   --provenance proposals/extb-provenance.tsv \
   --predictions tools/fold-han-predictions/extb-example-1.tsv
+python3 tools/fold-han-rare.py assemble --tier core \
+  --members selected-members.txt --output proposals
 ```
 
 Assembly writes `<tier>.tsv`, `<tier>-provenance.tsv`, `<tier>-gaps.tsv` and
 `<tier>-findings.tsv`. These are proposals, including when findings are present.
 Copy a settled provenance sidecar to the per-tier name when preparing authored
-data. The table declares `# complete`, mainland placement, transcription
+data. Full-tier CLI assembly declares `# complete`. `--members` selects one
+ideograph per line from that tier and writes only those members with `# partial`;
+predictions outside the selection are rejected. The `write_assembly()` API writes
+partial output by default; `complete=True` requires exactly the full tier.
+Its `mapping_choices` and `reading_choices` parameters carry explicit choices
+without suppressing their findings. Tables declare mainland placement, transcription
 attribution and per-reading counts by basis. Every output header carries all
 reference source/revision/checksum pins and the checksums of the verbatim
 prediction-log files. An `authored` header pins preceding-tier membership by

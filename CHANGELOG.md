@@ -17,6 +17,9 @@
   attribution, missing legal texts and inaccurate OpenCC modified-file notices
   block source-term checks; reviewed data disagreements cannot waive them.
   Focused fixtures cover source mismatches and CMake staging-install omissions.
+- Rare Han relation graphs retain unassigned Extension J reference vertices and
+  the exact excluded 線–缐 relation evidence. Explicit member lists produce bounded
+  partial tables; complete output requires every member of the tier.
 
 - Han NOTICE table scopes accept underscores in table names, so the shipped
   Unihan scopes `unihan/han_pinyin.tsv` and `unihan/han_simplified.tsv` parse
@@ -32,7 +35,9 @@
   the decisive `kTGHZ2013` reading. Offline fixtures cover compatibility
   endpoints, malformed reference readings and all cached rare tiers.
 - Han generation and checks use pinned Unihan 18.0.0 independently of Python's
-  Unicode version, retaining runtime category filtering. Generated headers
+  Unicode version, retaining runtime category filtering for keys and mapping
+  targets. Unsupported default targets are withheld without choosing another
+  variant; source relations remain in the provenance graph. Generated headers
   record the reference hash and Python Unicode database used for coverage.
 - Han word tables accept any spelling and merge readings under simplified keys;
   data checks flag redundant rows and readings at joined keys.

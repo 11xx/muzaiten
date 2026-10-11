@@ -5,7 +5,7 @@
 `src/search/fold/unihan/`. Ideographs listed in authored Han tables are
 excluded from both generated files. The pinned Unihan archive is checked
 before its fields are used. Its reference version is independent of Python's
-`unicodedata.unidata_version`. Generated keys must lie in `IDEOGRAPH_BLOCKS`
+`unicodedata.unidata_version`. Generated keys and mapping targets must lie in `IDEOGRAPH_BLOCKS`
 and have category `Lo` in the running Python's Unicode database. Reproducing
 output requires the same reference, authored tables, and runtime categories.
 
@@ -75,6 +75,8 @@ IDEOGRAPH_BLOCKS = [
     (0x2B740, 0x2B81F), (0x2B820, 0x2CEAF), (0x2CEB0, 0x2EBEF), (0x2EBF0, 0x2EE5F),
     (0x30000, 0x3134F), (0x31350, 0x323AF),
 ]
+# Unihan 18 relations include Extension J; output membership uses IDEOGRAPH_BLOCKS.
+REFERENCE_IDEOGRAPH_BLOCKS = [*IDEOGRAPH_BLOCKS, (0x323B0, 0x3347F)]
 
 READING_FIELDS = (
     "kMandarin", "kHanyuPinyin", "kXHC1983", "kTGHZ2013", "kHanyuPinlu",
@@ -221,7 +223,7 @@ def cns_readings(paths: tuple[pathlib.Path, pathlib.Path]) -> dict[str, set[str]
             for line in archive.read(member).decode().splitlines():
                 code, hex_point = line.split("\t")[:2]
                 point = int(hex_point, 16)
-                if in_ideograph_blocks(chr(point)):
+                if in_reference_ideograph_blocks(chr(point)):
                     result[chr(point)].update(by_code.get(code, ()))
     return {ch: readings for ch, readings in result.items() if readings}
 
@@ -335,6 +337,10 @@ def in_ideograph_blocks(ch: str) -> bool:
     return any(lo <= ord(ch) <= hi for lo, hi in IDEOGRAPH_BLOCKS)
 
 
+def in_reference_ideograph_blocks(ch: str) -> bool:
+    return any(lo <= ord(ch) <= hi for lo, hi in REFERENCE_IDEOGRAPH_BLOCKS)
+
+
 def is_unihan_ideograph(ch: str) -> bool:
     return in_ideograph_blocks(ch) and unicodedata.category(ch) == "Lo"
 
@@ -378,7 +384,7 @@ def generate(unihan_path: pathlib.Path | None, authored_dir: pathlib.Path, out_d
             continue
         if reading := default_reading(ch, fields):
             readings[reading].append(ch)
-        if simple := simplified_form(ch, fields):
+        if (simple := simplified_form(ch, fields)) and is_unihan_ideograph(simple):
             simplified[simple].append(ch)
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -470,7 +476,7 @@ def tiers(fields: dict[str, dict[str, str]] | None = None,
                ("exta", sorted(ch for ch in eligible if 0x3400 <= ord(ch) <= 0x4DBF)),
                ("extb", sorted(ch for ch in eligible if 0x20000 <= ord(ch) <= 0x2A6DF)),
                ("extc", sorted(ch for ch in eligible if ord(ch) >= 0x2A700)),
-               ("cns", sorted(ch for ch in cns if ch not in eligible)))
+               ("cns", sorted(ch for ch in cns if ch not in eligible and in_ideograph_blocks(ch))))
     for name, chars in ordered:
         new = []
         for c in chars:

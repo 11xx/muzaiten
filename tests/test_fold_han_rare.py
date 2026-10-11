@@ -587,8 +587,62 @@ class FoldHanRareTests(unittest.TestCase):
 
     def assemble_fixture(self):
         out = self.root / "output"
-        rare.write_assembly(out, "tgh", data.tiers(self.refs.fields, self.refs.cns)["tgh"], self.refs, self.predictions, set())
+        rare.write_assembly(out, "tgh", data.tiers(self.refs.fields, self.refs.cns)["tgh"], self.refs, self.predictions, set(), complete=True)
         return out, out / "tgh.tsv", out / "tgh-provenance.tsv"
+
+    def test_partial_cli_writes_only_selected_members(self):
+        selected = self.root / "members.txt"
+        selected.write_text("𠀁\n")
+        out = self.root / "partial-output"
+        with contextlib.redirect_stderr(io.StringIO()):
+            result = rare.main(["assemble", "--tier", "tgh", "--members", str(selected),
+                                "--output", str(out), *self.args[:-2]])
+        self.assertEqual(result, 0)
+        table = out / "tgh.tsv"
+        headers, rows = rare.document(table)
+        self.assertNotIn("complete", headers)
+        self.assertIn("# partial\n", table.read_text())
+        self.assertEqual([columns[0] for _, columns in rows], ["𠀁"])
+        _, records = rare.read_records(out / "tgh-provenance.tsv")
+        self.assertEqual({r.ch for r in records}, {"𠀁"})
+        selected.write_text("木\n")
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(rare.main(["assemble", "--tier", "tgh", "--members", str(selected),
+                                        "--output", str(out), *self.args[:-2]]), 2)
+
+    def test_complete_writer_refuses_a_slice(self):
+        out = self.root / "incomplete"
+        with self.assertRaisesRegex(ValueError, "every tier member"):
+            rare.write_assembly(out, "tgh", ["𠀀"], self.refs, rare.Predictions({}, []), set(), complete=True)
+        self.assertFalse(out.exists())
+
+    def test_reference_graph_keeps_unassigned_extension_j_vertices(self):
+        vertex = chr(0x331F0)
+        refs = self.refs_for({"kZVariant": {"𠀀": "U+331F0", vertex: "U+6728"}})
+        self.assertEqual(rare.endpoint(vertex), vertex)
+        self.assertFalse(data.in_ideograph_blocks(vertex))
+        self.assertFalse(data.is_unihan_ideograph(vertex))
+        mappings, issues, _ = rare.family_mappings(refs, {"木"})
+        self.assertEqual(mappings["𠀀"], ("木", "unihan:kZVariant"))
+        self.assertEqual(issues, {})
+        with self.assertRaisesRegex(ValueError, "CJK ideograph"):
+            rare.assemble([vertex], refs, rare.Predictions({}, []), set())
+        self.assertNotIn(vertex, data.tiers(refs.fields, {vertex: {"mù"}})["cns"])
+
+    def test_xian_policy_excludes_exact_relations_and_retains_evidence(self):
+        refs = self.refs_for({"kSimplifiedVariant": {"線": "U+7F10"},
+                              "kTraditionalVariant": {"缐": "U+7DDA", "线": "U+7DAB"},
+                              "kMandarin": {ch: "xiàn" for ch in "線缐线"}},
+                             opencc={"線": ["线", "缐"]})
+        rows, records, gaps, findings = rare.assemble(list("線缐"), refs, rare.Predictions({}, []), set())
+        self.assertEqual(rows, [("線", "xiàn", "线"), ("缐", "xiàn", "")])
+        self.assertEqual(findings, [])
+        self.assertEqual([(r.ch, r.value) for r in records if not r.rank], [("線", "线")])
+        self.assertEqual({(ch, target, reason) for ch, target, _, _, reason in gaps},
+                         {("線", "缐", "policy-excluded:kSimplifiedVariant"),
+                          ("缐", "線", "policy-excluded:kTraditionalVariant"),
+                          ("線", "缐", "policy-excluded:opencc:TSCharacters")})
+        self.assertEqual(refs.fields["kSimplifiedVariant"]["線"], "U+7F10")
 
     def test_complete_tier_cli_and_reproducible_bytes(self):
         out = self.root / "output"
@@ -768,7 +822,7 @@ class FoldHanRareTests(unittest.TestCase):
             findings = rare.check_provenance(table, sidecar, refs, predictions, set(), notice)
             self.assertEqual(len(findings), 1)
             self.assertIn(source + ": NOTICE attribution outside table scope", findings[0][5])
-        for removed in ("© 2024 Unicode®, Inc.", "OGDL-Taiwan-1.0", "Apache-2.0"):
+        for removed in (self.registry["sources"]["unihan"]["attribution"]["copyright"], "OGDL-Taiwan-1.0", "Apache-2.0"):
             notice.write_text(original.replace(removed, "absent"))
             self.assertTrue(rare.check_provenance(table, sidecar, refs, predictions, set(), notice))
         notice.unlink()

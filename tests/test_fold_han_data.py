@@ -88,10 +88,10 @@ class FoldHanDataTests(unittest.TestCase):
             authored = root / "authored"
             authored.mkdir()
             (authored / "han.tsv").write_text("㐀\tqiū\t一\n", encoding="utf-8")
-            categories = {"㐀": "Lo", "㐁": "Lo", "㐂": "Lo", "㐃": "Cn", "㐄": "Mn", "\U000323b0": "Cn", "A": "Lo"}
+            categories = {"㐀": "Lo", "㐁": "Lo", "㐂": "Lo", "㐃": "Cn", "㐄": "Mn", "一": "Lo", "\U000323b0": "Cn", "A": "Lo"}
             output = root / "output"
             with mock.patch.object(checker, "UNIHAN_SHA256", hashlib.sha256(archive.read_bytes()).hexdigest()), \
-                 mock.patch.object(checker, "IDEOGRAPH_BLOCKS", [(0x3400, 0x3404), (0x323B0, 0x323B0)]), \
+                 mock.patch.object(checker, "IDEOGRAPH_BLOCKS", [(0x3400, 0x3404), (0x4E00, 0x4E00), (0x323B0, 0x323B0)]), \
                  mock.patch.object(checker.unicodedata, "category", side_effect=categories.__getitem__):
                 for ch in ("㐃", "㐄", "\U000323b0", "A"):
                     self.assertFalse(checker.is_unihan_ideograph(ch))
@@ -138,6 +138,28 @@ class FoldHanDataTests(unittest.TestCase):
                 self.assertIn("一\t㐁㐃\U000323b0\n", (output / "han_simplified.tsv").read_text(encoding="utf-8"))
                 self.assertIn("# Python Unicode data: 17.0.0.",
                               (output / "han_pinyin.tsv").read_text(encoding="utf-8"))
+
+    def test_generation_withholds_unsupported_targets_without_selecting_an_alternative(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            archive = root / "Unihan.zip"
+            with zipfile.ZipFile(archive, "w") as zipped:
+                zipped.writestr("Unihan_Readings.txt", "".join(f"U+{cp:X}\tkMandarin\tmù\n" for cp in range(0x3400, 0x3404)))
+                zipped.writestr("Unihan_Variants.txt", (
+                    "U+3400\tkSimplifiedVariant\tU+331F0 U+4E00\n"
+                    "U+3401\tkSimplifiedVariant\tU+3404\n"
+                    "U+3402\tkSimplifiedVariant\tU+4E00\n"
+                    "U+3403\tkSimplifiedVariant\tU+0041\n"))
+            categories = {**{chr(cp): "Lo" for cp in range(0x3400, 0x3404)}, "㐄": "Cn", "一": "Lo"}
+            with (mock.patch.object(checker, "UNIHAN_SHA256", hashlib.sha256(archive.read_bytes()).hexdigest()),
+                  mock.patch.object(checker, "IDEOGRAPH_BLOCKS", [(0x3400, 0x3404), (0x4E00, 0x4E00)]),
+                  mock.patch.object(checker.unicodedata, "category", side_effect=categories.__getitem__)):
+                checker.generate(archive, root / "authored", root / "output")
+            simple = (root / "output/han_simplified.tsv").read_text()
+            self.assertEqual([line for line in simple.splitlines() if not line.startswith("#")], ["一\t㐂"])
+            self.assertIn("mu\t㐀㐁㐂㐃\n", (root / "output/han_pinyin.tsv").read_text())
+            fields = checker.unihan_fields(archive, "kSimplifiedVariant")
+            self.assertEqual(fields["kSimplifiedVariant"]["㐀"], "U+331F0 U+4E00")
 
     def test_cns_archives_parse_polyphones_and_skip_private_plane(self):
         self.cns_archive_patch.stop()

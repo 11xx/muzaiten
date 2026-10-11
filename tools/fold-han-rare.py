@@ -49,6 +49,8 @@ PREDICTION_COLUMNS = "ideograph readings confidence sound_component stated_basis
 PROVENANCE_COLUMNS = "ideograph value basis attested_by tone_from rank batch".split()
 DIRECT_FIELDS = (*data.VARIANT_FIELDS, "kZVariant")
 PARTIAL_FIELDS = ("kSemanticVariant", "kSpecializedSemanticVariant")
+# These written forms retain separate keys despite their source relations.
+EXCLUDED_PAIRS = {frozenset(("線", "缐"))}
 MAINLAND_FIELDS = ("kHanyuPinyin", "kXHC1983", "kTGHZ2013")
 FIELDS = (*data.READING_FIELDS, *DIRECT_FIELDS, *PARTIAL_FIELDS, "kTGH", "kUnihanCore2020")
 SHA256 = re.compile(r"[a-f0-9]{64}\Z")
@@ -159,7 +161,7 @@ def endpoint(value: str) -> str | None:
 
     NFC maps each compatibility ideograph to its unified counterpart."""
     value = nfc(value)
-    return value if len(value) == 1 and data.in_ideograph_blocks(value) else None
+    return value if len(value) == 1 and data.in_reference_ideograph_blocks(value) else None
 
 
 def links(pairs):
@@ -416,10 +418,16 @@ def family_mappings(refs: References, authored: set[str], choices: dict[str, str
 
     for field in DIRECT_FIELDS:
         for ch, target in unihan_links(refs.fields, field):
+            if frozenset((ch, target)) in EXCLUDED_PAIRS:
+                rejected[ch].append((target, "policy-excluded:" + field))
+                continue
             edge(ch, target, "unihan:" + field)
             if field == "kSimplifiedVariant":
                 simplified.add(target)
     for ch, target in links(refs.opencc.items()):
+        if frozenset((ch, target)) in EXCLUDED_PAIRS:
+            rejected[ch].append((target, "policy-excluded:opencc:TSCharacters"))
+            continue
         edge(ch, target, "opencc:TSCharacters")
         simplified.add(target)
     family = {}
@@ -434,6 +442,9 @@ def family_mappings(refs: References, authored: set[str], choices: dict[str, str
     partial = defaultdict(dict)
     for field in PARTIAL_FIELDS:
         for ch, target in unihan_links(refs.fields, field):
+            if frozenset((ch, target)) in EXCLUDED_PAIRS:
+                rejected[ch].append((target, "policy-excluded:" + field))
+                continue
             if target in graph.get(ch, {}):
                 continue
             if (ch not in typed and target in typed
@@ -514,7 +525,8 @@ def assemble(members: list[str], refs: References, predictions: Predictions, aut
                     gaps.append((ch, raw, normalized, prediction.batch, "unattested-syllable"))
             if prediction.simplified and prediction.simplified != target:
                 gaps.append((ch, prediction.simplified, prediction.simplified, prediction.batch, "unconfirmed-mapping"))
-        gaps.extend((ch, link, link, "-", "guard-failed:" + field) for link, field in rejected.get(ch, ()))
+        gaps.extend((ch, link, link, "-", field if field.startswith("policy-excluded:") else "guard-failed:" + field)
+                    for link, field in rejected.get(ch, ()))
         passes = {p.normalized for p in predictions.rows.get(ch, ())}
         if len(passes) > 1:
             findings.append((ch, "provenance", text, "prediction-pass disagreement"))
@@ -548,14 +560,21 @@ def header(schema: str, refs: References, predictions: Predictions, authored: se
             + f"# authored: {canonical(authored_pin(authored))}\n")
 
 
-def write_assembly(out: pathlib.Path, tier: str, members: list[str], refs: References, predictions: Predictions, authored: set[str]):
-    rows, records, gaps, findings = assemble(members, refs, predictions, authored, tier=tier)
+def write_assembly(out: pathlib.Path, tier: str, members: list[str], refs: References, predictions: Predictions,
+                   authored: set[str], *, complete: bool = False,
+                   mapping_choices: dict[str, str] | None = None,
+                   reading_choices: dict[str, list[str]] | None = None):
+    if complete and set(members) != set(data.tiers(refs.fields, refs.cns)[tier]):
+        raise ValueError("complete assembly requires every tier member")
+    rows, records, gaps, findings = assemble(members, refs, predictions, authored,
+                                           mapping_choices, reading_choices, tier=tier)
     counts = dict(sorted(Counter(r.basis for r in records if r.rank).items()))
     out.mkdir(parents=True, exist_ok=True)
     common = header(PROVENANCE_SCHEMA, refs, predictions, authored) + "# Source attributions and license texts: NOTICE.\n"
     modified = notice_terms.MODIFIED_NOTICE + "\n" if notice_terms.transformed_opencc(records) else ""
     files = {
-        f"{tier}.tsv": common + modified + "# complete\n# Mainland readings precede Taiwan-only readings; unresolved order choices require reviewed rows.\n"
+        f"{tier}.tsv": common + modified + ("# complete\n" if complete else "# partial\n")
+        + "# Mainland readings precede Taiwan-only readings; unresolved order choices require reviewed rows.\n"
         + "# Readings marked single are transcribed from the named source; see NOTICE.\n"
         + f"# counts: {canonical(counts)}\n# columns: ideograph\treadings\tsimplified\n"
         + "".join("\t".join(row) + "\n" for row in rows),
@@ -725,6 +744,7 @@ def main(argv: list[str] | None = None) -> int:
     reference_arguments(assembly)
     assembly.add_argument("--tier", choices=[p.removesuffix(".tsv") for p in data.RARE_FILES], required=True)
     assembly.add_argument("--output", type=pathlib.Path, required=True)
+    assembly.add_argument("--members", type=pathlib.Path, help="one selected ideograph per line; write a partial proposal")
     check = commands.add_parser("check", help="audit a table and its provenance without word checks")
     reference_arguments(check)
     check.add_argument("--provenance", type=pathlib.Path, required=True)
@@ -736,8 +756,12 @@ def main(argv: list[str] | None = None) -> int:
         predictions = read_predictions(args.predictions)
         authored = authored_before(args.authored, args.tier if args.command == "assemble" else args.table.stem)
         if args.command == "assemble":
-            members = data.tiers(refs.fields, refs.cns)[args.tier]
-            findings = write_assembly(args.output, args.tier, members, refs, predictions, authored)
+            tier_members = data.tiers(refs.fields, refs.cns)[args.tier]
+            members = args.members.read_text(encoding="utf-8").splitlines() if args.members else tier_members
+            if set(members) - set(tier_members):
+                raise ValueError("selected member outside tier")
+            findings = write_assembly(args.output, args.tier, members, refs, predictions, authored,
+                                      complete=args.members is None)
         else:
             findings = check_provenance(args.table, args.provenance, refs, predictions, authored)
             reviewed = data.read_reviewed(args.reviewed)
