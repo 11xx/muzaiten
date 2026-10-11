@@ -428,7 +428,6 @@
 繙	simplified	翻	𬙆	Common mainland variant fold, not the rare systematic form.
 藍	missing	lán	kXHC1983=la	la is not a current standalone reading; do not add it.
 蹟	tone	jì	jī	Modern mainland 事蹟/足蹟 use jì; jī is older/regional.
-蹟	simplified	迹	-	Variant fold; Unihan omits the mapping.
 轉	missing	zhuǎn zhuàn	kXHC1983=zhuǎi	Settled when the row was corrected: zhuǎi in 轉文 is regional, outside scope.
 釐	default	lí	xī	釐米/釐清 favor lí; xī belongs to older blessing terminology.
 釐	missing	lí	kTGHZ2013=xī;kXHC1983=xǐ	xī/xǐ are archaic blessing-related readings, outside scope.
@@ -437,7 +436,6 @@
 鎚	simplified	锤	𬭨	Common mainland variant fold, not the rare systematic form.
 鎗	simplified	枪	𬬰	Common mainland variant fold, not the rare systematic form.
 霤	simplified	溜	-	Variant fold; Unihan omits the mapping.
-餽	simplified	馈	-	Variant fold; Unihan omits the mapping.
 鯽	default	jì	zéi	Modern crucian carp is jì; zéi is older/regional.
 鯈	simplified	鲦	𱇱	Common mainland variant fold, not the rare systematic form.
 嚥	simplified	咽	-	Variant fold; Unihan omits the mapping.
@@ -446,7 +444,6 @@
 羶	simplified	膻	-	Variant fold; Unihan omits the mapping.
 藷	simplified	薯	𫉄	Common mainland variant fold, not the rare systematic form.
 蠍	simplified	蝎	-	Variant fold; Unihan omits the mapping.
-譁	simplified	哗	-	Variant fold; Unihan omits the mapping.
 譆	simplified	嘻	𫍻	Common mainland variant fold, not the rare systematic form.
 譙	tone	qiáo	qiào	qiáo survives in names, surnames and 譙樓; qiào is less common.
 醱	default	pō	fā	pō is the mainland brewing reading; fā remains in 醱酵.
@@ -546,7 +543,6 @@
 諌	default	jiàn	dǒng	諫 shinjitai; dǒng belongs to the separate old character.
 諌	unattested	jiàn	-	諫 shinjitai supplies jiàn.
 諌	simplified	谏	𮷅	Common form preferred to rare systematic alternative.
-関	simplified	关	-	Variant policy; no direct Unihan fold.
 陥	simplified	陷	-	Variant policy; no direct Unihan fold.
 舘	simplified	馆	-	Variant policy; no direct Unihan fold.
 巌	simplified	岩	-	Variant policy; no direct Unihan fold.
@@ -597,7 +593,6 @@
 権	simplified	权	-	Variant policy; no direct Unihan fold.
 県	simplified	县	-	Variant policy; no direct Unihan fold.
 険	simplified	险	-	Variant policy; no direct Unihan fold.
-顕	simplified	显	-	Variant policy; no direct Unihan fold.
 験	simplified	验	-	Variant policy; no direct Unihan fold.
 鹸	simplified	碱	-	Variant policy; no direct Unihan fold.
 厳	simplified	严	-	Variant policy; no direct Unihan fold.
@@ -627,7 +622,6 @@
 皐	simplified	皋	-	Variant policy; no direct Unihan fold.
 桟	simplified	栈	-	Variant policy; no direct Unihan fold.
 讃	simplified	赞	-	Variant policy; no direct Unihan fold.
-賛	simplified	赞	-	Variant policy; no direct Unihan fold.
 姉	simplified	姊	-	Variant policy; no direct Unihan fold.
 歯	simplified	齿	-	Variant policy; no direct Unihan fold.
 児	simplified	儿	-	Variant policy; no direct Unihan fold.
@@ -746,7 +740,6 @@
 兎	simplified	兔	-	Variant policy; no direct Unihan fold.
 妬	simplified	妒	-	Variant policy; no direct Unihan fold.
 嶋	simplified	岛	-	Variant policy; no direct Unihan fold.
-闘	simplified	斗	-	Variant policy; no direct Unihan fold.
 働	simplified	-	𫢙	family rule: no BMP or General Standard form; the astral form maps back to this character
 徳	simplified	德	-	Variant policy; no direct Unihan fold.
 涜	simplified	渎	-	Variant policy; no direct Unihan fold.
@@ -807,7 +800,6 @@
 柾	default	-	jiù	Japanese-only use; no established Mandarin reading.
 桝	default	-	jié	Japanese-only use; no established Mandarin reading.
 侭	simplified	尽	-	Variant policy; no direct Unihan fold.
-麿	default	-	mo	Japanese-only use; no established Mandarin reading.
 満	simplified	满	-	Variant policy; no direct Unihan fold.
 粍	default	-	zhé	Compound unit character; Chinese reading is multisyllabic.
 麺	simplified	面	-	Variant policy; no direct Unihan fold.
@@ -837,7 +829,6 @@
 齢	simplified	龄	-	Variant policy; no direct Unihan fold.
 暦	simplified	历	-	Variant policy; no direct Unihan fold.
 歴	simplified	历	-	Variant policy; no direct Unihan fold.
-錬	simplified	炼	-	Variant policy; no direct Unihan fold.
 労	simplified	劳	-	Variant policy; no direct Unihan fold.
 篭	simplified	笼	-	Variant policy; no direct Unihan fold.
 蝋	simplified	蜡	-	Variant policy; no direct Unihan fold.
@@ -891,7 +882,6 @@
 厰	simplified	厂	-	Variant policy; no direct Unihan fold.
 簒	simplified	篡	-	Variant policy; no direct Unihan fold.
 叺	default	-	chǐ	Japanese-only use; no established Mandarin reading.
-哘	default	-	xing	Japanese-only use; no established Mandarin reading.
 喞	simplified	唧	-	Variant policy; no direct Unihan fold.
 喩	simplified	喻	-	Variant policy; no direct Unihan fold.
 嗹	simplified	-	𪡏	family rule: no BMP or General Standard form; the astral form maps back to this character
@@ -900,7 +890,6 @@
 嚠	simplified	-	𭇯	family rule: no BMP or General Standard form; the astral form maps back to this character
 嚔	simplified	嚏	-	Variant policy; no direct Unihan fold.
 囃	simplified	-	𠱞	family rule: no BMP or General Standard form; the astral form maps back to this character
-囎	default	-	zen	Japanese-only use; no established Mandarin reading.
 囓	simplified	啮	-	Variant policy; no direct Unihan fold.
 圀	simplified	国	-	Variant policy; no direct Unihan fold.
 圦	default	-	kuài	Japanese-only use; no established Mandarin reading.
@@ -979,7 +968,6 @@
 怐	default	-	jù	怐愗 is kòumào; jù belongs to an old alternate sense.
 怱	simplified	匆	-	Variant policy; no direct Unihan fold.
 怺	default	-	yǒng	Japanese-only use; no established Mandarin reading.
-恷	default	-	xiao	Japanese-only use; no established Mandarin reading.
 恊	simplified	协	-	Variant policy; no direct Unihan fold.
 悧	simplified	俐	-	Variant policy; no direct Unihan fold.
 悋	simplified	吝	-	Variant policy; no direct Unihan fold.
@@ -1007,7 +995,6 @@
 拏	simplified	拿	-	Variant policy; no direct Unihan fold.
 挌	simplified	格	-	Variant policy; no direct Unihan fold.
 掟	default	-	zhěng	Current name/command use, including 掟上, is dìng; zhěng is old.
-掵	default	-	ming	Japanese-only use; no established Mandarin reading.
 搨	simplified	拓	-	Variant policy; no direct Unihan fold.
 擧	simplified	举	𢪓	Common form preferred to rare systematic alternative.
 擡	simplified	抬	-	Variant policy; no direct Unihan fold.
@@ -1039,7 +1026,6 @@
 梹	simplified	槟	-	Variant policy; no direct Unihan fold.
 梺	default	-	xià	Japanese-only use; no established Mandarin reading.
 棊	simplified	棋	-	Variant policy; no direct Unihan fold.
-椦	default	-	quan	Japanese-only use; no established Mandarin reading.
 椶	simplified	棕	-	Variant policy; no direct Unihan fold.
 椨	default	-	fǔ	Japanese-only use; no established Mandarin reading.
 椚	default	-	mēn	Japanese-only use; no established Mandarin reading.
@@ -1060,7 +1046,6 @@
 樢	simplified	茑	㭤	Settled when the row was corrected: Plant-name variant of 蔦; common simplified form is 茑.
 檪	simplified	栎	-	Variant policy; no direct Unihan fold.
 欅	simplified	榉	-	Variant policy; no direct Unihan fold.
-欟	default	-	guang	Japanese-only use; no established Mandarin reading.
 欸	default	ēi	ǎi	Settled when the row was corrected: Include both current interjection vowel series; ê and ei are distinct.
 飮	simplified	饮	-	Variant policy; no direct Unihan fold.
 歛	default	liǎn	hān	斂 variant; hān belongs to an old separate sense.
@@ -1105,7 +1090,6 @@
 珱	simplified	璎	-	Variant policy; no direct Unihan fold.
 瓩	default	-	qiān	Compound unit character; Chinese reading is multisyllabic.
 瓩	missing	-	kXHC1983=qiān	Compound unit character; qiān alone is not its Chinese unit name.
-瓲	default	-	wa	Compound unit character; retain the settled unit-character policy.
 瓸	default	-	bǎi	Compound unit character; Chinese reading is multisyllabic.
 甎	simplified	砖	-	Variant policy; no direct Unihan fold.
 甞	simplified	尝	-	Variant policy; no direct Unihan fold.
@@ -1135,7 +1119,6 @@
 礒	simplified	-	𥐟	family rule: no BMP or General Standard form; the astral form maps back to this character
 禝	simplified	稷	-	Variant policy; no direct Unihan fold.
 稾	simplified	稿	-	Variant policy; no direct Unihan fold.
-穃	default	-	rong	Japanese-only use; no established Mandarin reading.
 穉	simplified	稚	-	Variant policy; no direct Unihan fold.
 龝	simplified	秋	𬓫	Common form preferred to rare systematic alternative.
 穽	simplified	阱	-	Variant policy; no direct Unihan fold.
@@ -1189,11 +1172,9 @@
 縒	simplified	-	𬘷	family rule: no BMP or General Standard form; the astral form maps back to this character
 繦	simplified	襁	-	Variant policy; no direct Unihan fold.
 縺	simplified	-	𦈐	family rule: no BMP or General Standard form; the astral form maps back to this character
-繧	default	-	yun	Japanese-only use; no established Mandarin reading.
 繖	simplified	伞	𰬷	Common form preferred to rare systematic alternative.
 纃	default	-	qí	Japanese-only use; no established Mandarin reading.
 纃	simplified	-	𬘧	family rule: no BMP or General Standard form; the astral form maps back to this character
-緕	default	-	qi	Japanese-only use; no established Mandarin reading.
 繿	simplified	褴	䍀	Common form preferred to rare systematic alternative.
 纉	simplified	缵	-	Variant policy; no direct Unihan fold.
 纒	simplified	缠	-	Variant policy; no direct Unihan fold.
@@ -1256,7 +1237,6 @@
 蚫	simplified	鲍	-	Settled when the row was corrected: Variant of 鮑; fold to common simplified 鲍.
 蛬	simplified	蛩	-	Settled when the row was corrected: Variant of 蛩; fold to the common cricket character.
 蛯	default	-	lǎo	Japanese-only use; no established Mandarin reading.
-蟐	default	-	chang	Settled when the row was corrected: Japanese form; untoned chang does not establish Mandarin cháng.
 蟇	simplified	蟆	-	Variant policy; no direct Unihan fold.
 蠏	simplified	蟹	-	Variant policy; no direct Unihan fold.
 蟷	simplified	-	𬠅	family rule: no BMP or General Standard form; the astral form maps back to this character
@@ -1270,7 +1250,6 @@
 袮	simplified	祢	-	Variant policy; no direct Unihan fold.
 袰	default	-	bō	Japanese-only use; no established Mandarin reading.
 裃	default	-	kǎ	Japanese-only use; no established Mandarin reading.
-裄	default	-	xing	Japanese-only use; no established Mandarin reading.
 裲	simplified	-	𮖁	family rule: no BMP or General Standard form; the astral form maps back to this character
 褄	default	-	qī	Japanese-only use; no established Mandarin reading.
 襃	simplified	褒	-	Variant policy; no direct Unihan fold.
@@ -1340,7 +1319,6 @@
 錺	default	-	fāng	Japanese-only use; no established Mandarin reading.
 錺	simplified	-	𮸐	family rule: no BMP or General Standard form; the astral form maps back to this character
 錵	default	-	huā	Japanese-only use; no established Mandarin reading.
-錻	default	-	wu	Japanese-only use; no established Mandarin reading.
 鍜	simplified	-	𰾤	family rule: no BMP or General Standard form; the astral form maps back to this character
 鍼	simplified	针	𰾗	Common form preferred to rare systematic alternative.
 鍮	simplified	-	𨱎	family rule: no BMP or General Standard form; the astral form maps back to this character
@@ -1354,11 +1332,9 @@
 鑛	simplified	矿	𰽚	Common form preferred to rare systematic alternative.
 鑢	simplified	-	𮣶	family rule: no BMP or General Standard form; the astral form maps back to this character
 鈩	simplified	炉	-	Settled when the row was corrected: Japanese form of 鑪; common mainland form is 炉.
-鑵	simplified	罐	-	Variant policy; no direct Unihan fold.
 鑚	simplified	钻	-	Variant policy; no direct Unihan fold.
 閇	simplified	闭	-	Variant policy; no direct Unihan fold.
 閊	default	-	shān	Japanese-only use; no established Mandarin reading.
-閖	default	-	shui	Japanese-only use; no established Mandarin reading.
 閙	simplified	闹	-	Variant policy; no direct Unihan fold.
 閠	simplified	闰	-	Variant policy; no direct Unihan fold.
 閧	simplified	哄	𬮢	Common form preferred to rare systematic alternative.
@@ -1415,14 +1391,12 @@
 鱶	simplified	鲞	-	Variant policy; no direct Unihan fold.
 鳬	tone	fú	fǔ	鳧 variant; modern wild-duck reading fú.
 鳰	default	-	rù	Japanese-only use; no established Mandarin reading.
-鴈	simplified	雁	-	Variant policy; no direct Unihan fold.
 鳫	simplified	雁	-	Variant policy; no direct Unihan fold.
 鵄	simplified	鸱	𬸈	Common form preferred to rare systematic alternative.
 鴾	simplified	-	𱉲	family rule: no BMP or General Standard form; the astral form maps back to this character
 鵆	default	-	héng	Japanese-only use; no established Mandarin reading.
 鵈	default	-	ě	Japanese-only use; no established Mandarin reading.
 鵞	simplified	鹅	-	Variant policy; no direct Unihan fold.
-鵤	default	-	jiao	Japanese-only use; no established Mandarin reading.
 鵙	simplified	䴗	𱉐	Conventional shrike form preferred to rare systematic alternative.
 鶫	simplified	鸫	-	Variant policy; no direct Unihan fold.
 鶤	simplified	鹍	𱉱	Common form preferred to rare systematic alternative.
@@ -1430,7 +1404,6 @@
 鷏	simplified	-	𱊚	family rule: no BMP or General Standard form; the astral form maps back to this character
 麁	simplified	粗	-	Variant policy; no direct Unihan fold.
 麕	simplified	麇	-	Variant policy; no direct Unihan fold.
-麪	simplified	面	-	Variant policy; no direct Unihan fold.
 黽	default	mǐn	miǎn	Settled when the row was corrected: Current 黾勉 mǐn; exclude obsolete frog měng and place-spelling miǎn.
 黽	missing	mǐn	kXHC1983=miǎn	miǎn belongs to the obsolete 黽池 spelling of 渑池.
 鼈	simplified	鳖	𱌇	Common form preferred to rare systematic alternative.
@@ -1442,7 +1415,6 @@
 堈	simplified	缸	𰉙	Settled when the row was corrected: Variant of 缸; use the common form, not 𰉙.
 畺	simplified	疆	-	Variant policy; no direct Unihan fold.
 槪	simplified	概	-	Variant policy; no direct Unihan fold.
-迲	default	-	qu	Korean-only use; no established Mandarin reading.
 俓	simplified	径	𠇹	Settled when the row was corrected: Variant of 徑; fold to 径, not rare 𠇹.
 磎	simplified	溪	-	Settled when the row was corrected: Variant stream character; fold through 谿 to common 溪.
 敎	simplified	教	-	Variant policy; no direct Unihan fold.
@@ -1486,14 +1458,12 @@
 晳	simplified	晰	-	Variant policy; no direct Unihan fold.
 琁	simplified	璇	-	Variant policy; no direct Unihan fold.
 鐥	simplified	-	䦅	family rule: no BMP common or General Standard form; this character is the BMP fold key
-饍	simplified	膳	-	Variant policy; no direct Unihan fold.
 卨	simplified	-	𫧯	family rule: no BMP or General Standard form; the astral form maps back to this character
 飡	simplified	餐	-	Variant policy; no direct Unihan fold.
 峀	simplified	岫	-	Variant policy; no direct Unihan fold.
 潚	simplified	-	㴋	family rule: no BMP common or General Standard form; this character is the BMP fold key
 璹	simplified	-	𰡽	family rule: no BMP or General Standard form; the astral form maps back to this character
 枾	simplified	柿	-	Variant policy; no direct Unihan fold.
-篒	default	-	shi	Korean-only use; no established Mandarin reading.
 昻	simplified	昂	-	Variant policy; no direct Unihan fold.
 厓	simplified	崖	-	Settled when the row was corrected: Variant of 崖; fold to the common form.
 敭	simplified	扬	-	Variant policy; no direct Unihan fold.
@@ -2788,3 +2758,45 @@
 捱	simplified	挨	-	捱 is a variant of 挨 (挨打, 挨饿); OpenCC folds it there and Unihan omits the mapping.
 碕	simplified	埼	-	Unihan lists 碕 and 埼 as Morohashi semantic variants; OpenCC folds 碕 to 埼 and Unihan omits the mapping.
 钁	simplified	镢	䦆	镢 is the General Standard (2013) form of 钁; Unihan names the rare Extension A form 䦆.
+閒	simplified	闲	𫔮	D1.1: OpenCC attests 閒→闲; the common BMP simplified form precedes the astral variant 𫔮.
+絛	simplified	绦	-	D1.1: OpenCC TSCharacters directly attests 絛→绦, the common BMP simplified form.
+線	simplified	线	缐	Use 线 as the established fold key for 線; 缐 retains its separate written key despite the direct source relation.
+錄	simplified	录	-	D1.1: OpenCC TSCharacters directly attests 錄→录, the common BMP simplified form.
+毚	simplified	-	𫥎	D1.3: 毚 is the BMP family member; 𫥎 is not in kTGH.
+蹟	simplified	迹	𲃫	D1.1: retain the established common BMP form 迹 rather than the non-kTGH astral variant 𲃫.
+餽	simplified	馈	𳋮	Retain the essential-table policy mapping 餽→馈; the pinned sources do not establish an admissible joining path.
+譁	simplified	哗	𲂊	D1.1: retain the established common BMP form 哗 rather than the non-kTGH astral variant 𲂊.
+関	simplified	关	𬮦	Retain the essential-table policy mapping 関→关; the pinned sources do not establish an admissible joining path.
+顕	simplified	显	𲊿	Retain the essential-table policy mapping 顕→显; the pinned sources do not establish an admissible joining path.
+笹	default	-	shì	Japanese-only use; Mandarin readings are omitted for Japanese search.
+賛	simplified	赞	𰷣	Retain the essential-table policy mapping 賛→赞; the pinned sources do not establish an admissible joining path.
+闘	simplified	斗	𳈗	Retain the essential-table policy mapping 闘→斗; the pinned sources do not establish an admissible joining path.
+鋲	simplified	-	𲇿	D1.3: 鋲 is the BMP family member; 𲇿 is not in kTGH.
+麿	default	-	mǒ	Japanese-only use; no established Mandarin reading.
+錬	simplified	炼	𲇷	Retain the essential-table policy mapping 錬→炼; the pinned sources do not establish an admissible joining path.
+哘	default	-	xíng	Japanese-only use; no established Mandarin reading.
+囎	default	-	zèng	Japanese-only use; no established Mandarin reading.
+恷	default	-	qīu	Japanese-only use; no established Mandarin reading.
+掵	default	-	mìng	Japanese-only use; no established Mandarin reading.
+椦	default	-	quān	Japanese-only use; no established Mandarin reading.
+欟	default	-	guàn	Japanese-only use; no established Mandarin reading.
+瓲	default	-	túnwǎ	Compound unit character; retain the settled unit-character policy.
+穃	default	-	ròng	Japanese-only use; no established Mandarin reading.
+繧	default	-	wén	Japanese-only use; no established Mandarin reading.
+緕	default	-	zī	Japanese-only use; no established Mandarin reading.
+蟐	default	-	cháng	Japanese-only use; Mandarin readings are omitted for Japanese search.
+裄	default	-	háng	Japanese-only use; no established Mandarin reading.
+齎	simplified	赍	𬹳	D1.1: OpenCC attests 齎→赍; the common BMP simplified form precedes the astral variant 𬹳.
+遉	simplified	-	𲅗	D1.3: 遉 is the BMP family member; 𲅗 is not in kTGH.
+錻	default	-	bū	Japanese-only use; no established Mandarin reading.
+鑵	simplified	罐	𲈡	Retain the essential-table policy mapping 鑵→罐; the pinned sources do not establish an admissible joining path.
+閖	default	-	shuǐ	Japanese-only use; no established Mandarin reading.
+閖	simplified	-	𲈵	D1.3: 閖 is the BMP family member; 𲈵 is not in kTGH.
+鴈	simplified	雁	𳐃	Retain the essential-table policy mapping 鴈→雁; the pinned sources do not establish an admissible joining path.
+鵤	default	-	zān	Japanese-only use; no established Mandarin reading.
+鵺	simplified	-	𲍿	D1.3: 鵺 is the BMP family member; 𲍿 is not in kTGH.
+麪	simplified	面	𮮄	Retain the essential-table choice 面 among the BMP candidates 面 and 麺; OpenCC lists 面 first.
+麭	simplified	-	𮮆	D1.3: 麭 is the BMP family member; 𮮆 is not in kTGH.
+迲	default	-	qù	Korean-only use; no established Mandarin reading.
+饍	simplified	膳	𳋱	Retain the essential-table policy mapping 饍→膳; the pinned sources do not establish an admissible joining path.
+篒	default	-	yì	Korean-only use; no established Mandarin reading.

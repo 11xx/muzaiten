@@ -1,1 +1,3 @@
 CHANGELOG.md merge=union
+# Empty simplified fields retain the third TSV column's trailing tab.
+src/search/fold/tables/han/*.tsv whitespace=-blank-at-eol
