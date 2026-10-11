@@ -2804,3 +2804,4 @@
 𧭈	opencc	𫍾	𧭈/𫍾	Retain the established native pair 𧭈→𫍾 in its unresolved astral family; OpenCC attests this second candidate after the source itself, and Unihan names 𲂇.
 𨰥	family-target	𫔕	family-target:unresolved=𨰥 𫔕 𲈐	Retain the established native pair 𨰥→𫔕 in its unresolved astral family; OpenCC attests this second candidate after the source itself, and Unihan names 𲈐.
 𨰥	opencc	𫔕	𨰥/𫔕	Retain the established native pair 𨰥→𫔕 in its unresolved astral family; OpenCC attests this second candidate after the source itself, and Unihan names 𲈐.
+饹	provenance	gē le	kTGHZ2013 does not rank its readings; the tgh default requires a reviewed decision	Keep the zh-Hans kMandarin default gē for 饹馇; le remains the second reading, and 饸饹 has its word reading.

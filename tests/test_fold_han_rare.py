@@ -151,6 +151,65 @@ class FoldHanRareTests(unittest.TestCase):
         self.assertEqual([r[2] for r in rows], ["𫍾", "𫔕"])
         self.assertTrue(all(f[1] == "family-target" for f in issues))
 
+    def test_lower_tie_uses_cns_listing_order_and_reviewed_block_reorder(self):
+        refs = self.refs_for({"kMandarin": {"乛": "yǐ"}}, {"乛": ["yā", "wān"]})
+        empty = rare.Predictions({}, [])
+        records, issues = rare.ordered_readings("乛", refs, empty)
+        self.assertEqual([r.value for r in records], ["yǐ", "yā", "wān"])
+        self.assertEqual(issues, [("yǐ yā wān", "evidence-order tie at ranks 2-3 settled by CNS listing order")])
+        records, issues = rare.ordered_readings("乛", refs, empty, ["yǐ", "wān", "yā"])
+        self.assertEqual([r.value for r in records], ["yǐ", "wān", "yā"])
+        records, _ = rare.ordered_readings("乛", refs, empty, ["yā", "yǐ", "wān"])
+        self.assertEqual([r.value for r in records], ["yǐ", "yā", "wān"])
+        out = self.root / "lower"
+        findings = rare.write_assembly(out, "core", ["乛"], refs, empty, set())
+        self.assertEqual([f[1] for f in findings], ["reading-order"])
+        self.assertFalse(rare.check_provenance(out / "core.tsv", out / "core-provenance.tsv", refs, empty, set()))
+
+    def test_source_orders_settle_every_tie_without_overriding_evidence(self):
+        empty = rare.Predictions({}, [])
+        for field, raw, expected, settling in (
+            ("kHanyuPinlu", "bá(2) hé(30)", ["hé", "bá"], "kHanyuPinlu frequency order"),
+            ("kHanyuPinyin", "2:hé,bá 1:qǐ", ["qǐ", "hé", "bá"], "kHanyuPinyin HDZ order"),
+            ("kTGHZ2013", "1:hé 2:bá", ["hé", "bá"], "kTGHZ2013 listing order"),
+            ("kXHC1983", "1:hé 2:bá", ["hé", "bá"], "kXHC1983 listing order")):
+            with self.subTest(field=field):
+                refs = self.refs_for({"kMandarin": {"𠀀": "mā"}, field: {"𠀀": raw}})
+                records, issues = rare.ordered_readings("𠀀", refs, empty)
+                self.assertEqual([r.value for r in records], ["mā", *expected])
+                self.assertIn(settling, issues[0][1])
+
+    def test_cns_class_default_records_listing_basis_and_does_not_waive_reorder(self):
+        refs = self.refs_for({}, {"𠀀": ["mā", "hé"]})
+        refs.cns_default = {"basis": "CNS listing order"}
+        out = self.root / "class-default"
+        findings = rare.write_assembly(out, "cns", ["𠀀"], refs, rare.Predictions({}, []), set())
+        self.assertEqual([f[1] for f in findings], ["reading-order"])
+        self.assertIn("reviewed CNS-only class default: CNS listing order", (out / "cns.tsv").read_text())
+        records, issues = rare.ordered_readings("𠀀", refs, rare.Predictions({}, []), ["hé", "mā"])
+        self.assertEqual([r.value for r in records], ["hé", "mā"])
+        self.assertTrue(any("reviewed decision" in reason for _, reason in issues))
+
+    def test_tgh_multiple_readings_prefer_zh_hans_not_page_order(self):
+        refs = self.refs_for({"kMandarin": {"𠀀": "hán"}, "kTGHZ2013": {"𠀀": "1:gān 2:hán"}},
+                             {"𠀀": ["gān", "hán"]})
+        records, issues = rare.ordered_readings("𠀀", refs, rare.Predictions({}, []), tier="tgh")
+        self.assertEqual([r.value for r in records], ["hán", "gān"])
+        self.assertFalse(issues)
+
+    def test_tgh_disagreement_accepts_only_standard_default_and_ordered_tail(self):
+        refs = self.refs_for({"kMandarin": {"𠀀": "liàn"}, "kHanyuPinyin": {"𠀀": "1:liàn"},
+                              "kTGHZ2013": {"𠀀": "1:lì 2:liàn"}}, {"𠀀": ["lì", "bá"]})
+        empty = rare.Predictions({}, [])
+        records, issues = rare.ordered_readings("𠀀", refs, empty, tier="tgh")
+        self.assertEqual([r.value for r in records], ["liàn", "lì", "bá"])
+        self.assertIn("tgh default requires a reviewed decision", issues[0][1])
+        records, _ = rare.ordered_readings("𠀀", refs, empty, ["lì", "liàn", "bá"], tier="tgh")
+        self.assertEqual([r.value for r in records], ["lì", "liàn", "bá"])
+        for invalid in (["bá", "liàn", "lì"], ["lì", "bá", "liàn"]):
+            records, _ = rare.ordered_readings("𠀀", refs, empty, invalid, tier="tgh")
+            self.assertEqual([r.value for r in records], ["liàn", "lì", "bá"])
+
     def test_basis_exact_syllable_agreed_and_single(self):
         rows, records, gaps, findings = rare.assemble(list("𠀀𠀁𠀂"), self.refs, self.predictions, set())
         self.assertEqual(findings, [])
@@ -230,7 +289,7 @@ class FoldHanRareTests(unittest.TestCase):
         self.assertEqual([r.value for r in records], ["hé", "mā", "bō"])
         self.assertFalse(issues)
         _, issues = rare.ordered_readings("𠀀", refs, rare.Predictions({}, []))
-        self.assertEqual(len(issues), 1)
+        self.assertEqual(len(issues), 2)
 
     def test_single_cns_reading_needs_no_choice(self):
         refs = self.refs_for({}, {"𠀀": {"mā"}})
@@ -249,7 +308,7 @@ class FoldHanRareTests(unittest.TestCase):
         refs = self.refs_for({"kMandarin": {"𠀀": "mā má"}, "kHanyuPinyin": {"𠀀": "1:mǎ"},
                               "kXHC1983": {"𠀀": "1:mà"}, "kTGHZ2013": {"𠀀": "1:bá"},
                               "kHanyuPinlu": {"𠀀": "hé(1)"}})
-        self.assertEqual(refs.mainland("𠀀"), {"mā", "mǎ", "mà", "bá"})
+        self.assertEqual(refs.mainland("𠀀"), {"mā", "mǎ", "mà", "bá", "hé"})
 
     def test_evidence_tie_requires_a_decision(self):
         refs = self.refs_for({"kHanyuPinyin": {"𠀀": "1:mā,má"}})
@@ -441,13 +500,14 @@ class FoldHanRareTests(unittest.TestCase):
                 self.assertEqual([(r.basis, r.attested_by) for r in records], [("single", "unihan"), ("agreed", "cns,unihan")])
                 self.assertFalse(issues)
 
-    def test_tgh_priority_is_tier_specific_and_uses_the_first_valid_reference_reading(self):
-        refs = self.refs_for({"kMandarin": {"𠀀": "mā"}, "kTGHZ2013": {"𠀀": "1:hé,bá"}}, {"𠀀": {"mā"}})
+    def test_tgh_priority_is_tier_specific_and_uses_a_single_valid_reference_reading(self):
+        refs = self.refs_for({"kMandarin": {"𠀀": "mā"}, "kTGHZ2013": {"𠀀": "1:hé"}, "kHanyuPinyin": {"𠀀": "1:bá"}}, {"𠀀": {"mā"}})
         predictions = rare.Predictions({}, [])
         records, issues = rare.ordered_readings("𠀀", refs, predictions, ["mā", "hé", "bá"], tier="tgh")
         self.assertEqual(([r.value for r in records], issues), (["hé", "mā", "bá"], []))
         records, _ = rare.ordered_readings("𠀀", refs, predictions, tier="extb")
         self.assertEqual([r.value for r in records], ["mā", "bá", "hé"])
+        refs.fields["kHanyuPinyin"].clear()
         refs.fields["kTGHZ2013"]["𠀀"] = "1:x5,hé"
         records, issues = rare.ordered_readings("𠀀", refs, predictions, tier="tgh")
         self.assertEqual([r.value for r in records], ["hé", "mā"])
@@ -652,7 +712,7 @@ class FoldHanRareTests(unittest.TestCase):
                                 "--decisions", str(decisions), "--authored", str(self.root / "authored"), "--output", str(out)])
         self.assertEqual(status, 1)
         self.assertEqual(rare.document(out / "extb.tsv")[1][0][1], ["𠀀", "má mā", "𠀁"])
-        self.assertEqual(len(rare.document(out / "extb-findings.tsv")[1]), 2)
+        self.assertEqual(len(rare.document(out / "extb-findings.tsv")[1]), 3)
         _, records = rare.read_records(out / "extb-provenance.tsv")
         self.assertEqual([(r.value, r.rank) for r in records], [("má", 1), ("mā", 2), ("𠀁", 0)])
 
@@ -986,7 +1046,8 @@ class FoldHanRareTests(unittest.TestCase):
         predictions = rare.Predictions({}, [])
         records, issues = rare.ordered_readings("𠀀", refs, predictions, ["mā", "hé", "bá"])
         self.assertEqual([r.value for r in records], ["mā", "hé", "bá"])
-        self.assertEqual(issues, [("mā hé bá", "evidence-order tie requires a reviewed decision")])
+        self.assertEqual(issues, [("mā hé bá", "evidence-order tie requires a reviewed decision"),
+                                  ("mā hé bá", "evidence-order tie at ranks 1-2 settled by kHanyuPinyin HDZ order")])
         for choice in (["bá", "mā", "hé"], ["mā", "hé"], ["mā", "mā", "bá"], ["mā", "hé", "bō"]):
             with self.subTest(choice=choice):
                 records, _ = rare.ordered_readings("𠀀", refs, predictions, choice)
@@ -1233,7 +1294,7 @@ class PinnedReferenceSmokeTests(unittest.TestCase):
                 authored = rare.authored_before(data.DEFAULT_AUTHORED_DIR, name)
                 rows, _, _, findings = rare.assemble(members, self.refs, rare.Predictions({}, []), authored, tier=name)
                 self.assertEqual([row[0] for row in rows], members)
-                self.assertLessEqual({f[1] for f in findings}, {"provenance", "variant-guard", "family-target"})
+                self.assertLessEqual({f[1] for f in findings}, {"provenance", "variant-guard", "family-target", "reading-order"})
                 self.assertFalse([f for f in findings if f[3].startswith("unparseable")])
                 self.assertFalse([f for f in findings if f[1] == "variant-guard"
                                   and not f[3].startswith("variant-guard:tied-lineages=")])

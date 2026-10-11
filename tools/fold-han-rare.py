@@ -53,7 +53,7 @@ PARTIAL_FIELDS = ("kSemanticVariant", "kSpecializedSemanticVariant")
 EXCLUDED_PAIRS = {frozenset(("線", "缐"))}
 RULES = pathlib.Path(__file__).with_name("fold-han-reviewed-rules.json")
 TYPED_SHA256 = "843a97bc8bcab86a9295a29074cd074863fe877d0f7d4648931d49a9e7674fa7"
-MAINLAND_FIELDS = ("kHanyuPinyin", "kXHC1983", "kTGHZ2013")
+MAINLAND_FIELDS = ("kHanyuPinyin", "kXHC1983", "kTGHZ2013", "kHanyuPinlu")
 FIELDS = (*data.READING_FIELDS, *DIRECT_FIELDS, *PARTIAL_FIELDS, "kTGH", "kUnihanCore2020")
 SHA256 = re.compile(r"[a-f0-9]{64}\Z")
 TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+#:-]*\Z")
@@ -295,6 +295,7 @@ class References:
     pins: dict
     typed: frozenset[str] | None = None
     retained_mappings: dict[str, str] | None = None
+    cns_default: dict | None = None
 
     def unihan_spellings(self, ch: str, fields: tuple[str, ...]) -> list[str]:
         return [raw for field in fields for raw in data.field_readings(field, self.fields.get(field, {}).get(ch, ""))]
@@ -366,43 +367,100 @@ def classify(ch: str, value: str, lineages: set[str], predictions: Predictions) 
     return Record(ch, value, "agreed" if len(lineages) == 2 else "single", sources, sources, 1, "-")
 
 
+def source_orders(ch: str, refs: References) -> list[tuple[str, dict[str, int]]]:
+    frequency = {}
+    for raw, count in re.findall(r"([^\s(),;，]+)\s*\((\d+)\)", refs.fields.get("kHanyuPinlu", {}).get(ch, "")):
+        if value := reference_reading(raw):
+            frequency[value] = min(frequency.get(value, 0), -int(count))
+    hdz = []
+    raw = refs.fields.get("kHanyuPinyin", {}).get(ch, "")
+    entries = sorted(raw.split(), key=lambda entry: tuple(float(n) for n in entry.split(":")[0].split(",") if n))
+    for entry in entries:
+        hdz.extend(data.field_readings("kHanyuPinyin", entry))
+    orders = [("kHanyuPinlu frequency order", frequency)]
+    for label, raw_values in (("kHanyuPinyin HDZ order", hdz),
+                              ("kTGHZ2013 listing order", refs.unihan_spellings(ch, ("kTGHZ2013",))),
+                              ("kXHC1983 listing order", refs.unihan_spellings(ch, ("kXHC1983",))),
+                              ("CNS listing order", refs.cns.get(ch, ())),
+                              ("reference listing order", [raw for _, raw in refs.spellings(ch)])):
+        values = list(dict.fromkeys(value for raw in raw_values if (value := reference_reading(raw))))
+        orders.append((label, {value: index for index, value in enumerate(values)}))
+    return orders
+
+
+def cns_class_default(ch: str, refs: References) -> dict | None:
+    decision = refs.cns_default
+    if decision is None and refs.pins == json.loads(RULES.read_text(encoding="utf-8"))["references"]:
+        decision = reviewed_rules(refs).get("cns_default")
+    if decision and ch not in decision.get("individual_rows", ()):
+        return decision
+    return None
+
+
 def ordered_readings(ch: str, refs: References, predictions: Predictions,
                      choice: list[str] | None = None, tier: str | None = None
                      ) -> tuple[list[Record], list[tuple[str, str]]]:
-    """Prefer the decisive tgh reading, then region and evidence precedence.
-
-    Reviewed permutations reorder only tied readings; their decision finding remains."""
+    """Apply evidence keys at every rank and retain every source-settled tie."""
     attestations = refs.attestations(ch)
     records = {value: classify(ch, value, sources, predictions) for value, sources in attestations.items()}
     mandarin = refs.mandarin(ch)
     candidates = [(p.batch, i, token) for p in predictions.rows.get(ch, ()) for i, token in enumerate(p.normalized)]
     mainland = refs.mainland(ch)
-    tgh = [value for raw in refs.unihan_spellings(ch, ("kTGHZ2013",))
-           if (value := reference_reading(raw))] if tier == "tgh" else []
-    decisive = tgh[0] if tgh else None
+    standard = {value for raw in refs.unihan_spellings(ch, ("kTGHZ2013",))
+                if (value := reference_reading(raw))} if tier == "tgh" else set()
+    orders = source_orders(ch, refs)
 
-    def precedence(value: str):
+    def precedence(value: str, decisive: str | None = None):
         record = records[value]
         group = 0 if len(attestations[value]) == 2 else 1 if record.basis == "predicted" else 2
-        model = min(((batch, i) for batch, i, token in candidates if syllable(token) == syllable(value)), default=("~", sys.maxsize))
+        exact = [(batch, i) for batch, i, token in candidates if token == value]
+        matching = exact or [(batch, i) for batch, i, token in candidates if syllable(token) == syllable(value)]
+        model = min(matching, default=("~", sys.maxsize))
         return value != decisive, value not in mainland, group, mandarin.index(value) if value in mandarin else sys.maxsize, model
 
-    placed = sorted(records, key=lambda value: (precedence(value), value))
-    undecided = None
-    cns_only = all(attested == {"cns"} for attested in attestations.values())
-    if len(placed) > 1 and cns_only and not any(r.basis == "predicted" for r in records.values()):
-        undecided = "CNS-only default requires a reviewed decision"
-    elif len(placed) > 1 and precedence(placed[0]) == precedence(placed[1]):
-        undecided = "evidence-order tie requires a reviewed decision"
-    if (undecided and choice and sorted(choice) == sorted(placed)
-            and all(precedence(a) <= precedence(b) for a, b in itertools.pairwise(choice))):
+    def source_key(value: str):
+        return tuple(order.get(value, sys.maxsize) for _, order in orders)
+
+    evidence = min(standard, key=lambda value: (precedence(value), source_key(value)), default=None)
+    customary = mandarin[0] if mandarin and mandarin[0] in standard else None
+    decisive = next(iter(standard)) if len(standard) == 1 else customary or evidence
+    unranked = len(standard) > 1 and customary != evidence
+    placed = sorted(records, key=lambda value: (precedence(value, decisive), source_key(value)))
+    natural = list(placed)
+    lead = choice[0] if unranked and choice and choice[0] in standard else decisive
+    valid_choice = (choice and sorted(choice) == sorted(placed)
+                    and all(precedence(a, lead) <= precedence(b, lead) for a, b in itertools.pairwise(choice)))
+    if valid_choice:
         placed = list(choice)
-    issues = [(" ".join(placed), undecided)] if undecided else []
+    issues = []
+    if unranked:
+        issues.append((" ".join(placed), "kTGHZ2013 does not rank its readings; the tgh default requires a reviewed decision"))
+    cns_only = bool(attestations) and all(attested == {"cns"} for attested in attestations.values())
+    class_default = cns_class_default(ch, refs) if cns_only and not any(r.basis == "predicted" for r in records.values()) else None
+    if len(placed) > 1 and cns_only and not any(r.basis == "predicted" for r in records.values()):
+        if not class_default or placed != natural:
+            issues.append((" ".join(placed), "CNS-only default requires a reviewed decision"))
+    for _, group in itertools.groupby(placed, key=lambda value: precedence(value, lead)):
+        block = list(group)
+        if len(block) < 2:
+            continue
+        first = placed.index(block[0]) + 1
+        last = first + len(block) - 1
+        settling = next((label for label, order in orders
+                         if len({order.get(value, sys.maxsize) for value in block}) > 1), "reference listing order")
+        if first == 1 and not cns_only:
+            issues.append((" ".join(placed), "evidence-order tie requires a reviewed decision"))
+        issues.append((" ".join(placed), f"evidence-order tie at ranks {first}-{last} settled by {settling}"))
     issues.extend((raw, f"unparseable {source} reading") for source, raw in refs.unparseable(ch))
     for rank, value in enumerate(placed, 1):
         r = records[value]
         records[value] = Record(r.ch, r.value, r.basis, r.attested_by, r.tone_from, rank, r.batch)
     return [records[value] for value in placed], issues
+
+
+def informational_finding(finding: tuple) -> bool:
+    """Identify source-order reports that require no individual default decision."""
+    return finding[-3] == "reading-order"
 
 
 def family_mappings(refs: References, authored: set[str], choices: dict[str, str] | None = None
@@ -561,7 +619,8 @@ def assemble(members: list[str], refs: References, predictions: Predictions, aut
         if target:
             blind = [p.batch for p in predictions.rows.get(ch, ()) if p.simplified == target]
             records.append(Record(ch, target, "predicted" if blind else "single", relations, "-", 0, min(blind) if blind else "-"))
-        findings.extend((ch, "provenance", ours, reference) for ours, reference in issues)
+        findings.extend((ch, "reading-order" if reference.startswith("evidence-order tie at ranks ") else "provenance", ours, reference)
+                        for ours, reference in issues)
         findings.extend((ch, issue.split(":", 1)[0], target or "-", issue) for issue in family_issues.get(ch, ()))
         available = {syllable(r.value) for r in readings}
         for prediction in predictions.rows.get(ch, ()):
@@ -853,6 +912,7 @@ def write_assembly(out: pathlib.Path, tier: str, members: list[str], refs: Refer
     files = {
         f"{tier}.tsv": common + modified + ("# complete\n" if complete else "# partial\n")
         + "# Mainland readings precede Taiwan-only readings; unresolved order choices require reviewed rows.\n"
+        + ("# reviewed CNS-only class default: CNS listing order\n" if any(cns_class_default(ch, refs) for ch in members) else "")
         + "# Readings marked single are transcribed from the named source; see NOTICE.\n"
         + f"# counts: {canonical(counts)}\n# columns: ideograph\treadings\tsimplified\n"
         + "".join("\t".join(row) + "\n" for row in rows),
@@ -925,7 +985,8 @@ def check_notice(table: pathlib.Path, records: list[Record], notice: pathlib.Pat
 
 
 def check_provenance(table: pathlib.Path, provenance: pathlib.Path, refs: References, predictions: Predictions,
-                     authored: set[str], notice: pathlib.Path | None = None) -> list[tuple[str, str, str, str, str, str]]:
+                     authored: set[str], notice: pathlib.Path | None = None, *,
+                     include_information: bool = False) -> list[tuple[str, str, str, str, str, str]]:
     def finding(ch: str, ours: str, reference: str, kind: str = "provenance"):
         return table.name, "-", ch, kind, ours, reference
 
@@ -996,7 +1057,7 @@ def check_provenance(table: pathlib.Path, provenance: pathlib.Path, refs: Refere
     counts = dict(sorted(Counter(r.basis for r in actual if r.rank).items()))
     if headers.get("counts") != counts:
         findings.append(finding("-", canonical(headers.get("counts")), canonical(counts)))
-    return findings
+    return findings if include_information else [f for f in findings if not informational_finding(f)]
 
 
 def reference_arguments(parser):
@@ -1060,13 +1121,14 @@ def main(argv: list[str] | None = None) -> int:
                                       baseline=table_state(args.authored, args.generated),
                                       report_assembly=read_assembly(args.assembly, refs) if args.assembly else None)
         else:
-            findings = check_provenance(args.table, args.provenance, refs, predictions, authored)
+            findings = check_provenance(args.table, args.provenance, refs, predictions, authored, include_information=True)
             reviewed = data.read_reviewed(args.reviewed)
             findings = [f for f in findings if f[3] == "source-terms" or data.finding_key(f) not in reviewed]
             for f in findings:
                 print("\t".join(data.clean_tsv(value) for value in f))
-        print(f"{args.command}: blocking findings={len(findings)}", file=sys.stderr)
-        return int(bool(findings))
+        blocking = [f for f in findings if not informational_finding(f)]
+        print(f"{args.command}: blocking findings={len(blocking)}; informational findings={len(findings) - len(blocking)}", file=sys.stderr)
+        return int(bool(blocking))
     except (OSError, ValueError, TypeError, KeyError) as exc:
         print(exc, file=sys.stderr)
         return 2

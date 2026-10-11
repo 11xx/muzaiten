@@ -85,9 +85,15 @@ members; the fourth rule cannot override them. The provenance checker accepts a
 consistent listed target with its mapping records and an exact reviewed
 `family-target` row for each table member.
 
-In `tgh`, the first valid `kTGHZ2013` reading is the default before the general
-region and evidence order. Other attested readings retain that general order;
-without a valid `kTGHZ2013` reading it also chooses the default.
+In `tgh`, one valid `kTGHZ2013` reading is the default. With several,
+the zh-Hans `kMandarin` reading leads when it is among them; disagreement
+with the evidence order requires an exact reviewed choice. Dictionary page
+order provides no preference. Every other rank follows mainland and evidence
+precedence, then frequency, HDZ order and pinned source listing order.
+Tied blocks are reported at every rank; reviewed orders stay within a block.
+CNS-only defaults without a source preference follow the reviewed CNS listing
+order class, with individual source-decided exceptions. 饹 retains `gē le`;
+the 饸饹 word reading covers that compound.
 
 The authored files proceed through `tgh`, `big5-2`, `core`, `uro`, `exta`,
 `extb`, `extc` and `cns` after the four essential sets. A file declares full

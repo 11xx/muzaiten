@@ -119,26 +119,32 @@ Predictions without an attested syllable are withheld and recorded in gaps.
 All exact reference readings under the character ship; attestation is not
 inherited from a variant's reading.
 
-For `tgh`, the first valid `kTGHZ2013` reading is decisive for the default,
-before region and evidence precedence. Every other attested reading remains;
-its order follows the general rules. Without a valid `kTGHZ2013` reading those
-rules choose the default, and any unparseable source spelling remains a finding.
-For other tiers, region class is the first sort key: mainland-attested readings
-precede Taiwan-only readings. Within each region, evidence order is both lineages,
-then one lineage plus prediction, then unpredicted single-lineage readings.
-Ties use exact `kMandarin` order, then
-batch/model reading order. Remaining ties use lexical spelling for a reproducible
-proposal and require a reviewed decision when they affect the first reading.
-Mainland evidence is the first `kMandarin` value, `kHanyuPinyin`, `kXHC1983` or
-`kTGHZ2013`. CNS-only readings and a second `kMandarin` value alone provide Taiwan
-evidence. A predicted CNS-only reading cannot outrank an unpredicted mainland
-reading. Two or more CNS-only readings without a confirmed prediction require
-a reviewed default; one attested CNS-only reading needs no choice. A decider
-can choose an attested default for either an evidence-order tie or a CNS-only choice
-by aligning table order and provenance ranks, then recording the exact resulting
-finding in the reviewed rows. A permutation must preserve the region, evidence,
-`kMandarin` and prediction precedence of readings outside the tie. Duplicate,
-missing and unattested readings cannot settle a choice.
+For `tgh`, one valid `kTGHZ2013` reading is the default. With several,
+its dictionary page order ranks nothing: the first (zh-Hans) `kMandarin`
+value leads when it is among them. If it names none, or the general evidence
+order prefers another standard reading, a blocking finding requires a reviewed
+choice among the `kTGHZ2013` readings. Other readings follow the general order.
+
+Every rank uses the same evidence keys: the selected `tgh` default, mainland
+before Taiwan-only, both lineages before predicted before single-lineage,
+then exact `kMandarin` order and model order. Exact model readings precede
+syllable-only model matches. Mainland evidence includes the first `kMandarin`
+value, `kHanyuPinyin`, `kXHC1983`, `kTGHZ2013` and `kHanyuPinlu`.
+
+Each block tied on those keys follows descending `kHanyuPinlu` frequency,
+then `kHanyuPinyin` HDZ order, then the pinned listings of `kTGHZ2013`,
+`kXHC1983` and CNS phonetic rows. CNS keeps its iterable's order; these listings
+are sort orders, not preferences. Every tied block has a `reading-order`
+report naming its ranks and settling source. Only a rank-1 tie blocks;
+reviewed permutations may reorder within any tied block but must preserve all
+evidence keys between blocks. Duplicate, missing or unattested readings fail.
+
+The versioned CNS-only class decision in `fold-han-reviewed-rules.json` selects
+CNS listing order when no reading has a prediction or independent preference.
+Its source pins and listing basis are recorded with the proposal. The three
+source-decided defaults 䊷, 𠂲 and 𢤌 require individual reviewed rows. A reorder
+of a CNS-only class row retains its exact default finding for individual review.
+One attested CNS-only reading needs no default choice.
 Different prediction passes produce a blocking disagreement finding; they
 never count as independent attestation.
 

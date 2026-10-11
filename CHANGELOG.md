@@ -30,8 +30,9 @@
   mappings and NOTICE attribution; unmarked essential tables retain their
   authored-data rules. The fourth family target rule applies only when BMP and
   General Standard preferences are empty; unresolved families accept consistent
-  listed targets with provenance and exact reviewed rows. `tgh` defaults prefer
-  the decisive `kTGHZ2013` reading. Offline fixtures cover compatibility
+  listed targets with provenance and exact reviewed rows. `tgh` defaults use a sole
+  `kTGHZ2013` reading, or its zh-Hans `kMandarin` reading among several;
+  conflicting evidence requires an exact reviewed choice. Offline fixtures cover compatibility
   endpoints, malformed reference readings and all cached rare tiers.
 - Han generation and checks use pinned Unihan 18.0.0 independently of Python's
   Unicode version, retaining runtime category filtering for keys and mapping

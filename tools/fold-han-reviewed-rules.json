@@ -32,5 +32,14 @@
   "retained_mappings": {
     "𧭈": "𫍾",
     "𨰥": "𫔕"
+  },
+  "cns_default": {
+    "class": "cns-only-no-preference/1",
+    "basis": "CNS listing order",
+    "individual_rows": [
+      "䊷",
+      "𠂲",
+      "𢤌"
+    ]
   }
 }
