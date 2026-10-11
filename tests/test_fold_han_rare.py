@@ -498,7 +498,8 @@ class FoldHanRareTests(unittest.TestCase):
                                  "CNS_phonetic.txt": "1-1111\tㄝˇ\n1-1112\tㄇㄠˇ\n"})
         zip_fixture(mappings, {"Unicode/CNS2UNICODE_Unicode 2.txt": "1-1111\t20000\n1-1112\t20001\n"})
         cns = data.cns_readings((properties, mappings))
-        self.assertEqual(cns, {"𠀀": {"ê\u030c"}, "𠀁": {"mao\u02c7"}})
+        self.assertEqual(cns, {"𠀀": ["ê\u030c"], "𠀁": []})
+        self.assertEqual(cns.held["𠀁"][0]["reading"], "mao\u02c7")
         records, issues = rare.ordered_readings("𠀀", self.refs_for({}, cns), rare.Predictions({}, []))
         self.assertEqual(([r.value for r in records], issues), (["ê\u030c"], []))
 

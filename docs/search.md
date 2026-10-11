@@ -136,7 +136,10 @@ assembly never marks the surrounding tier complete.
 `tools/fold-han-data.py check` compares the authored tables with Unihan and
 Taiwan's CNS 11643 open data for reading attestation,
 including the exact tone of every reading across simplified and traditional
-counterparts. It reports `family-target` disagreements for astral variant
+counterparts. Direct CNS evidence admits the exceptional syllables `piā`, `yái`,
+`nuí`, `sēi` and `gué` unchanged. Its nucleusless `q` token remains unresolved
+and cannot attest a reading. CNS evidence lists preserve phonetic-file order.
+It reports `family-target` disagreements for astral variant
 families and `variant-guard` findings for unsupported semantic variant folds.
 Rare files and tables marked with `# schema: fold-han-provenance/1` require a
 matching provenance sidecar and their prediction batches. `--provenance DIR`

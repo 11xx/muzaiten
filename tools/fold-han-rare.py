@@ -288,7 +288,7 @@ class Record:
 @dataclass
 class References:
     fields: dict[str, dict[str, str]]
-    cns: dict[str, set[str]]
+    cns: dict[str, list[str]]
     opencc: dict[str, list[str]]
     pins: dict
 
@@ -297,8 +297,11 @@ class References:
 
     def spellings(self, ch: str) -> list[tuple[str, str]]:
         """Return (source, raw spelling) pairs; the source is a Unihan field or `cns`."""
+        cns = self.cns.get(ch, ())
+        if isinstance(cns, set):
+            cns = sorted(cns)
         return ([(field, raw) for field in data.READING_FIELDS for raw in self.unihan_spellings(ch, (field,))]
-                + [("cns", raw) for raw in sorted(self.cns.get(ch, ()))])
+                + [("cns", raw) for raw in cns])
 
     def attestations(self, ch: str) -> dict[str, set[str]]:
         result = defaultdict(set)

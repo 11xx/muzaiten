@@ -91,6 +91,29 @@ TONE_MARKS = {"\u0304", "\u0301", "\u030c", "\u0300"}
 DIACRITIC = "\u0308"
 PINYIN_CIRCUMFLEX = "\u0302"
 SPACING_CARON = "\u02c7"
+
+# Syllable bases in the pinned Unihan 18 reading fields, plus exceptional CNS classes.
+MANDARIN_SYLLABLES = set((
+    "a ai an ang ao ba bai ban bang bao bei ben beng bi bian biang biao bie bin bing bo bong bu ca cai "
+    "can cang cao ce cei cen ceng cha chai chan chang chao che chen cheng chi chong chou chu chua chuai "
+    "chuan chuang chui chun chuo ci cong cou cu cuan cui cun cuo da dai dan dang dao de dei den deng di "
+    "dia dian diao die din ding diu dong dou du duan dui dun duo e ei en eng er fa fan fang fei fen feng "
+    "fiao fo fou fu ga gai gan gang gao ge gei gen geng gong gou gu gua guai guan guang gue gui gun guo "
+    "ha hai han hang hao he hei hen heng hm hng hong hou hu hua huai huan huang hui hun huo ji jia jian "
+    "jiang jiao jie jin jing jiong jiu ju juan jue jun ka kai kan kang kao ke kei ken keng kong kou ku "
+    "kua kuai kuan kuang kui kun kuo la lai lan lang lao le lei len leng li lia lian liang liao lie lin "
+    "ling liu lo long lou lu luan lue lun luo m ma mai man mang mao me mei men meng mi mian miao mie min "
+    "ming miu mo mou mu n na nai nan nang nao ne nei nen neng ng ni nia nian niang niao nie nin ning niu "
+    "nong nou nu nuan nue nui nun nuo o ou pa pai pan pang pao pei pen peng pi pia pian piao pie pin ping "
+    "po pou pu qi qia qian qiang qiao qie qin qing qiong qiu qu quan que qun r ran rang rao re ren reng "
+    "ri rong rou ru rua ruan rui run ruo sa sai san sang sao se sei sen seng sha shai shan shang shao she "
+    "shei shen sheng shi shou shu shua shuai shuan shuang shui shun shuo si song sou su suan sui sun suo "
+    "ta tai tan tang tao te tei teng ti tian tiao tie ting tong tou tu tuan tui tun tunwa tuo wa wai wan "
+    "wang wei wen weng wo wong wu xi xia xian xiang xiao xie xin xing xiong xiu xu xuan xue xun ya yai "
+    "yan yang yao ye yi yin ying yo yong you yu yuan yue yun za zai zan zang zao ze zei zen zeng zha zhai "
+    "zhan zhang zhao zhe zhei zhen zheng zhi zhong zhou zhu zhua zhuai zhuan zhuang zhui zhun zhuo zi "
+    "zong zou zu zuan zui zun zuo "
+).split())
 CHECK_KINDS = (
     "source-terms", "format", "coverage", "default", "tone", "unattested", "archaic", "missing", "simplified",
     "family-target", "variant-guard",
@@ -205,27 +228,67 @@ def cns_pinyin(spelling: str) -> str:
     return combined if base and is_tone_marked_pinyin(combined, {base}, {combined}) else spelling
 
 
-def cns_readings(paths: tuple[pathlib.Path, pathlib.Path]) -> dict[str, set[str]]:
+class CNSReadings(dict[str, list[str]]):
+    """Admitted readings in phonetic-file order, with exact evidence for held tokens."""
+
+    def __init__(self):
+        super().__init__()
+        self.evidence: dict[str, list[dict]] = defaultdict(list)
+        self.held: dict[str, list[dict]] = defaultdict(list)
+        self.rules: dict[str, dict] = {}
+
+
+def member_witness(path: pathlib.Path, member: str, content: bytes) -> dict:
+    return {"archive": path.name, "archive_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "member": member, "member_sha256": hashlib.sha256(content).hexdigest()}
+
+
+def source_witness(member: dict, line: int, raw: str) -> dict:
+    return {**member, "line": line, "raw": raw}
+
+
+def cns_readings(paths: tuple[pathlib.Path, pathlib.Path]) -> CNSReadings:
     properties, mappings = paths
     with zipfile.ZipFile(properties) as archive:
-        pinyin = {zhuyin: cns_pinyin(spelling) for zhuyin, spelling in
-                  (line.split("\t")[:2] for line in archive.read("CNS_pinyin_2.txt").decode().splitlines())}
-        by_code: dict[str, set[str]] = defaultdict(set)
-        for line in archive.read("CNS_phonetic.txt").decode().splitlines():
-            code, zhuyin = line.split("\t")[:2]
-            if zhuyin in pinyin:
-                by_code[code].add(pinyin[zhuyin])
-    result: dict[str, set[str]] = defaultdict(set)
+        pinyin_bytes = archive.read("CNS_pinyin_2.txt")
+        pinyin_member = member_witness(properties, "CNS_pinyin_2.txt", pinyin_bytes)
+        pinyin = {}
+        for number, raw in enumerate(pinyin_bytes.decode().splitlines(), 1):
+            zhuyin, spelling = raw.split("\t")[:2]
+            pinyin[zhuyin] = cns_pinyin(spelling), source_witness(pinyin_member, number, raw)
+        phonetic_bytes = archive.read("CNS_phonetic.txt")
+        phonetic_member = member_witness(properties, "CNS_phonetic.txt", phonetic_bytes)
+        phonetics = list(enumerate(phonetic_bytes.decode().splitlines(), 1))
+    by_code = defaultdict(list)
     with zipfile.ZipFile(mappings) as archive:
         for member in archive.namelist():
             if not member.startswith("Unicode/CNS2UNICODE_") or not member.endswith(".txt"):
                 continue
-            for line in archive.read(member).decode().splitlines():
-                code, hex_point = line.split("\t")[:2]
+            content = archive.read(member)
+            mapping_member = member_witness(mappings, member, content)
+            for number, raw in enumerate(content.decode().splitlines(), 1):
+                code, hex_point = raw.split("\t")[:2]
                 point = int(hex_point, 16)
                 if in_reference_ideograph_blocks(chr(point)):
-                    result[chr(point)].update(by_code.get(code, ()))
-    return {ch: readings for ch, readings in result.items() if readings}
+                    by_code[code].append((chr(point), source_witness(mapping_member, number, raw)))
+    result = CNSReadings()
+    for number, raw in phonetics:
+        code, zhuyin = raw.split("\t")[:2]
+        if zhuyin not in pinyin:
+            continue
+        spelling, witness = pinyin[zhuyin]
+        admitted = admit_syllable(spelling)
+        for ch, mapping in by_code[code]:
+            evidence = {"cns": code, "reading": spelling, "status": "keep" if admitted else "held",
+                        "phonetic": source_witness(phonetic_member, number, raw),
+                        "pinyin": witness, "mapping": mapping}
+            result.evidence[ch].append(evidence)
+            readings = result.setdefault(ch, [])
+            if admitted and admitted not in readings:
+                readings.append(admitted)
+            elif not admitted:
+                result.held[ch].append(evidence)
+    return result
 
 
 def cedict_pinyin(token: str) -> str | None:
@@ -506,15 +569,21 @@ def pinyin_base(reading: str) -> str | None:
 
 
 def pinyin_inventory(fields: dict[str, dict[str, str]]) -> set[str]:
-    """Collect Mandarin syllable spellings represented by Unihan readings."""
-    inventory = set()
+    """Collect Unihan syllable spellings and the admitted exceptional CNS classes."""
+    inventory = {"pia", "yai", "nui", "sei", "gue"}
     for field in READING_FIELDS:
-        for value in fields[field].values():
+        for value in fields.get(field, {}).values():
             inventory.update(
                 base for reading in field_readings(field, value)
                 if (base := pinyin_base(reading)) is not None
             )
     return inventory
+
+
+def admit_syllable(reading: str) -> str | None:
+    """Admit one NFC Mandarin syllable without inferring a corrected spelling."""
+    normalized = unicodedata.normalize("NFC", reading)
+    return normalized if is_tone_marked_pinyin(normalized, MANDARIN_SYLLABLES, {normalized}) else None
 
 
 def expected_tone_position(letters: str) -> int | None:
@@ -538,7 +607,7 @@ def is_tone_marked_pinyin(
     inventory: set[str],
     special_spellings: set[str],
 ) -> bool:
-    """Check tone placement and membership in Unihan's Mandarin syllables."""
+    """Check tone placement and membership in the admitted Mandarin inventory."""
     if not reading or reading != reading.lower():
         return False
     letters = []
@@ -563,13 +632,13 @@ def is_tone_marked_pinyin(
             return False
 
     base = "".join(letters)
-    if base not in inventory:
+    if base not in inventory | {"pia", "yai", "nui", "sei", "gue"}:
         return False
     if not tone_positions:
-        return True
+        return expected_tone_position(base) is not None or base in {"hm", "hng", "ng", "r"}
     expected = expected_tone_position(base)
     if expected is None:
-        return unicodedata.normalize("NFC", reading) in special_spellings
+        return len(tone_positions) == 1 and unicodedata.normalize("NFC", reading) in special_spellings
     return len(tone_positions) == 1 and tone_positions[0] == expected
 
 

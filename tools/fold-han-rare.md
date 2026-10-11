@@ -80,7 +80,14 @@ syllable-only agreement cannot attest a tone.
 
 Reference readings are NFC tone-marked pinyin. CNS writes a third tone after a
 vowel with the spacing caron (U+02C7); it reads as the combining caron when the
-result is a tone-marked syllable. Any other reference spelling that is not
+result is a tone-marked syllable. The shared syllable admission accepts the
+directly attested exceptional CNS spellings `piā`, `yái`, `nuí`, `sēi` and `gué`
+unchanged. The nucleusless `q` token is held with its phonetic, Hanyu-column and
+Unicode-mapping witnesses; it supplies neither attestation nor a tone.
+CNS reader lists follow `CNS_phonetic.txt` order, deduplicating each character's
+admitted readings across all its CNS codes. The reading evidence retains archive
+and member hashes, line numbers and raw lines, including held tokens.
+Any other reference spelling that is not
 tone-marked pinyin attests nothing and is a blocking `provenance` finding naming
 the character, the spelling and its source, such as `unparseable cns reading`.
 

@@ -175,10 +175,47 @@ class FoldHanDataTests(unittest.TestCase):
                 archive.writestr("Unicode/CNS2UNICODE_Unicode 15.txt", "15-1111\tF6001\n")
             with mock.patch.object(checker, "CNS_SHA256", {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (properties, mappings)}):
                 self.assertEqual(checker.cns_archives((properties, mappings)), (properties, mappings))
-                self.assertEqual(checker.cns_readings((properties, mappings)), {"期": {"jī", "qī", "qí"}})
+                self.assertEqual(checker.cns_readings((properties, mappings)), {"期": ["jī", "qī", "qí"]})
                 properties.write_bytes(b"bad")
                 with self.assertRaisesRegex(ValueError, "sha256"):
                     checker.cns_archives((properties, mappings))
+
+    def cns_fixture(self, root, pinyin, phonetic, mapping, sources=""):
+        properties, mappings = root / "Properties.zip", root / "MapingTables.zip"
+        with zipfile.ZipFile(properties, "w") as archive:
+            archive.writestr("CNS_pinyin_2.txt", pinyin)
+            archive.writestr("CNS_phonetic.txt", phonetic)
+            archive.writestr("CNS_source.txt", sources)
+        with zipfile.ZipFile(mappings, "w") as archive:
+            archive.writestr("Unicode/CNS2UNICODE_Unicode BMP.txt", mapping)
+        return properties, mappings
+
+    def test_cns_file_order_survives_duplicate_codes_and_mapping_order(self):
+        self.cns_readings_patch.stop()
+        with tempfile.TemporaryDirectory() as directory:
+            paths = self.cns_fixture(pathlib.Path(directory), "甲\tqī\n乙\tjī\n丙\tqí\n",
+                                     "1-1112\t甲\n1-1111\t乙\n1-1112\t甲\n1-1111\t丙\n",
+                                     "1-1111\t671F\n1-1112\t671F\n")
+            self.assertEqual(checker.cns_readings(paths)["期"], ["qī", "jī", "qí"])
+
+    def test_exceptional_cns_syllables_and_held_nucleusless_token(self):
+        self.cns_readings_patch.stop()
+        with tempfile.TemporaryDirectory() as directory:
+            readings = ["piā", "yái", "nuí", "sēi", "gué", "q", "cuì"]
+            paths = self.cns_fixture(pathlib.Path(directory),
+                                     "".join(f"注{i}\t{r}\n" for i, r in enumerate(readings)),
+                                     "".join(f"1-1111\t注{i}\n" for i in range(len(readings))),
+                                     "1-1111\t671F\n")
+            result = checker.cns_readings(paths)
+            self.assertEqual(result["期"], readings[:5] + ["cuì"])
+            held = result.held["期"][0]
+            self.assertEqual((held["reading"], held["status"]), ("q", "held"))
+            self.assertEqual(held["phonetic"]["raw"], "1-1111\t注5")
+            self.assertEqual(held["pinyin"]["line"], 6)
+            for token in readings[:5]:
+                self.assertTrue(checker.is_tone_marked_pinyin(token, checker.pinyin_inventory({}), {token}))
+            self.assertIsNone(checker.admit_syllable("q"))
+            self.assertIsNone(checker.admit_syllable("pía"))
 
     def test_rare_tiers_are_ordered_and_disjoint(self):
         fields = {name: {} for name in (*checker.READING_FIELDS, *checker.VARIANT_FIELDS,
