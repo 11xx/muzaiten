@@ -200,6 +200,39 @@ QList<QKeySequence> keysForAction(const KeyBindingMap &bindings, const QString &
     return keys;
 }
 
+ResolvedKeyBindings resolveKeyBindings(const KeyBindingMap &preset, const KeyBindingOverrides &overrides)
+{
+    ResolvedKeyBindings resolved;
+    resolved.bindings = applyKeyBindingOverrides(preset, overrides);
+    KeyBindingMap normalizedPreset;
+    for (auto it = preset.cbegin(); it != preset.cend(); ++it) {
+        normalizedPreset.insert(normalizedKey(it.key()), it.value());
+    }
+    for (auto it = resolved.bindings.cbegin(); it != resolved.bindings.cend(); ++it) {
+        if (normalizedPreset.value(it.key()) != it.value()) {
+            resolved.userKeys.insert(it.key());
+        }
+    }
+    for (auto it = normalizedPreset.cbegin(); it != normalizedPreset.cend(); ++it) {
+        if (!resolved.bindings.contains(it.key())) {
+            resolved.removedKeys.insert(it.key());
+        }
+    }
+    return resolved;
+}
+
+bool isTextKey(const QKeySequence &key)
+{
+    if (key.count() != 1) {
+        return false;
+    }
+    const QKeyCombination combination = key[0];
+    const Qt::KeyboardModifiers modifiers = combination.keyboardModifiers() & ~Qt::ShiftModifier;
+    const int code = combination.key();
+    return modifiers == Qt::NoModifier && ((code >= Qt::Key_Space && code <= Qt::Key_AsciiTilde) || code >= 0xa0)
+        && code < Qt::Key_Escape;
+}
+
 QString keyBindingOverridesToJson(const KeyBindingOverrides &overrides)
 {
     QJsonObject object;
@@ -232,7 +265,8 @@ KeyBindingOverrides keyBindingOverridesFromJson(const QString &json, const KeyBi
             // exactly as written.
             const QString text = entry.toString();
             const QKeySequence parsed = QKeySequence::fromString(text, QKeySequence::PortableText);
-            if (parsed.count() != 1 || parsed[0].key() == Qt::Key_unknown
+            if (parsed.count() < 1 || parsed.count() > 2 || parsed[0].key() == Qt::Key_unknown
+                || (parsed.count() == 2 && parsed[1].key() == Qt::Key_unknown)
                 || parsed.toString(QKeySequence::PortableText).compare(text, Qt::CaseInsensitive) != 0) {
                 continue;
             }

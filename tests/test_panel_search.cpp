@@ -3,6 +3,7 @@
 #include <QWidget>
 
 #include "search/SearchMatcher.h"
+#include "ui/KeybindCatalog.h"
 #include "ui/MainPanelKeybindings.h"
 #include "ui/PanelSearchController.h"
 
@@ -112,6 +113,89 @@ private slots:
 
         QTest::keyClick(&focusWidget, Qt::Key_N, Qt::AltModifier);  // no query left
         QVERIFY(controller.isVisible());
+    }
+
+    // The album grid's own keys yield to keys the user gave another action, and
+    // any key the user gave Play now plays.
+    void albumGridHonorsReassignedKeys()
+    {
+        using namespace MainPanelAction;
+        FakePanel panel{{QStringLiteral("A"), QStringLiteral("B"), QStringLiteral("C")}, 0};
+        QWidget grid;
+        PanelSearchController controller;
+        MainPanelTarget target = panel.makeTarget(&grid);
+        target.id = MainPanelId::Albums;
+        target.label = QStringLiteral("Albums");
+        int activated = 0;
+        int marked = 0;
+        int played = 0;
+        target.activateCurrent = [&activated]() { ++activated; };
+        target.markCurrent = [&marked]() { ++marked; };
+        target.playCurrentNow = [&played]() { ++played; };
+        target.moveCurrentInGrid = [&panel](int horizontal, int) { panel.currentRow += horizontal; };
+        controller.registerTarget(target);
+        controller.setActivePanel(MainPanelId::Albums, false);
+        controller.activateForMainView();
+        controller.setKeyBindingOverrides(
+            {{QString::fromLatin1(MoveDown), {QKeySequence(Qt::Key_J), QKeySequence(Qt::Key_Down)}},
+             {QString::fromLatin1(Mark), {QKeySequence(Qt::Key_M), QKeySequence(Qt::Key_N)}},
+             {QString::fromLatin1(PlayNow),
+              {QKeySequence(Qt::Key_Return), QKeySequence(Qt::Key_Enter), QKeySequence(Qt::AltModifier | Qt::Key_Return),
+               QKeySequence(Qt::AltModifier | Qt::Key_Enter), QKeySequence(Qt::ControlModifier | Qt::Key_L)}}});
+
+        QTest::keyClick(&grid, Qt::Key_N);
+        QCOMPARE(activated, 0);
+        QCOMPARE(marked, 1);
+        QTest::keyClick(&grid, Qt::Key_L, Qt::ControlModifier);
+        QCOMPARE(played, 1);
+        // Preset keys the user left alone keep the grid's meaning.
+        QTest::keyClick(&grid, Qt::Key_Return);
+        QCOMPARE(activated, 1);
+        QCOMPARE(played, 1);
+    }
+
+    void removedKeysDoNothing()
+    {
+        using namespace MainPanelAction;
+        QStringList names;
+        for (int i = 0; i < 40; ++i) {
+            names.push_back(QString::number(i));
+        }
+        FakePanel panel{names, 5};
+        QWidget focusWidget;
+        PanelSearchController controller;
+        controller.registerTarget(panel.makeTarget(&focusWidget));
+        controller.setActivePanel(MainPanelId::Artists, false);
+        controller.activateForMainView();
+        controller.setKeyBindingOverrides({{QString::fromLatin1(PageDown), {}}, {QString::fromLatin1(MoveDown), {}}});
+
+        QTest::keyClick(&focusWidget, Qt::Key_V, Qt::ControlModifier);
+        QCOMPARE(panel.currentRow, 5);
+        QTest::keyClick(&focusWidget, Qt::Key_PageDown);
+        QCOMPARE(panel.currentRow, 5);
+        QTest::keyClick(&focusWidget, Qt::Key_J);
+        QCOMPARE(panel.currentRow, 5);
+        QTest::keyClick(&focusWidget, Qt::Key_K);
+        QCOMPARE(panel.currentRow, 4);
+    }
+
+    // A text key given to a search command types into the query instead.
+    void searchFieldKeepsTextKeys()
+    {
+        FakePanel panel{{QStringLiteral("Axe"), QStringLiteral("Box")}, 0};
+        QWidget focusWidget;
+        PanelSearchController controller;
+        QLineEdit *edit = controller.findChild<QLineEdit *>();
+        QVERIFY(edit != nullptr);
+        controller.registerTarget(panel.makeTarget(&focusWidget));
+        controller.setActivePanel(MainPanelId::Artists, false);
+        controller.activateForMainView();
+        controller.setKeyBindingOverrides(
+            {{QString::fromLatin1(MainPanelAction::SearchNext), {QKeySequence(Qt::Key_X)}}});
+
+        QTest::keyClick(&focusWidget, Qt::Key_Slash);
+        QTest::keyClicks(edit, QStringLiteral("ax"));
+        QCOMPARE(edit->text(), QStringLiteral("ax"));
     }
 };
 

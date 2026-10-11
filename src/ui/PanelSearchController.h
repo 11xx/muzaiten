@@ -112,10 +112,11 @@ private:
     void unmarkCurrent();
     void unmarkAll();
     void cycleMatch(int direction);
-    bool handleAlbumGridKey(QKeyEvent *event, const QString &action);
+    bool handleAlbumGridKey(QKeyEvent *event, const QString &action, bool userKey);
     bool handlePanelKey(QKeyEvent *event, MainPanelId panel);
     bool handleSearchKey(QKeyEvent *event);
     int pageStepForActivePanel() const;
+    void applyKeyBindings();
 
     QVector<MainPanelTarget> m_targets;
     QHash<QWidget *, MainPanelId> m_widgetToPanel;
@@ -124,6 +125,8 @@ private:
     KeyBindingMap m_keyBindings;
     QString m_keyBindingProfileName;
     KeyBindingOverrides m_keyBindingOverrides;
+    QSet<QKeySequence> m_userKeys;
+    QSet<QKeySequence> m_removedKeys;
     MainPanelId m_activePanel = MainPanelId::Artists;
     bool m_hasActivePanel = false;
     bool m_mainViewActive = false;

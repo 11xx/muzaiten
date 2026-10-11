@@ -673,6 +673,7 @@ QueueTable::QueueTable(QueueTablePreset preset, QWidget *parent)
         providers.focusList = [this] { navigationWidget()->setFocus(); };
         m_search->setProviders(providers);
         layout->addWidget(m_search);
+        applyKeyBindings();
     }
 
     m_columnLayout = new ResponsiveColumnLayout(m_view, responsiveSpecsForPreset(preset), this);
@@ -1000,13 +1001,26 @@ void QueueTable::setNavigationScrollPadding(int rows)
 void QueueTable::setKeyBindingProfileName(const QString &name)
 {
     m_keyBindingProfileName = name.isEmpty() ? defaultQueueKeyBindingProfileName() : name;
-    m_keyBindings = applyKeyBindingOverrides(queueBindingMapForProfile(m_keyBindingProfileName), m_keyBindingOverrides);
+    applyKeyBindings();
 }
 
 void QueueTable::setKeyBindingOverrides(const KeyBindingOverrides &overrides)
 {
     m_keyBindingOverrides = overrides;
-    m_keyBindings = applyKeyBindingOverrides(queueBindingMapForProfile(m_keyBindingProfileName), m_keyBindingOverrides);
+    applyKeyBindings();
+}
+
+void QueueTable::applyKeyBindings()
+{
+    const ResolvedKeyBindings resolved =
+        resolveKeyBindings(queueBindingMapForProfile(m_keyBindingProfileName), m_keyBindingOverrides);
+    m_keyBindings = resolved.bindings;
+    m_removedKeys = resolved.removedKeys;
+    if (m_search != nullptr) {
+        m_search->setCommandKeys(keysForAction(m_keyBindings, QString::fromLatin1(QueueAction::Escape)),
+                                 keysForAction(m_keyBindings, QString::fromLatin1(QueueAction::SearchNext)),
+                                 keysForAction(m_keyBindings, QString::fromLatin1(QueueAction::SearchPrevious)));
+    }
 }
 
 bool QueueTable::eventFilter(QObject *watched, QEvent *event)
@@ -1292,10 +1306,13 @@ bool QueueTable::handleKeyPress(QKeyEvent *event)
         return false;
     }
 
-    QString action = keyBindingAction(m_keyBindings, event);
-    if (action.isEmpty() && event->modifiers() == Qt::ControlModifier && event->key() == Qt::Key_V) {
-        action = QString::fromLatin1(QueueAction::PageDown);
+    const QKeySequence pressed = keySequenceForEvent(event);
+    if (m_removedKeys.contains(pressed)) {
+        // A preset key the user unassigned does nothing, not even the table's
+        // own navigation.
+        return true;
     }
+    const QString action = m_keyBindings.value(pressed);
     if (action.isEmpty()) {
         return false;
     }

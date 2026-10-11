@@ -1,6 +1,7 @@
 #include "ui/PanelSearchBar.h"
 
 #include "search/SearchQuery.h"
+#include "ui/KeybindCatalog.h"
 
 #include <QHBoxLayout>
 #include <QKeyEvent>
@@ -201,6 +202,23 @@ bool PanelSearchBar::eventFilter(QObject *watched, QEvent *event)
     return QWidget::eventFilter(watched, event);
 }
 
+void PanelSearchBar::setCommandKeys(const QList<QKeySequence> &escapeKeys, const QList<QKeySequence> &nextKeys,
+                                    const QList<QKeySequence> &previousKeys)
+{
+    const auto commandKeys = [](const QList<QKeySequence> &keys) {
+        QList<QKeySequence> result;
+        for (const QKeySequence &key : keys) {
+            if (!isTextKey(key)) {
+                result.push_back(normalizedKey(key));
+            }
+        }
+        return result;
+    };
+    m_escapeKeys = commandKeys(escapeKeys);
+    m_nextKeys = commandKeys(nextKeys);
+    m_previousKeys = commandKeys(previousKeys);
+}
+
 bool PanelSearchBar::handleEditKey(QKeyEvent *event)
 {
     const Qt::KeyboardModifiers mods = event->modifiers();
@@ -211,15 +229,16 @@ bool PanelSearchBar::handleEditKey(QKeyEvent *event)
         confirm();
         return true;
     }
-    if (event->key() == Qt::Key_Escape) {
+    const QKeySequence pressed = keySequenceForEvent(event);
+    if (m_escapeKeys.contains(pressed)) {
         escape();
         return true;
     }
-    if (mods.testFlag(Qt::AltModifier) && event->key() == Qt::Key_N) {
+    if (m_nextKeys.contains(pressed)) {
         cycle(+1);
         return true;
     }
-    if (mods.testFlag(Qt::AltModifier) && event->key() == Qt::Key_P) {
+    if (m_previousKeys.contains(pressed)) {
         cycle(-1);
         return true;
     }

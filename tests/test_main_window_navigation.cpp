@@ -4225,6 +4225,56 @@ print(json.dumps({"protocol_version": 1, "request_id": request["request_id"], "e
         QVERIFY(artistList->hasFocus());
     }
 
+    void explorerKeysFollowTheUsersBindings()
+    {
+        using namespace ExplorerAction;
+        QVector<Track> tracks;
+        for (const QString &name : {QStringLiteral("a"), QStringLiteral("b"), QStringLiteral("c")}) {
+            Track track;
+            track.path = QStringLiteral("/library/%1.flac").arg(name);
+            track.filename = name + QStringLiteral(".flac");
+            track.title = name;
+            tracks.push_back(track);
+        }
+        FileExplorerView view;
+        view.setMode(FileExplorerMode::Library);
+        view.setLibraryEntries({}, tracks);
+        view.setKeyBindingProfileName(QStringLiteral("vim"));
+        auto *tree = view.findChild<QTreeWidget *>();
+        QVERIFY(tree != nullptr);
+        QCOMPARE(tree->topLevelItemCount(), 3);
+        tree->setCurrentItem(tree->topLevelItem(0));
+        QSignalSpy adds(&view, &FileExplorerView::addToQueueRequested);
+        QSignalSpy plays(&view, &FileExplorerView::trackActivated);
+
+        // Keys the user gives an action run it ahead of the explorer's own
+        // handling of those keys.
+        view.setKeyBindingOverrides({{QString::fromLatin1(AddToQueue),
+                                      {QKeySequence(Qt::Key_Return), QKeySequence(Qt::Key_Slash), QKeySequence(Qt::Key_G),
+                                       QKeySequence(Qt::ControlModifier | Qt::Key_Z)}}});
+        QTest::keyClick(tree, Qt::Key_Return);
+        QTest::keyClick(tree, Qt::Key_Slash);
+        QTest::keyClick(tree, Qt::Key_G);
+        QTest::keyClick(tree, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(adds.count(), 4);
+        QCOMPARE(plays.count(), 0);
+        // A binding with a modifier needs the modifier.
+        QTest::keyClick(tree, Qt::Key_Z);
+        QCOMPARE(adds.count(), 4);
+
+        // A key taken off an action does nothing.
+        view.setKeyBindingOverrides({{QString::fromLatin1(MoveDown), {}}});
+        QTest::keyClick(tree, Qt::Key_J);
+        QCOMPARE(tree->currentItem(), tree->topLevelItem(0));
+
+        // The vim preset's G goes to the bottom and gg back to the top.
+        QTest::keyClick(tree, Qt::Key_G, Qt::ShiftModifier);
+        QCOMPARE(tree->currentItem(), tree->topLevelItem(2));
+        QTest::keyClick(tree, Qt::Key_G);
+        QTest::keyClick(tree, Qt::Key_G);
+        QCOMPARE(tree->currentItem(), tree->topLevelItem(0));
+    }
+
     void savedQueueKeysApplyWhenTheQueueScreenIsBuilt()
     {
         AppCore core;

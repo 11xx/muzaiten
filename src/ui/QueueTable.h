@@ -99,6 +99,7 @@ private:
     void applyTableFrameStyle();
     void setHeaderHeight(int height);
     bool handleKeyPress(QKeyEvent *event);
+    void applyKeyBindings();
     int pageStepRows() const;
     QVector<int> selectedRowsForAction() const;
     Track currentTrackForAction() const;
@@ -110,6 +111,7 @@ private:
     KeyBindingMap m_keyBindings;
     QString m_keyBindingProfileName;
     KeyBindingOverrides m_keyBindingOverrides;
+    QSet<QKeySequence> m_removedKeys;
     QTableView *m_view = nullptr;
     QAbstractTableModel *m_model = nullptr;
     QStyledItemDelegate *m_itemDelegate = nullptr;

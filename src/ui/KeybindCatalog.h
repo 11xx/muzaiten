@@ -5,6 +5,7 @@
 #include <QKeySequence>
 #include <QList>
 #include <QMap>
+#include <QSet>
 #include <QString>
 #include <QVector>
 
@@ -48,6 +49,19 @@ KeyBindingMap presetBindings(const KeyBindingScope &scope, const QString &preset
 // keys; a key an override assigns leaves whichever action had it.
 KeyBindingMap applyKeyBindingOverrides(const KeyBindingMap &preset, const KeyBindingOverrides &overrides);
 QList<QKeySequence> keysForAction(const KeyBindingMap &bindings, const QString &action);
+
+// What a screen's key handler needs from a preset and the user's overrides:
+// the bindings in effect; user keys, which run a different action than the
+// preset gives them and so go before any built-in handling of the key; and
+// removed keys, preset keys left with no action, which do nothing.
+struct ResolvedKeyBindings {
+    KeyBindingMap bindings;
+    QSet<QKeySequence> userKeys;
+    QSet<QKeySequence> removedKeys;
+};
+ResolvedKeyBindings resolveKeyBindings(const KeyBindingMap &preset, const KeyBindingOverrides &overrides);
+// Whether a key types text in a line edit (no Ctrl, Alt or Meta, a printable key).
+bool isTextKey(const QKeySequence &key);
 
 QString keyBindingOverridesToJson(const KeyBindingOverrides &overrides);
 // Unknown actions, malformed keys and keys reserved by the window are dropped.

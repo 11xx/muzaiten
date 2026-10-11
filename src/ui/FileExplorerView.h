@@ -121,6 +121,8 @@ private:
     QVector<Track> selectedTracks() const;
 
     void applyKeyAction(const QString &action);
+    void applyKeyBindings();
+    bool startsChord(const QKeySequence &key) const;
     void updateHintBar();
     // Recompute the hint-bar palette from the live application palette so the
     // bar (background + text) tracks theme changes instead of freezing the
@@ -133,7 +135,7 @@ private:
     QLabel *m_hintLabel = nullptr;
     QTreeWidget *m_tree = nullptr;
     PanelSearchBar *m_search = nullptr;
-    QTimer *m_ggTimer = nullptr;
+    QTimer *m_chordTimer = nullptr;
     QTimer *m_metadataTimer = nullptr;
     QList<QTreeWidgetItem *> m_pendingMetadata;
     std::function<Track(const QString &)> m_trackResolver;
@@ -142,7 +144,10 @@ private:
     KeyBindingMap m_keyBindings;
     QString m_keyBindingProfileName;
     KeyBindingOverrides m_keyBindingOverrides;
-    bool m_pendingG = false;
+    QSet<QKeySequence> m_userKeys;
+    QSet<QKeySequence> m_removedKeys;
+    // The first key of a two-key binding, waiting for the second.
+    QKeySequence m_pendingChord;
     bool m_showUnsupported = false;
     QString m_startDirectory;
     QHash<QString, QString> m_lastSelectedByDir;

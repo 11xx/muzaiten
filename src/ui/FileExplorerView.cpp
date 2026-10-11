@@ -224,11 +224,11 @@ FileExplorerView::FileExplorerView(QWidget *parent, int idleReleaseMs)
     layout->addWidget(m_hintBar);
     m_hintBar->setVisible(false);
 
-    m_ggTimer = new QTimer(this);
-    m_ggTimer->setInterval(500);
-    m_ggTimer->setSingleShot(true);
-    connect(m_ggTimer, &QTimer::timeout, this, [this]() {
-        m_pendingG = false;
+    m_chordTimer = new QTimer(this);
+    m_chordTimer->setInterval(500);
+    m_chordTimer->setSingleShot(true);
+    connect(m_chordTimer, &QTimer::timeout, this, [this]() {
+        m_pendingChord = QKeySequence();
     });
 
     // Drives lazy, non-blocking metadata reads for free-roam files not already
@@ -1026,16 +1026,35 @@ void FileExplorerView::setKeyBindingProfileName(const QString &name)
         return;
     }
     m_keyBindingProfileName = name;
-    m_keyBindings = applyKeyBindingOverrides(bindingMapForProfile(name), m_keyBindingOverrides);
-    updateHintBar();
+    applyKeyBindings();
     emit keyBindingProfileChanged(name);
 }
 
 void FileExplorerView::setKeyBindingOverrides(const KeyBindingOverrides &overrides)
 {
     m_keyBindingOverrides = overrides;
-    m_keyBindings = applyKeyBindingOverrides(bindingMapForProfile(m_keyBindingProfileName), m_keyBindingOverrides);
+    applyKeyBindings();
+}
+
+void FileExplorerView::applyKeyBindings()
+{
+    const ResolvedKeyBindings resolved =
+        resolveKeyBindings(bindingMapForProfile(m_keyBindingProfileName), m_keyBindingOverrides);
+    m_keyBindings = resolved.bindings;
+    m_userKeys = resolved.userKeys;
+    m_removedKeys = resolved.removedKeys;
+    m_pendingChord = QKeySequence();
     updateHintBar();
+}
+
+bool FileExplorerView::startsChord(const QKeySequence &key) const
+{
+    for (auto it = m_keyBindings.cbegin(); it != m_keyBindings.cend(); ++it) {
+        if (it.key().count() == 2 && it.key()[0] == key[0]) {
+            return true;
+        }
+    }
+    return false;
 }
 
 QString FileExplorerView::keyBindingProfileName() const
@@ -1098,6 +1117,23 @@ bool FileExplorerView::eventFilter(QObject *watched, QEvent *event)
     auto *keyEvent = static_cast<QKeyEvent *>(event);
     const int key = keyEvent->key();
     const auto modifiers = keyEvent->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier | Qt::ShiftModifier);
+    const QKeySequence pressed = keySequenceForEvent(keyEvent);
+
+    if (!m_pendingChord.isEmpty()) {
+        const QKeySequence chord(m_pendingChord[0], pressed[0]);
+        m_pendingChord = QKeySequence();
+        m_chordTimer->stop();
+        if (const QString action = m_keyBindings.value(chord); !action.isEmpty()) {
+            applyKeyAction(action);
+            return true;
+        }
+    }
+
+    // A key the user gave an action runs it, ahead of the explorer's own keys.
+    if (m_userKeys.contains(pressed)) {
+        applyKeyAction(m_keyBindings.value(pressed));
+        return true;
+    }
 
     // "/" search, mirroring the main view: open, M-n/M-p cycle confirmed matches,
     // Esc clears the constraint. The bar handles its own edit keys internally.
@@ -1120,6 +1156,10 @@ bool FileExplorerView::eventFilter(QObject *watched, QEvent *event)
         }
     }
 
+    if (m_removedKeys.contains(pressed)) {
+        return true;
+    }
+
     if (!modifiers && key == Qt::Key_Backspace) {
         navigateUp();
         return true;
@@ -1132,31 +1172,15 @@ bool FileExplorerView::eventFilter(QObject *watched, QEvent *event)
         return false;
     }
 
-    if (!modifiers && key == Qt::Key_G && m_keyBindings.contains(Qt::Key_G)) {
-        if (m_pendingG) {
-            m_pendingG = false;
-            m_ggTimer->stop();
-            applyKeyAction(ExplorerAction::ScrollToTop);
-        } else {
-            m_pendingG = true;
-            m_ggTimer->start();
-        }
-        return true;
-    }
-    m_pendingG = false;
-
-    if (const QString action = keyBindingAction(m_keyBindings, keyEvent); !action.isEmpty()) {
+    if (const QString action = m_keyBindings.value(pressed); !action.isEmpty()) {
         applyKeyAction(action);
         return true;
     }
 
-    if (!modifiers && key >= Qt::Key_Space && key <= Qt::Key_AsciiTilde) {
-        for (auto it = m_keyBindings.constBegin(); it != m_keyBindings.constEnd(); ++it) {
-            if (it.key().count() == 1 && (it.key()[0].key() == static_cast<Qt::Key>(key))) {
-                applyKeyAction(it.value());
-                return true;
-            }
-        }
+    if (startsChord(pressed)) {
+        m_pendingChord = pressed;
+        m_chordTimer->start();
+        return true;
     }
 
     return false;

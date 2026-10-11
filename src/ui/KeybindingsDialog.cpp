@@ -107,8 +107,8 @@ struct KeybindingsDialog::Page {
     QKeySequence pendingKey;
     QKeySequence lookupKey;
     // A refused key's explanation, shown while its action stays selected.
-    QString refusal;
-    QString refusalAction;
+    QString message;
+    QString messageAction;
 
     KeyBindingMap presetOnly() const
     {
@@ -415,7 +415,8 @@ void KeybindingsDialog::refreshEditor(Page &page)
         page.chips->addWidget(chip);
     }
     page.addKey->setEnabled(!action.isEmpty());
-    page.resetAction->setEnabled(page.overrides.contains(action));
+    page.resetAction->setEnabled(!action.isEmpty()
+                                 && keySet(keysForAction(bindings, action)) != keySet(keysForAction(page.presetOnly(), action)));
 
     const bool conflict = !page.pendingAction.isEmpty() && page.pendingAction == action;
     if (conflict) {
@@ -423,13 +424,13 @@ void KeybindingsDialog::refreshEditor(Page &page)
         page.noticeText->setText(QStringLiteral("%1 already does %2. Use it here instead?")
                                      .arg(keyText(page.pendingKey), keyActionLabel(*page.scope, owner)));
     }
-    const bool refused = !conflict && !page.refusal.isEmpty() && page.refusalAction == action;
-    if (refused) {
-        page.noticeText->setText(page.refusal);
+    const bool informed = !conflict && !page.message.isEmpty() && page.messageAction == action;
+    if (informed) {
+        page.noticeText->setText(page.message);
     }
     page.useHere->setVisible(conflict);
     page.keepThere->setVisible(conflict);
-    page.notice->setVisible(conflict || refused);
+    page.notice->setVisible(conflict || informed);
 }
 
 void KeybindingsDialog::applyFilter(Page &page)
@@ -483,14 +484,14 @@ KeybindingsDialog::KeyRequest KeybindingsDialog::requestKey(const QString &scope
     }
     page->pendingAction.clear();
     page->pendingKey = QKeySequence();
-    page->refusal.clear();
+    page->message.clear();
     page->selectedAction = action;
 
     if (const QString use = reservedWindowKeyUse(normalized); !use.isEmpty()) {
-        page->refusal = QStringLiteral("%1 is a window key (%2), so this screen never receives it. "
+        page->message = QStringLiteral("%1 is a window key (%2), so this screen never receives it. "
                                        "Choose another key.")
                             .arg(keyText(normalized), use);
-        page->refusalAction = action;
+        page->messageAction = action;
         refreshTree(*page);
         return KeyRequest::Reserved;
     }
@@ -548,17 +549,35 @@ void KeybindingsDialog::removeKey(const QString &scopeId, const QString &action,
         keys.removeAll(normalizedKey(key));
         setOverride(*page, action, keys);
         page->pendingAction.clear();
+        page->message.clear();
         refreshTree(*page);
     }
 }
 
 void KeybindingsDialog::resetAction(const QString &scopeId, const QString &action)
 {
-    if (Page *page = this->page(scopeId)) {
-        page->overrides.remove(action);
-        page->pendingAction.clear();
-        refreshTree(*page);
+    Page *page = this->page(scopeId);
+    if (page == nullptr) {
+        return;
     }
+    // A preset key another action took comes back to this one.
+    QStringList reclaimed;
+    for (const QKeySequence &key : keysForAction(page->presetOnly(), action)) {
+        const KeyBindingMap bindings = page->effective();
+        const QString owner = bindings.value(key);
+        if (owner.isEmpty() || owner == action) {
+            continue;
+        }
+        QList<QKeySequence> ownerKeys = keysForAction(bindings, owner);
+        ownerKeys.removeAll(key);
+        setOverride(*page, owner, ownerKeys);
+        reclaimed << QStringLiteral("%1 from %2").arg(keyText(key), keyActionLabel(*page->scope, owner));
+    }
+    page->overrides.remove(action);
+    page->pendingAction.clear();
+    page->message = reclaimed.isEmpty() ? QString() : QStringLiteral("Took back %1.").arg(reclaimed.join(QStringLiteral(", ")));
+    page->messageAction = action;
+    refreshTree(*page);
 }
 
 void KeybindingsDialog::restoreDefaults(const QString &scopeId)

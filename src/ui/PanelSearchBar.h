@@ -2,6 +2,8 @@
 
 #include "search/SearchMatcher.h"
 
+#include <QKeySequence>
+#include <QList>
 #include <QWidget>
 #include <QVector>
 
@@ -26,7 +28,8 @@ class QKeyEvent;
 //
 // The host owns row navigation and supplies it through Providers; the bar owns
 // the query/match state and the edit-key handling. Bind the host's Search /
-// SearchNext / SearchPrevious / Escape actions to open()/cycle()/escape().
+// SearchNext / SearchPrevious / Escape actions to open()/cycle()/escape(), and
+// pass the same actions' keys to setCommandKeys() so the edit agrees with them.
 class PanelSearchBar final : public QWidget {
     Q_OBJECT
 
@@ -46,6 +49,10 @@ public:
     void setProviders(Providers providers);
     // Display name of the searched view, e.g. "Queue" -> prompt "Search Queue:".
     void setLabel(const QString &label);
+    // The edit's keys for escape() and cycle(); Esc, M-n and M-p until set.
+    // Keys that type text are left to the edit.
+    void setCommandKeys(const QList<QKeySequence> &escapeKeys, const QList<QKeySequence> &nextKeys,
+                        const QList<QKeySequence> &previousKeys);
 
     void open();
     void cycle(int direction); // +1 next, -1 previous
@@ -77,6 +84,9 @@ private:
     QVector<Search::PanelMatch> m_matches;
     int m_currentMatch = -1;
     bool m_fuzzy = false;
+    QList<QKeySequence> m_escapeKeys{QKeySequence(Qt::Key_Escape)};
+    QList<QKeySequence> m_nextKeys{QKeySequence(Qt::ALT | Qt::Key_N)};
+    QList<QKeySequence> m_previousKeys{QKeySequence(Qt::ALT | Qt::Key_P)};
 
     QLabel *m_prompt = nullptr;
     QLineEdit *m_edit = nullptr;

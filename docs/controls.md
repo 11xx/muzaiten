@@ -20,11 +20,15 @@ File explorer screens it changes them over a chosen preset: select an action,
 then **Add key** and press the key, or click a key to remove it. Actions with
 no key by default can be given one. A key another action already uses asks before
 it moves; the window keys (`1`–`5`, `o`, `r`, `s`) are refused, since the
-window handles them before any screen. **Reset to preset** undoes one action,
-and **Restore the … defaults** a whole screen. **Find a key…** shows what the
-next key you press does on that screen. With changed keys, the file explorer's
-key hints list the keys in effect. Search, playlist and window keys are
-fixed.
+window handles them before any screen. A key you give an action runs it even
+where the screen otherwise uses that key itself (such as `Return` or `/` in the
+file explorer), and a key you remove does nothing. In the queue's search field,
+the Close search, Next match and Previous match keys apply; a key that types
+text stays text there. **Reset to preset** undoes one action, taking back its
+preset keys from any action that took them, and **Restore the … defaults** a
+whole screen. **Find a key…** shows what the next key you press does on that
+screen. With changed keys, the file explorer's key hints list the keys in
+effect. Search, playlist and window keys are fixed.
 
 The player bar carries the current track's album art on every view except the
 library ones, where the right sidebar shows it at full width. Right-click the
@@ -246,7 +250,7 @@ not change the tags or stored metadata.
 
 Selectable keybinding profiles from the explorer context menu:
 
-- **Vim-style**: `j/k/h/l` move, `Space` play, `a` add to playlist,
+- **Vim-style**: `j/k/h/l` move, `gg`/`G` top/bottom, `Space` play, `a` add to playlist,
   `q` add to queue, `p` play next,
   `i` import, `f` open containing directory, `b` jump to start folder,
   `~` home.

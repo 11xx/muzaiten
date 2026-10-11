@@ -1,4 +1,5 @@
 #include "ui/HeaderLabelStyle.h"
+#include "ui/PanelSearchBar.h"
 #include "ui/QueueStore.h"
 #include "ui/QueueTable.h"
 #include "ui/QueueKeybindings.h"
@@ -539,6 +540,59 @@ private slots:
         QCOMPARE(titles(store), QStringLiteral("bca"));
         QTest::keyClick(view, Qt::Key_P, Qt::ShiftModifier);
         QCOMPARE(titles(store), QStringLiteral("bac"));
+    }
+
+    void removedKeysDoNothingAndSearchUsesTheQueueKeys()
+    {
+        QueueStore store;
+        QVector<Track> tracks;
+        for (int i = 0; i < 40; ++i) {
+            Track track;
+            track.path = QStringLiteral("/%1.flac").arg(i);
+            track.title = QString::number(i);
+            tracks.push_back(track);
+        }
+        store.setTracks(tracks);
+        QueueTable table(QueueTablePreset::FullScreen);
+        table.setQueueStore(&store);
+        table.resize(600, 300);
+        table.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&table));
+        table.setKeyBindingOverrides({{QString::fromLatin1(QueueAction::PageDown), {}},
+                                      {QString::fromLatin1(QueueAction::MoveDown), {}},
+                                      {QString::fromLatin1(QueueAction::Escape),
+                                       {QKeySequence(Qt::ControlModifier | Qt::Key_X)}}});
+        auto *view = table.findChild<QTableView *>();
+        QVERIFY(view != nullptr);
+
+        // Keys taken off an action do nothing, including the table's own
+        // navigation they used to stand for.
+        table.setCurrentRow(5);
+        QTest::keyClick(view, Qt::Key_V, Qt::ControlModifier);
+        QCOMPARE(table.currentRow(), 5);
+        QTest::keyClick(view, Qt::Key_Down);
+        QCOMPARE(table.currentRow(), 5);
+        QTest::keyClick(view, Qt::Key_J);
+        QCOMPARE(table.currentRow(), 5);
+        QTest::keyClick(view, Qt::Key_K);
+        QCOMPARE(table.currentRow(), 4);
+
+        auto *bar = table.findChild<PanelSearchBar *>();
+        QVERIFY(bar != nullptr);
+        auto *edit = bar->findChild<QLineEdit *>();
+        QVERIFY(edit != nullptr);
+        QTest::keyClick(view, Qt::Key_Slash);
+        QVERIFY(bar->isSearchVisible());
+        QTest::keyClick(edit, Qt::Key_Escape);
+        QVERIFY(bar->isSearchVisible());
+        QTest::keyClick(edit, Qt::Key_X, Qt::ControlModifier);
+        QVERIFY(!bar->isSearchVisible());
+
+        // A command key that types text stays text in the search field.
+        table.setKeyBindingOverrides({{QString::fromLatin1(QueueAction::SearchNext), {QKeySequence(Qt::Key_X)}}});
+        QTest::keyClick(view, Qt::Key_Slash);
+        QTest::keyClicks(edit, QStringLiteral("1x"));
+        QCOMPARE(edit->text(), QStringLiteral("1x"));
     }
 
     void followingThePlayingRowKeepsAVisibleRowInPlace()

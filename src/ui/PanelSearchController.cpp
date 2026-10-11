@@ -83,13 +83,22 @@ void PanelSearchController::replaceTarget(MainPanelTarget target)
 void PanelSearchController::setKeyBindingProfileName(const QString &name)
 {
     m_keyBindingProfileName = name.isEmpty() ? defaultMainPanelKeyBindingProfileName() : name;
-    m_keyBindings = applyKeyBindingOverrides(mainPanelBindingMapForProfile(m_keyBindingProfileName), m_keyBindingOverrides);
+    applyKeyBindings();
 }
 
 void PanelSearchController::setKeyBindingOverrides(const KeyBindingOverrides &overrides)
 {
     m_keyBindingOverrides = overrides;
-    m_keyBindings = applyKeyBindingOverrides(mainPanelBindingMapForProfile(m_keyBindingProfileName), m_keyBindingOverrides);
+    applyKeyBindings();
+}
+
+void PanelSearchController::applyKeyBindings()
+{
+    const ResolvedKeyBindings resolved =
+        resolveKeyBindings(mainPanelBindingMapForProfile(m_keyBindingProfileName), m_keyBindingOverrides);
+    m_keyBindings = resolved.bindings;
+    m_userKeys = resolved.userKeys;
+    m_removedKeys = resolved.removedKeys;
 }
 
 void PanelSearchController::setFocusOrder(const QVector<MainPanelId> &order)
@@ -550,7 +559,7 @@ void PanelSearchController::cycleMatch(int direction)
     updateSearchUi();
 }
 
-bool PanelSearchController::handleAlbumGridKey(QKeyEvent *event, const QString &action)
+bool PanelSearchController::handleAlbumGridKey(QKeyEvent *event, const QString &action, bool userKey)
 {
     if (m_activePanel != MainPanelId::Albums) {
         return false;
@@ -560,7 +569,8 @@ bool PanelSearchController::handleAlbumGridKey(QKeyEvent *event, const QString &
         return false;
     }
 
-    if (event->modifiers() == Qt::NoModifier) {
+    // The grid's own keys apply unless the user gave the key to an action.
+    if (!userKey && event->modifiers() == Qt::NoModifier) {
         if (event->key() == Qt::Key_N) {
             activateCurrent();
             focusTracks();
@@ -576,7 +586,7 @@ bool PanelSearchController::handleAlbumGridKey(QKeyEvent *event, const QString &
     }
 
     if (action == QString::fromLatin1(MainPanelAction::PlayNow)) {
-        if (event->modifiers() & Qt::AltModifier) {
+        if (userKey || (event->modifiers() & Qt::AltModifier)) {
             playCurrentNow();
         }
         return true;
@@ -595,15 +605,18 @@ bool PanelSearchController::handleAlbumGridKey(QKeyEvent *event, const QString &
 bool PanelSearchController::handlePanelKey(QKeyEvent *event, MainPanelId panel)
 {
     Q_UNUSED(panel)
-    QString action = keyBindingAction(m_keyBindings, event);
-    if (action.isEmpty() && event->modifiers() == Qt::ControlModifier && event->key() == Qt::Key_V) {
-        action = QString::fromLatin1(MainPanelAction::PageDown);
+    const QKeySequence pressed = keySequenceForEvent(event);
+    if (m_removedKeys.contains(pressed)) {
+        // A preset key the user unassigned does nothing, not even the panel's
+        // own navigation.
+        return true;
     }
+    const QString action = m_keyBindings.value(pressed);
     if (action.isEmpty() && m_activePanel != MainPanelId::Albums) {
         return false;
     }
 
-    if (handleAlbumGridKey(event, action)) {
+    if (handleAlbumGridKey(event, action, m_userKeys.contains(pressed))) {
         return true;
     }
 
@@ -676,7 +689,8 @@ bool PanelSearchController::handleSearchKey(QKeyEvent *event)
         confirmSearch();
         return true;
     }
-    const QString action = keyBindingAction(m_keyBindings, event);
+    const QKeySequence pressed = keySequenceForEvent(event);
+    const QString action = isTextKey(pressed) ? QString() : m_keyBindings.value(pressed);
     if (action == QString::fromLatin1(MainPanelAction::Escape)) {
         escapeSearch();
         return true;

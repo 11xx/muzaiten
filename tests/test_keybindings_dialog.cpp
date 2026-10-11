@@ -6,6 +6,7 @@
 
 #include <QKeyEvent>
 #include <QLineEdit>
+#include <QPushButton>
 #include <QTest>
 #include <QTimer>
 #include <QTreeWidget>
@@ -88,6 +89,22 @@ private slots:
         QVERIFY(!effective.contains(key("J")));
     }
 
+    void resolvedKeysNameChangedAndRemovedKeys()
+    {
+        const KeyBindingMap preset{{key("J"), QStringLiteral("move_down")},
+                                   {key("N"), QStringLiteral("move_down")},
+                                   {key("K"), QStringLiteral("move_up")},
+                                   {key("C"), QStringLiteral("clear_queue")}};
+        const KeyBindingOverrides overrides{{QStringLiteral("move_down"), {key("J"), key("N"), key("Ctrl+J")}},
+                                            {QStringLiteral("clear_queue"), {}},
+                                            {QStringLiteral("add_to_playlist"), {key("K")}}};
+        const ResolvedKeyBindings resolved = resolveKeyBindings(preset, overrides);
+        // An action's untouched preset keys are not the user's keys, even when
+        // the action has other keys added.
+        QCOMPARE(resolved.userKeys, (QSet<QKeySequence>{key("Ctrl+J"), key("K")}));
+        QCOMPARE(resolved.removedKeys, QSet<QKeySequence>{key("C")});
+    }
+
     void overridesRoundTripThroughJsonAndDropBadEntries()
     {
         const KeyBindingScope &scope = *keyBindingScope(queue);
@@ -102,6 +119,11 @@ private slots:
         QVERIFY(!parsed.contains(QStringLiteral("no_such_action")));
         QVERIFY(!parsed.contains(QStringLiteral("clear_queue")));
         QVERIFY(keyBindingOverridesFromJson(QStringLiteral("[1,2]"), scope).isEmpty());
+
+        // A preset's two-key binding kept beside an added key survives storage.
+        const KeyBindingScope &explorerScope = *keyBindingScope(explorer);
+        const KeyBindingOverrides chord{{QString::fromLatin1(ExplorerAction::ScrollToTop), {key("G, G"), key("Home")}}};
+        QCOMPARE(keyBindingOverridesFromJson(keyBindingOverridesToJson(chord), explorerScope), chord);
     }
 
     void shiftedSymbolsMatchTheirBinding()
@@ -155,6 +177,35 @@ private slots:
         QCOMPARE(bindings.value(key("Alt+N")), moveItem);
         QVERIFY(keysForAction(bindings, nextMatch).isEmpty());
         QVERIFY(keysForAction(bindings, moveItem).contains(key("Shift+N")));
+    }
+
+    void resetTakesBackPresetKeysAnotherActionTook()
+    {
+        KeybindingsDialog dialog;
+        dialog.selectScreen(queue);
+        const QString moveItem = QString::fromLatin1(QueueAction::MoveItemDown);
+        const QString nextMatch = QString::fromLatin1(QueueAction::SearchNext);
+        QCOMPARE(dialog.requestKey(queue, moveItem, key("Alt+N")), KeybindingsDialog::KeyRequest::Conflict);
+        dialog.confirmUseHere(queue);
+        QVERIFY(keysForAction(dialog.effectiveBindings(queue), nextMatch).isEmpty());
+
+        dialog.selectAction(queue, nextMatch);
+        QPushButton *reset = nullptr;
+        for (QPushButton *button : dialog.findChildren<QPushButton *>()) {
+            if (button->text() == QStringLiteral("Reset to preset") && button->isVisibleTo(&dialog)) {
+                reset = button;
+            }
+        }
+        QVERIFY(reset != nullptr);
+        // The action differs from its preset although it has no change of its own.
+        QVERIFY(reset->isEnabled());
+
+        reset->click();
+        const KeyBindingMap bindings = dialog.effectiveBindings(queue);
+        QCOMPARE(keysForAction(bindings, nextMatch), QList<QKeySequence>{key("Alt+N")});
+        QCOMPARE(keysForAction(bindings, moveItem), QList<QKeySequence>{key("Shift+N")});
+        QVERIFY(dialog.overrides(queue).isEmpty());
+        QVERIFY(!reset->isEnabled());
     }
 
     void windowKeysAreRefused()
