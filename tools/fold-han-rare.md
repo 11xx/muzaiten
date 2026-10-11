@@ -121,6 +121,14 @@ Relation endpoints are NFC-normalized, which maps compatibility ideographs to
 their unified counterparts. The reference graph includes Unihan 18's Extension J
 even when Python has not assigned its vertices. Output membership uses the
 generator's output blocks and runtime categories independently of the graph.
+Assembly requires category `Lo` in the build Python's Unicode data. A selected
+family target outside that boundary is withheld as an `unsupported-target`
+gap naming its relation path; the family and its unresolved decisions remain
+intact. Block-based tier members outside that boundary are recorded as
+`unsupported-member` gaps naming the Unicode version and category. Complete
+proposals cover every buildable member and report every withheld member;
+partial proposals report withheld members in their explicit selection.
+Run assembly with the same Python Unicode database used to generate the build.
 The exact 線–缐 pair is excluded from family joins so 缐 retains its written key;
 each excluded source relation remains a `policy-excluded:<relation>` gap record.
 
@@ -197,6 +205,25 @@ SHA-256 of sorted ideographs, one per LF-terminated line; its revision is that
 content checksum. `--authored` must supply the same preceding-tier membership
 for assembly and checking. No runtime-dependent timestamps or filesystem paths enter
 generated headers. Preserve the referenced logs with the sidecars.
+
+`assemble --decisions reviewed.tsv` supplies choices for both full and
+`--members` proposals. It uses the five-column reviewed-row format:
+
+```text
+ideograph<TAB>kind<TAB>ours<TAB>reference<TAB>reason
+```
+
+Blank lines and comments are allowed; a header is optional. `family-target`
+and `variant-guard` rows put the chosen target ideograph in `ours`.
+`provenance` rows put the complete ordered list of attested readings there.
+`reference` must be the exact emitted choice finding, including the candidate
+list or default-choice text. The reason must be nonempty. Rows for members
+outside the selection and other finding kinds supply no choices, so one ledger
+can serve several tiers. Conflicting choices, stale findings, unattested
+readings and permutations outside the allowed precedence fail before output
+is written. Decisions preserve their findings in assembly output; the checker
+uses `--reviewed` to discharge their exact keys. A decisions file and explicit
+API choice dictionaries cannot be supplied together.
 
 The default pins come from the shipped checker. Offline fixtures or explicit
 reference snapshots use `--references manifest.json` together with all four

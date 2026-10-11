@@ -610,6 +610,42 @@ class FoldHanRareTests(unittest.TestCase):
             self.assertEqual(rare.main(["assemble", "--tier", "tgh", "--members", str(selected),
                                         "--output", str(out), *self.args[:-2]]), 2)
 
+    def test_cli_decisions_preserve_reviewed_mapping_and_reading_choices(self):
+        refs = self.refs_for({"kTraditionalVariant": {"𠀀": "U+20001"}},
+                             {"𠀀": {"mā", "má"}}, {"𠀀": ["𠀀", "𠀁", "𠀂"]})
+        decisions = self.root / "decisions.tsv"
+        decisions.write_text("𠀀\tfamily-target\t𠀁\tfamily-target:unresolved=𠀀 𠀁 𠀂\tRetain the witnessed pair.\n"
+                             "𠀀\tprovenance\tmá mā\tCNS-only default requires a reviewed decision\tChoose the attested default.\n"
+                             "木\tfamily-target\t禾\tfamily-target:unresolved=木 禾\tAnother tier.\n")
+        selected = self.root / "members.txt"
+        selected.write_text("𠀀\n")
+        out = self.root / "decided"
+        with mock.patch.object(rare, "read_references", return_value=refs), contextlib.redirect_stderr(io.StringIO()):
+            status = rare.main(["assemble", "--tier", "extb", "--members", str(selected),
+                                "--decisions", str(decisions), "--authored", str(self.root / "authored"), "--output", str(out)])
+        self.assertEqual(status, 1)
+        self.assertEqual(rare.document(out / "extb.tsv")[1][0][1], ["𠀀", "má mā", "𠀁"])
+        self.assertEqual(len(rare.document(out / "extb-findings.tsv")[1]), 2)
+        _, records = rare.read_records(out / "extb-provenance.tsv")
+        self.assertEqual([(r.value, r.rank) for r in records], [("má", 1), ("mā", 2), ("𠀁", 0)])
+
+    def test_decisions_reject_stale_conflicting_and_invalid_choices_before_writing(self):
+        refs = self.refs_for({}, {"𠀀": {"mā", "má"}})
+        selected = self.root / "members.txt"
+        selected.write_text("𠀀\n")
+        decisions = self.root / "decisions.tsv"
+        base = "𠀀\tprovenance\tmá mā\tCNS-only default requires a reviewed decision\tChoose a default.\n"
+        for text in (base.replace("decision", "choice"), base.replace("má mā", "bō mā"),
+                     base + base.replace("má mā", "mā má"), base.rsplit("\t", 1)[0] + "\t\n", "𠀀\tprovenance\tmā\n"):
+            with self.subTest(text=text):
+                decisions.write_text(text)
+                out = self.root / "invalid-choice"
+                with mock.patch.object(rare, "read_references", return_value=refs), contextlib.redirect_stderr(io.StringIO()):
+                    status = rare.main(["assemble", "--tier", "extb", "--members", str(selected),
+                                        "--decisions", str(decisions), "--authored", str(self.root / "authored"), "--output", str(out)])
+                self.assertEqual(status, 2)
+                self.assertFalse(out.exists())
+
     def test_complete_writer_refuses_a_slice(self):
         out = self.root / "incomplete"
         with self.assertRaisesRegex(ValueError, "every tier member"):
@@ -628,6 +664,53 @@ class FoldHanRareTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "CJK ideograph"):
             rare.assemble([vertex], refs, rare.Predictions({}, []), set())
         self.assertNotIn(vertex, data.tiers(refs.fields, {vertex: {"mù"}})["cns"])
+
+    def test_unsupported_targets_are_withheld_without_changing_the_family(self):
+        for target in (chr(0x331F0), chr(0x2B73E)):
+            with self.subTest(target=target):
+                refs = self.refs_for({"kSimplifiedVariant": {"𠀀": f"U+{ord(target):X}"},
+                                      "kMandarin": {"𠀀": "mù"}})
+                mappings, _, _ = rare.family_mappings(refs, set())
+                self.assertEqual(mappings["𠀀"][0], target)
+                rows, records, gaps, findings = rare.assemble(["𠀀"], refs, rare.Predictions({}, []), set())
+                self.assertEqual(rows, [("𠀀", "mù", "")])
+                self.assertFalse([r for r in records if not r.rank])
+                self.assertIn(("𠀀", target, target, "-", "unsupported-target:unihan:kSimplifiedVariant"), gaps)
+                self.assertFalse(findings)
+                out = self.root / "withheld-target"
+                rare.write_assembly(out, "extb", ["𠀀"], refs, rare.Predictions({}, []), set())
+                self.assertFalse(rare.check_provenance(out / "extb.tsv", out / "extb-provenance.tsv",
+                                                       refs, rare.Predictions({}, []), set()))
+
+    def test_unassigned_tier_members_are_reported_in_complete_and_partial_output(self):
+        ch = chr(0x2B73E)
+        refs = self.refs_for({}, {ch: {"mù"}, "𠀀": {"mù"}})
+        empty = rare.Predictions({}, [])
+        members, withheld = rare.build_tiers(refs)
+        self.assertEqual(members["cns"], ["𠀀"])
+        self.assertEqual(withheld["cns"], [ch])
+        for selected, complete in ((["𠀀"], True), ([ch], False)):
+            with self.subTest(complete=complete):
+                out = self.root / ("complete-members" if complete else "partial-members")
+                rare.write_assembly(out, "cns", selected, refs, empty, set(), complete=complete)
+                headers, rows = rare.document(out / "cns.tsv")
+                self.assertEqual(bool(headers.get("complete")), complete)
+                self.assertEqual([r[0] for _, r in rows], ["𠀀"] if complete else [])
+                gaps = rare.document(out / "cns-gaps.tsv")[1]
+                self.assertEqual([r[0] for _, r in gaps], [ch])
+                self.assertTrue(gaps[0][1][-1].startswith("unsupported-member:"))
+                self.assertFalse(rare.check_provenance(out / "cns.tsv", out / "cns-provenance.tsv", refs, empty, set()))
+        with self.assertRaisesRegex(ValueError, "CJK ideograph"):
+            rare.ideograph(ch)
+
+    def test_full_cli_reports_unassigned_members_without_writing_rows(self):
+        refs = self.refs_for({}, {chr(0x2B73E): {"mù"}, "𠀀": {"mù"}})
+        out = self.root / "cli-withheld"
+        with mock.patch.object(rare, "read_references", return_value=refs), contextlib.redirect_stderr(io.StringIO()):
+            status = rare.main(["assemble", "--tier", "cns", "--authored", str(self.root / "authored"), "--output", str(out)])
+        self.assertEqual(status, 0)
+        self.assertEqual([r[0] for _, r in rare.document(out / "cns.tsv")[1]], ["𠀀"])
+        self.assertIn(chr(0x2B73E), (out / "cns-gaps.tsv").read_text())
 
     def test_xian_policy_excludes_exact_relations_and_retains_evidence(self):
         refs = self.refs_for({"kSimplifiedVariant": {"線": "U+7F10"},
@@ -981,7 +1064,7 @@ class PinnedReferenceSmokeTests(unittest.TestCase):
         cls.refs = pinned_references()
         if cls.refs is None:
             raise unittest.SkipTest("pinned references are not cached")
-        cls.tiers = data.tiers(cls.refs.fields, cls.refs.cns)
+        cls.tiers, cls.withheld = rare.build_tiers(cls.refs)
 
     def test_every_tier_assembles(self):
         for name in (path.removesuffix(".tsv") for path in data.RARE_FILES):

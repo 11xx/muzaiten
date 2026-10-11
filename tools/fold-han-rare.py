@@ -127,7 +127,7 @@ def shipped_pins() -> dict:
 
 
 def ideograph(value: str) -> None:
-    if len(value) != 1 or not any(lo <= ord(value) <= hi for lo, hi in data.IDEOGRAPH_BLOCKS):
+    if len(value) != 1 or not data.is_unihan_ideograph(value):
         raise ValueError("expected one CJK ideograph")
 
 
@@ -501,16 +501,23 @@ def assemble(members: list[str], refs: References, predictions: Predictions, aut
     if len(members) != len(set(members)):
         raise ValueError("duplicate tier member")
     for ch in members:
-        ideograph(ch)
+        if len(ch) != 1 or not data.in_ideograph_blocks(ch):
+            ideograph(ch)
     outside = set(predictions.rows) - set(members)
     if outside:
         raise ValueError("predictions outside tier: " + " ".join(sorted(outside)))
     mappings, family_issues, rejected = family_mappings(refs, authored, mapping_choices)
     rows, records, gaps, findings = [], [], [], []
     for ch in members:
+        if not data.is_unihan_ideograph(ch):
+            gaps.append(member_gap(ch))
+            continue
         readings, issues = ordered_readings(ch, refs, predictions, (reading_choices or {}).get(ch), tier)
         text = " ".join(r.value for r in readings) or "-"
         target, relations = mappings.get(ch, ("", ""))
+        if target and not data.is_unihan_ideograph(target):
+            gaps.append((ch, target, target, "-", "unsupported-target:" + relations))
+            target = ""
         rows.append((ch, text, target))
         records.extend(readings)
         if target:
@@ -531,6 +538,43 @@ def assemble(members: list[str], refs: References, predictions: Predictions, aut
         if len(passes) > 1:
             findings.append((ch, "provenance", text, "prediction-pass disagreement"))
     return rows, records, gaps, findings
+
+
+def build_tiers(refs: References) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Partition block-based membership into buildable and withheld members."""
+    tiers = data.tiers(refs.fields, refs.cns)
+    return ({tier: [ch for ch in members if data.is_unihan_ideograph(ch)] for tier, members in tiers.items()},
+            {tier: [ch for ch in members if not data.is_unihan_ideograph(ch)] for tier, members in tiers.items()})
+
+
+def member_gap(ch: str) -> tuple[str, str, str, str, str]:
+    return ch, ch, ch, "-", f"unsupported-member:UCD-{unicodedata.unidata_version}:category={unicodedata.category(ch)}"
+
+
+def read_decisions(path: pathlib.Path, members: list[str]):
+    """Extract choices for selected members from exact five-column reviewed rows."""
+    mappings, readings, expected = {}, {}, set()
+    for number, columns in document(path)[1]:
+        if len(columns) != 5 or not columns[4].strip():
+            raise ValueError(f"{path.name}:{number}: expected five reviewed columns with a reason")
+        ch, kind, ours, reference, _ = columns
+        if ch not in members:
+            continue
+        if kind in {"family-target", "variant-guard"}:
+            ideograph(ours)
+            choices, value = mappings, ours
+        elif kind == "provenance":
+            value = ours.split()
+            if not value or len(value) != len(set(value)) or any(reading(r) != r for r in value):
+                raise ValueError("decision readings must be distinct NFC pinyin")
+            choices = readings
+        else:
+            continue
+        if ch in choices and choices[ch] != value:
+            raise ValueError(f"conflicting decisions for {ch}")
+        choices[ch] = value
+        expected.add((ch, kind, ours, reference))
+    return mappings, readings, expected
 
 
 def authored_before(directory: pathlib.Path, tier: str) -> set[str]:
@@ -563,11 +607,22 @@ def header(schema: str, refs: References, predictions: Predictions, authored: se
 def write_assembly(out: pathlib.Path, tier: str, members: list[str], refs: References, predictions: Predictions,
                    authored: set[str], *, complete: bool = False,
                    mapping_choices: dict[str, str] | None = None,
-                   reading_choices: dict[str, list[str]] | None = None):
-    if complete and set(members) != set(data.tiers(refs.fields, refs.cns)[tier]):
+                   reading_choices: dict[str, list[str]] | None = None,
+                   decisions: pathlib.Path | None = None):
+    tiers, withheld = build_tiers(refs)
+    if complete and {ch for ch in members if len(ch) == 1 and data.is_unihan_ideograph(ch)} != set(tiers[tier]):
         raise ValueError("complete assembly requires every tier member")
+    expected_decisions = set()
+    if decisions:
+        if mapping_choices is not None or reading_choices is not None:
+            raise ValueError("provide a decisions file or API choices, not both")
+        mapping_choices, reading_choices, expected_decisions = read_decisions(decisions, members)
     rows, records, gaps, findings = assemble(members, refs, predictions, authored,
                                            mapping_choices, reading_choices, tier=tier)
+    if expected_decisions - set(findings):
+        raise ValueError("decision does not match an emitted choice finding")
+    if complete:
+        gaps.extend(member_gap(ch) for ch in withheld[tier] if ch not in members)
     counts = dict(sorted(Counter(r.basis for r in records if r.rank).items()))
     out.mkdir(parents=True, exist_ok=True)
     common = header(PROVENANCE_SCHEMA, refs, predictions, authored) + "# Source attributions and license texts: NOTICE.\n"
@@ -667,7 +722,7 @@ def check_provenance(table: pathlib.Path, provenance: pathlib.Path, refs: Refere
                 ideograph(simple)
             members.append(ch)
             observed[ch] = text, simple
-        tiers = data.tiers(refs.fields, refs.cns)
+        tiers, _ = build_tiers(refs)
         if table.stem in tiers and set(predictions.rows) - set(tiers[table.stem]):
             raise ValueError("prediction contains an ideograph outside the tier")
         selected_predictions = Predictions({ch: values for ch, values in predictions.rows.items() if ch in observed}, predictions.inputs)
@@ -745,6 +800,7 @@ def main(argv: list[str] | None = None) -> int:
     assembly.add_argument("--tier", choices=[p.removesuffix(".tsv") for p in data.RARE_FILES], required=True)
     assembly.add_argument("--output", type=pathlib.Path, required=True)
     assembly.add_argument("--members", type=pathlib.Path, help="one selected ideograph per line; write a partial proposal")
+    assembly.add_argument("--decisions", type=pathlib.Path, help="five-column reviewed TSV supplying exact mapping and reading choices")
     check = commands.add_parser("check", help="audit a table and its provenance without word checks")
     reference_arguments(check)
     check.add_argument("--provenance", type=pathlib.Path, required=True)
@@ -756,12 +812,13 @@ def main(argv: list[str] | None = None) -> int:
         predictions = read_predictions(args.predictions)
         authored = authored_before(args.authored, args.tier if args.command == "assemble" else args.table.stem)
         if args.command == "assemble":
-            tier_members = data.tiers(refs.fields, refs.cns)[args.tier]
+            tiers, withheld = build_tiers(refs)
+            tier_members = tiers[args.tier]
             members = args.members.read_text(encoding="utf-8").splitlines() if args.members else tier_members
-            if set(members) - set(tier_members):
+            if set(members) - set(tier_members) - set(withheld[args.tier]):
                 raise ValueError("selected member outside tier")
             findings = write_assembly(args.output, args.tier, members, refs, predictions, authored,
-                                      complete=args.members is None)
+                                      complete=args.members is None, decisions=args.decisions)
         else:
             findings = check_provenance(args.table, args.provenance, refs, predictions, authored)
             reviewed = data.read_reviewed(args.reviewed)
