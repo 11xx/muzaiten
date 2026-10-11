@@ -61,9 +61,12 @@
   version as `muzaiten --version` and exit 0. They answer locally, before any
   socket connection or state, configuration or database access, so they work
   with no running app and create no files.
-- Search tables include 34 selected rare Han ideographs with every exactly
-  attested reading and per-value source provenance, alongside regenerated
-  Unihan 18 tables. Reviewed native pairs 𧭈/𫍾 and 𨰥/𫔕 retain their aliases.
+- Search reads the attested Mandarin readings and simplified forms of 1,233
+  rare General Standard Han characters, including their alternate readings.
+  The partial rare tables cover 1,266 ideographs with per-value source
+  provenance; 䓨, 缊 and 飏 retain generated Unihan coverage pending family
+  decisions. Reviewed forms join 䜣→欣, 俫→徕, 刬→铲, 劄→札 and 鸮→枭;
+  𡻎 reads `xī` and folds to 嶲. Reviewed native pairs 𧭈/𫍾 and 𨰥/𫔕 retain their aliases.
   匙 uses `chí shi` while 钥匙 retains `shi`; Japanese-only 蟐 and 笹 have no
   Mandarin reading. 線→线 keeps 缐 separate, and 麪 retains 面. These files
   provide partial coverage of six rare sets.

@@ -101,8 +101,12 @@ The authored files proceed through `tgh`, `big5-2`, `core`, `uro`, `exta`,
 coverage with a `# complete` header line; a file without it may still be
 partial while its set is being authored.
 
-Six partial rare files contain 34 selected ideographs with every exactly attested
-reading under each character and per-value provenance. Essential-table policies
+Six partial rare files contain 1,266 ideographs with every exactly attested
+reading under each character and per-value provenance. The `tgh` table covers
+1,233 General Standard characters; 䓨, 缊 and 飏 stay in the generated Unihan
+tier while their family keys await a decision. Reviewed forms join 䜣→欣,
+俫→徕, 刬→铲, 劄→札 and 鸮→枭. The Extension B companion 𡻎 reads `xī`
+and folds to 嶲, keeping their native searches together. Essential-table policies
 remain separate: 匙 has `chí shi`, with `shi` in 钥匙; Japanese-only 蟐 and 笹
 have no Mandarin reading. The native pairs 𧭈/𫍾 and 𨰥/𫔕 retain reviewed
 continuity despite competing Unihan variants. 線 folds to 线 while 缐 keeps its
