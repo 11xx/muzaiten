@@ -1192,6 +1192,13 @@ class PinnedReferenceSmokeTests(unittest.TestCase):
         self.assertEqual(refs.attestations("㐀"), {"mā": {"unihan"}})
         self.assertEqual(refs.mainland("㐀"), set())
 
+    def test_syllable_inventory_matches_the_pinned_unihan_fields(self):
+        derived = {base for field in ("kMandarin", "kHanyuPinyin", "kXHC1983", "kTGHZ2013", "kHanyuPinlu")
+                   for value in self.refs.fields[field].values()
+                   for reading in data.field_readings(field, value)
+                   if (base := data.pinyin_base(reading)) is not None}
+        self.assertEqual(data.MANDARIN_SYLLABLES, derived | {"pia", "yai", "nui", "sei", "gue"})
+
     def test_every_tier_assembles(self):
         for name in (path.removesuffix(".tsv") for path in data.RARE_FILES):
             with self.subTest(tier=name):
