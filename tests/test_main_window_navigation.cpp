@@ -2137,10 +2137,10 @@ print(json.dumps({"protocol_version": 1, "request_id": request["request_id"], "e
     {
         QWidget host;
         auto *layout = new QVBoxLayout(&host);
+        auto *view = new QLineEdit(&host);
         auto *bar = new PlayerBar(&host);
-        auto *view = new QTableView(&host);
-        layout->addWidget(bar);
         layout->addWidget(view);
+        layout->addWidget(bar);
         host.show();
         QVERIFY(QTest::qWaitForWindowExposed(&host));
         view->setFocus();
@@ -2154,10 +2154,14 @@ print(json.dumps({"protocol_version": 1, "request_id": request["request_id"], "e
             QTest::mouseClick(control, Qt::LeftButton);
             QCOMPARE(host.focusWidget(), view);
         }
-        for (QWidget *control : {static_cast<QWidget *>(bar->m_menuButton), static_cast<QWidget *>(bar->m_menuBar),
-                                 static_cast<QWidget *>(bar->m_volumeButton), static_cast<QWidget *>(bar->m_rating)}) {
-            QCOMPARE(control->focusPolicy(), Qt::NoFocus);
+        // Tab still reaches the transport controls, and Space activates them.
+        QSignalSpy previous(bar, &PlayerBar::previousRequested);
+        for (int step = 0; step < 4 && host.focusWidget() != bar->m_previous; ++step) {
+            QTest::keyClick(host.focusWidget(), Qt::Key_Tab);
         }
+        QCOMPARE(host.focusWidget(), bar->m_previous);
+        QTest::keyClick(bar->m_previous, Qt::Key_Space);
+        QCOMPARE(previous.count(), 1);
     }
 
     void playerBarGraysVolumeWhenControlIsDisabled()

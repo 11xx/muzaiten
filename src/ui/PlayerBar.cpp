@@ -1110,13 +1110,15 @@ PlayerBar::PlayerBar(QWidget *parent)
         emit seekRequested(value);
     });
 
-    // The bar is driven by mouse and global keys. None of its controls takes
-    // keyboard focus, by click or by Tab, so the active view keeps its keys.
-    const QList<QWidget *> focusFreeControls{m_menuButton, m_menuBar, m_albumArt, m_previous,
-                                             m_playPause, m_next, m_progress, m_rating,
-                                             m_stopAfterIndicator, m_volumeButton, m_repeat,
-                                             m_shuffle, m_radio};
-    for (QWidget *control : focusFreeControls) {
+    // Clicking a control leaves keyboard focus in the active view, so its keys
+    // keep working; Tab still reaches the controls that act on the keyboard.
+    const QList<QWidget *> tabOnlyControls{m_menuButton, m_previous, m_playPause, m_next, m_progress,
+                                           m_stopAfterIndicator, m_volumeButton, m_repeat,
+                                           m_shuffle, m_radio};
+    for (QWidget *control : tabOnlyControls) {
+        control->setFocusPolicy(Qt::TabFocus);
+    }
+    for (QWidget *control : {static_cast<QWidget *>(m_menuBar), static_cast<QWidget *>(m_albumArt), m_rating}) {
         control->setFocusPolicy(Qt::NoFocus);
     }
 

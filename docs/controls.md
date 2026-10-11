@@ -32,8 +32,9 @@ The queue view and the library's queue sidebar share these keys:
 
 Playing a track keeps the queue where it is and moves the cursor to the
 playing row, scrolling only when that row is off screen. `1` and `o` in the
-queue view center the playing row. The player bar's buttons and sliders
-never take keyboard focus, so the current view keeps its keys after a click.
+queue view center the playing row. Clicking the player bar's buttons and
+sliders leaves keyboard focus in the current view, so its keys keep working;
+Tab still reaches them.
 
 ## Context menus
 
