@@ -2,6 +2,7 @@
 
 #include "app/AppPaths.h"
 #include "reco/TasteProfile.h"
+#include "reco/TrackScorer.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -9,6 +10,7 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFutureWatcher>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -16,6 +18,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QVBoxLayout>
+#include <QtConcurrentRun>
 
 namespace {
 
@@ -34,6 +37,32 @@ void previewLayout(QDialog &dialog, const QByteArray &bytes, QVBoxLayout *layout
 void showError(QWidget *parent, const QString &error)
 {
     QMessageBox::warning(parent, QStringLiteral("Taste profiles"), error);
+}
+
+// Both export variants from one reading of the library, so toggling decade
+// shares in the preview never reads it again. Index 1 includes decades.
+struct ExportPreview {
+    QByteArray bytes[2];
+    QString errors[2];
+};
+
+ExportPreview buildExportPreview(const QString &libraryPath, const QString &featuresPath)
+{
+    ExportPreview preview;
+    QVector<TrackScorer::Candidate> tracks;
+    QString error;
+    if (!TasteProfiles::libraryCandidates(libraryPath, featuresPath, &tracks, &error)) {
+        preview.errors[0] = preview.errors[1] = error;
+        return preview;
+    }
+    for (int decades = 0; decades < 2; ++decades) {
+        TasteProfile profile;
+        if (!TasteProfiles::aggregate(tracks, true, decades == 1, &profile, &preview.errors[decades])
+            || !TasteProfiles::encode(profile, &preview.bytes[decades], &preview.errors[decades])) {
+            preview.bytes[decades].clear();
+        }
+    }
+    return preview;
 }
 
 } // namespace
@@ -102,35 +131,38 @@ void TasteProfileDialog::exportProfile()
     preview.setWindowTitle(QStringLiteral("Preview aggregate taste export"));
     auto *layout = new QVBoxLayout(&preview);
     auto *decades = new QCheckBox(QStringLiteral("Include supported decade shares"), &preview);
+    decades->setEnabled(false);
     layout->addWidget(decades);
-    TasteProfile profile;
-    QByteArray bytes;
-    QString error;
-    const auto generate = [&]() {
-        const QDir dataDirectory(AppPaths::dataDir());
-        return TasteProfiles::fromLibrary(dataDirectory.filePath(QStringLiteral("library.sqlite")),
-            dataDirectory.filePath(QStringLiteral("features.sqlite")), true, decades->isChecked(), &profile, &error)
-            && TasteProfiles::encode(profile, &bytes, &error);
-    };
-    if (!generate()) {
-        showError(this, error);
-        return;
-    }
-    previewLayout(preview, bytes, layout);
+    previewLayout(preview, {}, layout);
     auto *contents = preview.findChild<QPlainTextEdit *>(QStringLiteral("tastePreviewContents"));
-    connect(decades, &QCheckBox::toggled, &preview, [&](bool) {
-        if (generate()) {
-            contents->setPlainText(QString::fromUtf8(bytes));
-        } else {
-            bytes.clear();
-            contents->setPlainText(error);
-        }
-    });
+    contents->setPlainText(QStringLiteral("Reading the library…"));
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, &preview);
     auto *write = buttons->addButton(QStringLiteral("Export these contents…"), QDialogButtonBox::AcceptRole);
+    write->setEnabled(false);
     layout->addWidget(buttons);
     connect(write, &QPushButton::clicked, &preview, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &preview, &QDialog::reject);
+
+    // The library is read off the GUI thread; Cancel closes the preview at once
+    // and its result is dropped. What is shown is exactly what is written.
+    ExportPreview built;
+    QByteArray bytes;
+    const auto show = [&]() {
+        const int variant = decades->isChecked() ? 1 : 0;
+        bytes = built.bytes[variant];
+        contents->setPlainText(bytes.isEmpty() ? built.errors[variant] : QString::fromUtf8(bytes));
+        write->setEnabled(!bytes.isEmpty());
+    };
+    QFutureWatcher<ExportPreview> reading;
+    connect(&reading, &QFutureWatcherBase::finished, &preview, [&]() {
+        built = reading.result();
+        decades->setEnabled(true);
+        show();
+    });
+    connect(decades, &QCheckBox::toggled, &preview, [&](bool) { show(); });
+    const QDir dataDirectory(AppPaths::dataDir());
+    reading.setFuture(QtConcurrent::run(buildExportPreview, dataDirectory.filePath(QStringLiteral("library.sqlite")),
+                                        dataDirectory.filePath(QStringLiteral("features.sqlite"))));
     if (preview.exec() != QDialog::Accepted || bytes.isEmpty()) {
         return;
     }
@@ -142,6 +174,7 @@ void TasteProfileDialog::exportProfile()
     }
     const QFileInfo target(path);
     const bool replace = target.exists() || target.isSymLink();
+    QString error;
     if (replace && QMessageBox::question(this, QStringLiteral("Replace taste file"),
         QStringLiteral("Replace the existing file with the previewed contents?"),
         QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {

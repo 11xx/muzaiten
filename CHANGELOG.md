@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `Radio > Taste profiles… > Preview library export…` no longer freezes the
+  window on a large library. The preview opens at once and reads the library
+  in the background, Cancel closes it without waiting, and the decade-shares
+  toggle switches between results from that one reading instead of reading
+  the library again.
+
 ## [2026.10.11]
 
 ### Distribution

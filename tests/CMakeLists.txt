@@ -795,7 +795,7 @@ add_executable(test_taste_profile_dialog
     ../src/ui/TasteProfileDialog.h
 )
 target_include_directories(test_taste_profile_dialog PRIVATE ../src)
-target_link_libraries(test_taste_profile_dialog PRIVATE muzaiten_db muzaiten_reco Qt6::Core Qt6::Widgets Qt6::Sql Qt6::Test)
+target_link_libraries(test_taste_profile_dialog PRIVATE muzaiten_db muzaiten_reco Qt6::Concurrent Qt6::Core Qt6::Widgets Qt6::Sql Qt6::Test)
 target_compile_features(test_taste_profile_dialog PRIVATE cxx_std_26)
 add_test(NAME test_taste_profile_dialog COMMAND test_taste_profile_dialog)
 set_tests_properties(test_taste_profile_dialog PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 45)

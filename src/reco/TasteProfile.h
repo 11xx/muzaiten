@@ -42,6 +42,11 @@ bool aggregate(const QVector<TrackScorer::Candidate> &tracks, bool optIn, bool i
                TasteProfile *profile, QString *error);
 bool fromLibrary(const QString &libraryPath, const QString &featuresPath, bool optIn,
                  bool includeDecades, TasteProfile *profile, QString *error);
+// The tracks fromLibrary() aggregates: playable library-root tracks not kept
+// out of learning, with canonical genres and feature scalars. Opens its own
+// read-only connections, so it may run on any thread.
+bool libraryCandidates(const QString &libraryPath, const QString &featuresPath,
+                       QVector<TrackScorer::Candidate> *tracks, QString *error);
 // Merge alias-canonicalized labels, drop invalid labels and normalize retained shares.
 TasteProfile withAliases(const TasteProfile &profile, const QHash<QString, QString> &aliases);
 double similarity(const TasteProfile &profile, const TrackScorer::Candidate &candidate);

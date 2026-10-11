@@ -198,8 +198,10 @@ uses local files only and makes no network requests.
 `Radio > Taste profiles…` exports aggregate library taste and imports local
 files as named seeds. **Preview library export…** generates an exact JSON
 preview only after that action; **Export these contents…** deliberately opts
-in to writing those bytes. Decade shares are optional and unchecked by
-default. **Preview import…** validates and shows the aggregate contents;
+in to writing those bytes. The preview opens at once and reads the library in
+the background; Cancel closes it without waiting. Decade shares are optional
+and unchecked by default; both variants come from that one reading, so
+toggling them is immediate. **Preview import…** validates and shows the aggregate contents;
 choose a local seed name and press **Import seed** to save. Replacement needs
 an explicit checkbox. Import does not start radio.
 

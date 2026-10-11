@@ -4,6 +4,7 @@
 #include "ui/TasteProfileDialog.h"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
 #include <QFile>
@@ -101,6 +102,8 @@ void TasteProfileDialogTest::explicitPreviewAndImport()
             auto *contents = preview->findChild<QPlainTextEdit *>(QStringLiteral("tastePreviewContents"));
             QVERIFY(contents != nullptr);
             QVERIFY(contents->isReadOnly());
+            // The library is read in the background; the preview is up meanwhile.
+            QTRY_VERIFY(button(preview, QStringLiteral("Export these contents…"))->isEnabled());
             displayed = contents->toPlainText().toUtf8();
             QVERIFY(!QFile::exists(output));
             preview->reject();
@@ -115,8 +118,23 @@ void TasteProfileDialogTest::explicitPreviewAndImport()
         QTimer::singleShot(0, &dialog, [&]() {
             auto *preview = qobject_cast<QDialog *>(QApplication::activeModalWidget());
             QVERIFY(preview != nullptr);
-            QCOMPARE(preview->findChild<QPlainTextEdit *>(QStringLiteral("tastePreviewContents"))->toPlainText().toUtf8(), displayed);
+            auto *contents = preview->findChild<QPlainTextEdit *>(QStringLiteral("tastePreviewContents"));
+            QTRY_VERIFY(button(preview, QStringLiteral("Export these contents…"))->isEnabled());
+            QCOMPARE(contents->toPlainText().toUtf8(), displayed);
             QVERIFY(query.exec(QStringLiteral("UPDATE track_genres SET genre_folded = 'rock'")));
+            // Both variants come from the one reading made when the preview
+            // opened: toggling decades never reads the changed library.
+            auto *decades = preview->findChild<QCheckBox *>();
+            QVERIFY(decades != nullptr && decades->isEnabled());
+            decades->setChecked(true);
+            TasteProfile withDecades;
+            QString parseError;
+            QVERIFY2(TasteProfiles::parse(contents->toPlainText().toUtf8(), &withDecades, &parseError),
+                     qPrintable(parseError));
+            QCOMPARE(withDecades.genres, (QMap<QString, double>{{QStringLiteral("jazz"), 1.0}}));
+            QVERIFY(!withDecades.decades.isEmpty());
+            decades->setChecked(false);
+            QCOMPARE(contents->toPlainText().toUtf8(), displayed);
             QTimer::singleShot(0, &dialog, [&]() {
                 auto *destination = qobject_cast<QFileDialog *>(QApplication::activeModalWidget());
                 QVERIFY(destination != nullptr);

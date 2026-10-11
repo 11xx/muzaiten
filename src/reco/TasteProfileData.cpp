@@ -18,11 +18,20 @@ bool fromLibrary(const QString &libraryPath, const QString &featuresPath, bool o
         *error = QStringLiteral("Taste export requires explicit opt-in on every invocation: --opt-in.");
         return false;
     }
+    QVector<TrackScorer::Candidate> tracks;
+    return libraryCandidates(libraryPath, featuresPath, &tracks, error)
+        && aggregate(tracks, optIn, includeDecades, profile, error);
+}
+
+bool libraryCandidates(const QString &libraryPath, const QString &featuresPath,
+                       QVector<TrackScorer::Candidate> *candidates, QString *error)
+{
     if (!QFileInfo(libraryPath).isFile()) {
         *error = QStringLiteral("No local library is available for taste export.");
         return false;
     }
-    QVector<TrackScorer::Candidate> tracks;
+    QVector<TrackScorer::Candidate> &tracks = *candidates;
+    tracks.clear();
     {
         Database library(QStringLiteral("taste-export-%1").arg(QUuid::createUuid().toString()));
         const auto unreadable = [error](const QString &reason) {
@@ -81,7 +90,7 @@ bool fromLibrary(const QString &libraryPath, const QString &featuresPath, bool o
             track.energy = scalars.energy;
         }
     }
-    return aggregate(tracks, optIn, includeDecades, profile, error);
+    return true;
 }
 
 } // namespace TasteProfiles

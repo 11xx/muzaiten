@@ -906,6 +906,7 @@ target_link_libraries(muzaiten_ui_dialogs PUBLIC
         muzaiten_playback
         muzaiten_playlist
         muzaiten_reco
+        Qt6::Concurrent
 )
 
 add_library(muzaiten_ui_app STATIC ${MUZAITEN_UI_APP_SOURCES})
