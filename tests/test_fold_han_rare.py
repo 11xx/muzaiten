@@ -316,6 +316,23 @@ class FoldHanRareTests(unittest.TestCase):
         self.assertEqual([r.value for r in records], ["mā", "má"])
         self.assertIn(("mā má", "evidence-order tie requires a reviewed decision"), issues)
 
+    def test_opencc_relation_cannot_attest_distinct_use(self):
+        refs = self.refs_for({"kSimplifiedVariant": {"𠀀": "U+6728"}})
+        paths = {"opencc": self.root / "distinct-opencc.txt"}
+        paths["opencc"].write_text("𠀀\t木\n")
+        refs.pins["opencc"]["sha256"] = rare.digest(paths["opencc"])
+        refs.archives = paths
+        witness = {"source": "opencc", "archive": "TSCharacters.txt", "archive_sha256": rare.digest(paths["opencc"]),
+                   "member": "TSCharacters.txt", "member_sha256": rare.digest(paths["opencc"]), "line": 1, "raw": "𠀀\t木"}
+        relations = rare.family_relations(refs)
+        refs.reviewed_families = [{"schema": "fold-han-reviewed-families/1", "family_id": "distinct-fixture", "source_pins": refs.pins,
+            "typed_members_sha256": rare.authored_pin(set())["sha256"], "source_family_members": sorted("𠀀木"),
+            "source_family_relations_sha256": rare.fingerprint(relations), "source_family_witnesses": [],
+            "source_family_witnesses_sha256": rare.fingerprint([]), "basis": {"kind": "pinned-distinct-use", "distinction": "Separate uses"},
+            "distinct_use_evidence": [witness], "excluded_relations": [], "partitions": [{"key": "木", "members": sorted("𠀀木")}]}]
+        with self.assertRaisesRegex(ValueError, "substantive source"):
+            rare.family_mappings(refs, set())
+
     def test_basis_exact_syllable_agreed_and_single(self):
         rows, records, gaps, findings = rare.assemble(list("𠀀𠀁𠀂"), self.refs, self.predictions, set())
         self.assertEqual(findings, [])

@@ -631,7 +631,8 @@ def reviewed_families(refs: References, authored: set[str]) -> list[dict]:
               and record["distinct_use_evidence"]):
             portable_text(basis["distinction"])
             for witness in record["distinct_use_evidence"]:
-                if witness["source"] == "unihan" and "\tkDefinition\t" not in witness["raw"]:
+                if (witness["source"] in {"opencc", "cns-properties", "cns-mappings"}
+                        or witness["source"] == "unihan" and "\tkDefinition\t" not in witness["raw"]):
                     raise ValueError("distinct use requires a substantive source witness")
                 verify_witness(witness, refs, extra_pins)
         else:
