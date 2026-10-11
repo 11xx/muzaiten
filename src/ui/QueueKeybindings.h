@@ -10,6 +10,8 @@ namespace QueueAction {
     inline constexpr auto MoveUp         = "move_up";
     inline constexpr auto PageDown       = "page_down";
     inline constexpr auto PageUp         = "page_up";
+    inline constexpr auto MoveItemDown   = "move_item_down";
+    inline constexpr auto MoveItemUp     = "move_item_up";
     inline constexpr auto PlaySelected   = "play_selected";
     inline constexpr auto RemoveSelected = "remove_selected";
     inline constexpr auto ClearQueue     = "clear_queue";

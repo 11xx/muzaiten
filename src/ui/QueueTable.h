@@ -8,6 +8,7 @@
 #include <QWidget>
 
 #include <functional>
+#include <optional>
 
 class QueueStore;
 class QAbstractTableModel;
@@ -43,6 +44,9 @@ public:
     void setCurrentRow(int row);
     void setCurrentRow(int row, int scrollDirection);
     void moveCurrentRow(int delta);
+    // Moves the selected rows one place up (delta < 0) or down as a block; a
+    // selection that is not one contiguous run moves only the cursor row.
+    void moveSelectedRows(int delta);
     void activateCurrentRow();
     // Centers the playing row and makes it the cursor row.
     void revealCurrentPlaying();
@@ -110,6 +114,14 @@ private:
     ResponsiveColumnLayout *m_columnLayout = nullptr;
     int m_hoveredRow = -1;
     int m_pendingRestoreRow = -1;
+    // Rows a keyboard move placed, reselected when the reordered queue arrives.
+    struct MovedRows {
+        int first = -1;
+        int count = 0;
+        int cursor = -1;
+        int direction = 0;
+    };
+    std::optional<MovedRows> m_movedRows;
     bool m_showPlayNextBadge = true;
     bool m_showPlayNextTitleAccent = false;
     PanelBorderEdges m_tableBorders;

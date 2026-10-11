@@ -42,6 +42,9 @@ struct MainPanelTarget {
     // FocusPrevious (h) back to the grid instead of being cleared. Only the grid
     // target supplies it.
     std::function<bool()> narrowingPersistsOnReturn = {};
+    // Optional; moves the current item one place up (delta < 0) or down in an
+    // orderable panel. Only the queue target supplies it.
+    std::function<void(int delta)> moveCurrentItem = {};
 };
 
 class PanelSearchController final : public QWidget {

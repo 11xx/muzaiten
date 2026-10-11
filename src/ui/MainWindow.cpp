@@ -954,6 +954,9 @@ MainWindow::MainWindow(AppCore *core, QWidget *parent)
         {},
         {},
         [this]() { return m_rightSidebar->queueSearchDocuments(); },
+        {},
+        {},
+        [this](int delta) { m_rightSidebar->moveQueueItems(delta); },
     });
     m_panelSearch->registerTarget({
         MainPanelId::Artists,

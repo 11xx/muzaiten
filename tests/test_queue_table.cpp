@@ -17,6 +17,53 @@
 #include <QTest>
 #include <QTimer>
 
+namespace {
+
+QVector<Track> tracksNamed(std::initializer_list<const char *> names)
+{
+    QVector<Track> tracks;
+    for (const char *name : names) {
+        Track track;
+        track.path = QStringLiteral("/%1.flac").arg(QLatin1String(name));
+        track.title = QString::fromLatin1(name);
+        tracks.push_back(track);
+    }
+    return tracks;
+}
+
+QString titles(const QueueStore &store)
+{
+    QString text;
+    for (const Track &track : store.tracks()) {
+        text += track.title;
+    }
+    return text;
+}
+
+// Reorders the store the way PlayerCore::moveRows reorders the queue.
+void applyMovesLikePlayerCore(QueueTable &table, QueueStore &store)
+{
+    QObject::connect(&table, &QueueTable::rowsMoveRequested, &store,
+                     [&store](const QVector<int> &rows, int destination) {
+        QVector<Track> queue = store.tracks();
+        QVector<Track> moving;
+        int before = 0;
+        for (int row : rows) {
+            moving.push_back(queue.at(row));
+            before += row < destination ? 1 : 0;
+        }
+        for (auto it = rows.crbegin(); it != rows.crend(); ++it) {
+            queue.removeAt(*it);
+        }
+        for (int offset = 0; offset < moving.size(); ++offset) {
+            queue.insert(destination - before + offset, moving.at(offset));
+        }
+        store.setTracks(queue);
+    });
+}
+
+} // namespace
+
 class QueueTableTest : public QObject {
     Q_OBJECT
 
@@ -417,6 +464,53 @@ private slots:
 
         // A query with no matches leaves the cursor where it was.
         edit->setText(QStringLiteral("zzz-no-such-track"));
+        QCOMPARE(table.currentRow(), 1);
+    }
+
+    void shiftNAndShiftPMoveQueueRows()
+    {
+        QueueStore store;
+        store.setTracks(tracksNamed({"a", "b", "c", "d", "e"}));
+        QueueTable table(QueueTablePreset::FullScreen);
+        table.setQueueStore(&store);
+        applyMovesLikePlayerCore(table, store);
+        auto *view = table.findChild<QTableView *>();
+        QVERIFY(view != nullptr);
+        QSignalSpy moves(&table, &QueueTable::rowsMoveRequested);
+
+        table.setCurrentRow(1);
+        QTest::keyClick(view, Qt::Key_N, Qt::ShiftModifier);
+        QCOMPARE(titles(store), QStringLiteral("acbde"));
+        QCOMPARE(table.currentRow(), 2);
+
+        QTest::keyClick(view, Qt::Key_P, Qt::ShiftModifier);
+        QTest::keyClick(view, Qt::Key_P, Qt::ShiftModifier);
+        QCOMPARE(titles(store), QStringLiteral("bacde"));
+        QCOMPARE(table.currentRow(), 0);
+
+        // The first row cannot move up; nothing is requested.
+        const int requested = moves.count();
+        QTest::keyClick(view, Qt::Key_P, Qt::ShiftModifier);
+        QCOMPARE(moves.count(), requested);
+        QCOMPARE(titles(store), QStringLiteral("bacde"));
+
+        // A contiguous selection moves as a block and stays selected.
+        table.setCurrentRow(1);
+        view->selectionModel()->select(QItemSelection(view->model()->index(1, 0), view->model()->index(2, 0)),
+                                       QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        QTest::keyClick(view, Qt::Key_N, Qt::ShiftModifier);
+        QCOMPARE(titles(store), QStringLiteral("bdace"));
+        QCOMPARE(table.currentRow(), 2);
+        QCOMPARE(view->selectionModel()->selectedRows().size(), 2);
+        QVERIFY(view->selectionModel()->isRowSelected(2, {}));
+        QVERIFY(view->selectionModel()->isRowSelected(3, {}));
+
+        // A scattered selection moves only the cursor row.
+        table.setCurrentRow(0);
+        view->selectionModel()->select(view->model()->index(4, 0),
+                                       QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        QTest::keyClick(view, Qt::Key_N, Qt::ShiftModifier);
+        QCOMPARE(titles(store), QStringLiteral("dbace"));
         QCOMPARE(table.currentRow(), 1);
     }
 

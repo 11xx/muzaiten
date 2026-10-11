@@ -7,7 +7,7 @@ QVector<KeyBindingProfile> defaultQueueKeyBindingProfiles()
     KeyBindingProfile profile;
     profile.name = QStringLiteral("dired_hjkl");
     profile.label = QStringLiteral("Queue: dired + hjkl");
-    profile.hintText = QStringLiteral("j/n↓ k/p↑ C-v/M-v page Ret play d remove c clear x clear-priority f file l library o playing / search Esc/C-g clear");
+    profile.hintText = QStringLiteral("j/n↓ k/p↑ N/P move item C-v/M-v page Ret play d remove c clear x clear-priority f file l library o playing / search Esc/C-g clear");
     profile.bindings = {
         {Qt::Key_J, MoveDown},
         {Qt::Key_N, MoveDown},
@@ -17,6 +17,8 @@ QVector<KeyBindingProfile> defaultQueueKeyBindingProfiles()
         {Qt::Key_P, MoveUp},
         {Qt::Key_Up, MoveUp},
         {QKeySequence(Qt::ControlModifier | Qt::Key_P), MoveUp},
+        {QKeySequence(Qt::ShiftModifier | Qt::Key_N), MoveItemDown},
+        {QKeySequence(Qt::ShiftModifier | Qt::Key_P), MoveItemUp},
         {Qt::Key_PageDown, PageDown},
         {QKeySequence(Qt::ControlModifier | Qt::Key_V), PageDown},
         {Qt::Key_PageUp, PageUp},

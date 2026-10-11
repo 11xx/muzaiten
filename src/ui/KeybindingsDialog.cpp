@@ -25,6 +25,8 @@ QString actionLabel(const QString &action)
         {QString::fromLatin1(MainPanelAction::MoveUp), QStringLiteral("Move up")},
         {QString::fromLatin1(MainPanelAction::PageDown), QStringLiteral("Page down")},
         {QString::fromLatin1(MainPanelAction::PageUp), QStringLiteral("Page up")},
+        {QString::fromLatin1(MainPanelAction::MoveItemDown), QStringLiteral("Move queue item down")},
+        {QString::fromLatin1(MainPanelAction::MoveItemUp), QStringLiteral("Move queue item up")},
         {QString::fromLatin1(MainPanelAction::FocusPrevious), QStringLiteral("Focus previous panel")},
         {QString::fromLatin1(MainPanelAction::FocusNext), QStringLiteral("Focus next panel")},
         {QString::fromLatin1(MainPanelAction::FocusQueue), QStringLiteral("Focus queue")},

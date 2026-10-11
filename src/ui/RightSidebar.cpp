@@ -173,6 +173,11 @@ void RightSidebar::setCurrentIndex(int index, bool reveal)
     }
 }
 
+void RightSidebar::moveQueueItems(int delta)
+{
+    m_queueTable->moveSelectedRows(delta);
+}
+
 void RightSidebar::followCurrentPlaying()
 {
     if (m_currentQueueIndex >= 0) {

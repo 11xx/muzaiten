@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- `Shift+N` / `Shift+P` move the selected queue rows one place down or up, in
+  the queue view and the library's queue sidebar. A contiguous selection moves
+  as a block and stays selected; otherwise the cursor row moves.
+
 ### Changed
 
 - Playing a track keeps the queue where it is: the cursor moves to the playing

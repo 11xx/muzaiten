@@ -753,6 +753,18 @@ void QueueTable::setQueueStore(QueueStore *store)
         return;
     }
     connect(m_store, &QueueStore::tracksReset, this, [this]() {
+        if (m_movedRows.has_value()) {
+            const MovedRows moved = *m_movedRows;
+            m_movedRows.reset();
+            const int last = std::min(moved.first + moved.count, rowCount()) - 1;
+            if (moved.first >= 0 && moved.first <= last) {
+                setCurrentRow(std::clamp(moved.cursor, moved.first, last), moved.direction);
+                if (QItemSelectionModel *selection = m_view->selectionModel(); selection != nullptr) {
+                    selection->select(QItemSelection(m_model->index(moved.first, 0), m_model->index(last, 0)),
+                                      QItemSelectionModel::Select | QItemSelectionModel::Rows);
+                }
+            }
+        }
         const int row = currentRow();
         if (row < 0 && rowCount() > 0) {
             setCurrentRow(std::max(0, m_store->currentIndex()));
@@ -909,6 +921,34 @@ void QueueTable::moveCurrentRow(int delta)
     }
     const int row = currentRow() >= 0 ? currentRow() : 0;
     setCurrentRow(std::clamp(row + delta, 0, rowCount() - 1), delta);
+}
+
+void QueueTable::moveSelectedRows(int delta)
+{
+    if (delta == 0 || rowCount() == 0) {
+        return;
+    }
+    QVector<int> rows = selectedRowsForAction();
+    const bool contiguous = !rows.isEmpty() && rows.back() - rows.front() + 1 == rows.size();
+    if (!contiguous) {
+        if (currentRow() < 0) {
+            return;
+        }
+        rows = {currentRow()};
+    }
+    const int first = rows.front();
+    const int last = rows.back();
+    if ((delta < 0 && first == 0) || (delta > 0 && last >= rowCount() - 1)) {
+        return;
+    }
+    // The destination is an insertion point in the current order: before the row
+    // above the block, or after the row below it.
+    const int destination = delta > 0 ? last + 2 : first - 1;
+    const int newFirst = delta > 0 ? first + 1 : first - 1;
+    const int cursor = currentRow();
+    const int cursorOffset = cursor >= first && cursor <= last ? cursor - first : 0;
+    m_movedRows = MovedRows{newFirst, static_cast<int>(rows.size()), newFirst + cursorOffset, delta};
+    emit rowsMoveRequested(rows, destination);
 }
 
 void QueueTable::activateCurrentRow()
@@ -1268,6 +1308,10 @@ bool QueueTable::handleKeyPress(QKeyEvent *event)
         setCurrentRow(std::min(rowCount() - 1, std::max(0, currentRow()) + pageStepRows()), +1);
     } else if (action == QString::fromLatin1(QueueAction::PageUp)) {
         setCurrentRow(std::max(0, std::max(0, currentRow()) - pageStepRows()), -1);
+    } else if (action == QString::fromLatin1(QueueAction::MoveItemDown)) {
+        moveSelectedRows(+1);
+    } else if (action == QString::fromLatin1(QueueAction::MoveItemUp)) {
+        moveSelectedRows(-1);
     } else if (action == QString::fromLatin1(QueueAction::PlaySelected)) {
         activateCurrentRow();
     } else if (action == QString::fromLatin1(QueueAction::RemoveSelected)) {

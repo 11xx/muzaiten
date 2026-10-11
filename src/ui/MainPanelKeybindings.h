@@ -18,6 +18,8 @@ namespace MainPanelAction {
     inline constexpr auto MoveUp = "move_up";
     inline constexpr auto PageDown = "page_down";
     inline constexpr auto PageUp = "page_up";
+    inline constexpr auto MoveItemDown = "move_item_down";
+    inline constexpr auto MoveItemUp = "move_item_up";
     inline constexpr auto FocusPrevious = "focus_previous";
     inline constexpr auto FocusNext = "focus_next";
     inline constexpr auto FocusQueue = "focus_queue";

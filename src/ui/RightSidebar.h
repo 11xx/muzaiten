@@ -34,6 +34,7 @@ public:
     void setPlayNextRange(int begin, int end);
     void setCurrentIndex(int index, bool reveal = false);
     void followCurrentPlaying();
+    void moveQueueItems(int delta);
     void setAlbumArt(const QString &imagePath);
     void setAlbumArt(const QImage &image);
     void setTrackInfo(const Track &track);

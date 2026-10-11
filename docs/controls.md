@@ -24,6 +24,12 @@ art for **Find in library** and **Open containing directory**.
 
 ## Queue
 
+The queue view and the library's queue sidebar share these keys:
+
+- `j`/`k` (or `n`/`p`, arrows) move the cursor; `Return` plays the cursor row
+- `Shift+N` / `Shift+P` move the selected rows one place down / up; a
+  contiguous selection moves as a block, otherwise the cursor row moves
+
 Playing a track keeps the queue where it is and moves the cursor to the
 playing row, scrolling only when that row is off screen. `1` and `o` in the
 queue view center the playing row. The player bar's buttons and sliders

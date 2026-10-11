@@ -620,6 +620,14 @@ bool PanelSearchController::handlePanelKey(QKeyEvent *event, MainPanelId panel)
     else if (action == QString::fromLatin1(MainPanelAction::MoveUp)) moveCurrent(-1);
     else if (action == QString::fromLatin1(MainPanelAction::PageDown)) movePage(+1);
     else if (action == QString::fromLatin1(MainPanelAction::PageUp)) movePage(-1);
+    else if (action == QString::fromLatin1(MainPanelAction::MoveItemDown)
+             || action == QString::fromLatin1(MainPanelAction::MoveItemUp)) {
+        const MainPanelTarget *target = targetForId(m_activePanel);
+        if (target == nullptr || !target->moveCurrentItem) {
+            return false;
+        }
+        target->moveCurrentItem(action == QString::fromLatin1(MainPanelAction::MoveItemDown) ? +1 : -1);
+    }
     else if (action == QString::fromLatin1(MainPanelAction::FocusPrevious)) {
         // h from Tracks returns to the album grid. A keyboard-made multi-album
         // selection is meant to survive going back and forth, so we keep it; every

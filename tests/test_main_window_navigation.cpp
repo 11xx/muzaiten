@@ -4221,6 +4221,33 @@ print(json.dumps({"protocol_version": 1, "request_id": request["request_id"], "e
         QVERIFY(artistList->hasFocus());
     }
 
+    void sidebarQueueShiftNAndShiftPReorderTheQueue()
+    {
+        AppCore core;
+        MainWindow window(&core);
+        window.resize(900, 640);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        const QVector<Track> tracks = syntheticQueueTracks(3);
+        window.m_player->resetQueue(tracks);
+        window.syncQueueState();
+        window.switchMainView(MainView::LibraryPanels);
+
+        window.m_panelSearch->setActivePanel(MainPanelId::Queue, true);
+        QWidget *queue = window.m_rightSidebar->queueNavigationWidget();
+        QVERIFY(queue->hasFocus());
+        window.m_rightSidebar->setQueueCurrentRow(1);
+
+        QTest::keyClick(queue, Qt::Key_N, Qt::ShiftModifier);
+        QCOMPARE(window.m_player->queue().at(2).path, tracks.at(1).path);
+        QCOMPARE(window.m_rightSidebar->queueCurrentRow(), 2);
+
+        QTest::keyClick(queue, Qt::Key_P, Qt::ShiftModifier);
+        QTest::keyClick(queue, Qt::Key_P, Qt::ShiftModifier);
+        QCOMPARE(window.m_player->queue().at(0).path, tracks.at(1).path);
+        QCOMPARE(window.m_rightSidebar->queueCurrentRow(), 0);
+    }
+
     void musicExplorerHCollapsesTracksBeforeMovingPanels()
     {
         AppCore core;
