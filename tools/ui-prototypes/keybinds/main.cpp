@@ -162,18 +162,70 @@ QWidget *editablePage(QWidget *parent, const QString &title, const QVector<Group
     keysRow->addWidget(keyChip(editor, QStringLiteral("Shift+J")));
     auto *capture = new QKeySequenceEdit(QKeySequence(QStringLiteral("Alt+N")), editor);
     capture->setMaximumSequenceLength(1);
+    capture->setFixedWidth(140);
+    capture->setToolTip(QStringLiteral("Press the new key"));
     keysRow->addWidget(capture);
     keysRow->addStretch(1);
     keysRow->addWidget(new QPushButton(QStringLiteral("Reset to preset"), editor));
     editorLayout->addLayout(keysRow);
     auto *conflictRow = new QHBoxLayout;
-    auto *conflict = new QLabel(QStringLiteral("Alt+N is assigned to Next match. Moving it here unassigns it there."), editor);
+    auto *icon = new QLabel(editor);
+    const int iconSize = editor->style()->pixelMetric(QStyle::PM_SmallIconSize);
+    icon->setPixmap(editor->style()->standardIcon(QStyle::SP_MessageBoxWarning).pixmap(iconSize, iconSize));
+    conflictRow->addWidget(icon, 0, Qt::AlignTop);
+    auto *conflict = new QLabel(QStringLiteral("Alt+N already does Next match. Use it here instead?"), editor);
     conflict->setWordWrap(true);
     conflictRow->addWidget(conflict, 1);
-    conflictRow->addWidget(new QPushButton(QStringLiteral("Move key here"), editor));
-    conflictRow->addWidget(new QPushButton(QStringLiteral("Cancel"), editor));
+    conflictRow->addWidget(new QPushButton(QStringLiteral("Use it here"), editor));
+    conflictRow->addWidget(new QPushButton(QStringLiteral("Keep it there"), editor));
     editorLayout->addLayout(conflictRow);
     layout->addWidget(editor);
+    return page;
+}
+
+QWidget *fixedPage(QWidget *parent)
+{
+    auto *page = new QWidget(parent);
+    auto *layout = new QVBoxLayout(page);
+    layout->setContentsMargins(0, 0, 0, 0);
+    auto *heading = new QLabel(QStringLiteral("Search"), page);
+    QFont headingFont = heading->font();
+    headingFont.setBold(true);
+    headingFont.setPointSizeF(headingFont.pointSizeF() * 1.25);
+    heading->setFont(headingFont);
+    layout->addWidget(heading);
+    auto *note = new QLabel(QStringLiteral("These keys are fixed."), page);
+    note->setForegroundRole(QPalette::PlaceholderText);
+    layout->addWidget(note);
+    QVector<Group> groups{{QStringLiteral("Results"),
+                           {{QStringLiteral("Move down"), {QStringLiteral("Down"), QStringLiteral("Ctrl+N")}},
+                            {QStringLiteral("Move up"), {QStringLiteral("Up"), QStringLiteral("Ctrl+P")}},
+                            {QStringLiteral("Play"), {QStringLiteral("Return")}},
+                            {QStringLiteral("Refresh the index"), {QStringLiteral("F5")}}}}};
+    layout->addWidget(bindingTree(page, groups, nullptr), 1);
+    return page;
+}
+
+QWidget *findingPage(QWidget *parent)
+{
+    QWidget *page = editablePage(parent, QStringLiteral("Queue"), queueGroups());
+    if (auto *filter = page->findChild<QLineEdit *>()) {
+        filter->setPlaceholderText(QStringLiteral("Press a key to look it up. Esc stops."));
+        filter->setText(QStringLiteral("Shift+P"));
+        filter->setReadOnly(true);
+    }
+    if (auto *tree = page->findChild<QTreeWidget *>()) {
+        for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+            QTreeWidgetItem *group = tree->topLevelItem(i);
+            bool any = false;
+            for (int j = 0; j < group->childCount(); ++j) {
+                const bool match = group->child(j)->text(1).split(QStringLiteral(", ")).contains(QStringLiteral("Shift+P"));
+                group->child(j)->setHidden(!match);
+                any = any || match;
+            }
+            group->setHidden(!any);
+        }
+    }
     return page;
 }
 
@@ -207,11 +259,23 @@ int main(int argc, char **argv)
     footer->addWidget(buttons);
     root->addLayout(footer);
 
+    pages->addWidget(fixedPage(pages));
+    pages->addWidget(findingPage(pages));
+    QObject::connect(screens, &QListWidget::currentRowChanged, pages, [pages](int row) {
+        pages->setCurrentIndex(row == 3 ? 1 : 0);
+    });
+
     const QString shotDir = qEnvironmentVariable("PROTOTYPE_SHOT_DIR");
     dialog.show();
     if (!shotDir.isEmpty()) {
-        QTimer::singleShot(600, &app, [&dialog, shotDir] {
+        QTimer::singleShot(600, &app, [&dialog, pages, screens, shotDir] {
             dialog.grab().save(shotDir + QStringLiteral("/keybinds.png"));
+            screens->setCurrentRow(3);
+            pages->setCurrentIndex(1);
+            dialog.grab().save(shotDir + QStringLiteral("/keybinds-fixed.png"));
+            screens->setCurrentRow(0);
+            pages->setCurrentIndex(2);
+            dialog.grab().save(shotDir + QStringLiteral("/keybinds-find.png"));
             QCoreApplication::quit();
         });
     }
